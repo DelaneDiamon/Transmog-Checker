@@ -1,0 +1,6 @@
+## Interface: 40400
+## Title: Item Checker
+## Notes: Short description of your addon
+## Version: 0.0.1
+## Author: Diamon
+ItemChecker.lua
