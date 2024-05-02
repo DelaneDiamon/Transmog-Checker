@@ -38,7 +38,7 @@ function f:ADDON_LOADED(addonName)
 
             if bindType > 0 and validEquipLocs[itemEquipLoc] then
 
-				local sourceID, appearanceID = C_TransmogCollection.GetItemInfo(link)
+				local sourceID, appearanceID = C_TransmogCollection.GetItemInfo(link) -- only check for appearance ID, not ench ID
 				local isKnown = C_TransmogCollection.PlayerHasTransmogItemModifiedAppearance(appearanceID)
 				if isKnown then
 					tooltip:AddLine("|cFF00FF00Transmog: COLLECTED|r")
