@@ -18,6 +18,8 @@ local validEquipLocs = {
                 ["INVTYPE_WEAPONOFFHAND"] = true,
                 ["INVTYPE_HOLDABLE"] = true,   -- off-hand frills
                 ["INVTYPE_TABARD"] = true
+                ["INVTYPE_RANGED"] = true, -- Ranged weapons (bows)
+                ["INVTYPE_RANGEDRIGHT"] = true, -- Guns, crossbows
     }
 f:SetScript("OnEvent", function(self, event, ...)
     self[event](self, ...)
@@ -30,9 +32,6 @@ function f:ADDON_LOADED(addonName)
 
     GameTooltip:HookScript("OnTooltipSetItem", function(tooltip)
         local _, link = tooltip:GetItem()
-        tooltip.ItemChecker_link = link 
-
-		local link = tooltip.ItemChecker_link
 
         if link then
 			local _, _, _, _, _, _, _, _, itemEquipLoc, _, _, _, _, _, bindType = GetItemInfo(link)
