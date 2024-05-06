@@ -39,36 +39,39 @@ function f:ADDON_LOADED(addonName)
             if bindType > 0 and validEquipLocs[itemEquipLoc] then
                 local appearanceID, sourceID  = C_TransmogCollection.GetItemInfo(link)
 
-                local isExactKnown = C_TransmogCollection.PlayerHasTransmogItemModifiedAppearance(sourceID)
-                local appearanceCollected = false
-                local sources = C_TransmogCollection.GetAppearanceSources(appearanceID)
-                
-                if sources then
-                    if appearanceCollected == false then
-                        for i, source in pairs(sources) do
-                            if C_TransmogCollection.PlayerHasTransmog(source.itemID, source.itemAppearanceModID) then
-                                appearanceCollected = true
-                                break
+                if (appearanceID ~= nil) and (sourceID ~= nil) then
+
+                    local isExactKnown = C_TransmogCollection.PlayerHasTransmogItemModifiedAppearance(sourceID)
+                    local appearanceCollected = false
+                    local sources = C_TransmogCollection.GetAppearanceSources(appearanceID)
+                    
+                    if sources then
+                        if appearanceCollected == false then
+                            for i, source in pairs(sources) do
+                                if C_TransmogCollection.PlayerHasTransmog(source.itemID, source.itemAppearanceModID) then
+                                    appearanceCollected = true
+                                    break
+                                end
                             end
                         end
+                    else 
+                        appearanceCollected = nil
                     end
-                else 
-                    appearanceCollected = nil
-                end
 
-                if appearanceCollected then
-                    tooltip:AddLine("|cFF00FF00Item Model: COLLECTED|r")
-                elseif appearanceCollected == nil then
-                    tooltip:AddLine("|cFFFF0000Item Model: CLASS NOT ELIGIBLE TO COLLECT|r")
-                else 
-                    tooltip:AddLine("|cFFFF7F00Item Model: NOT COLLECTED|r")
-                end
+                    if appearanceCollected then
+                        tooltip:AddLine("|cFF00FF00Item Model: COLLECTED|r")
+                    elseif appearanceCollected == nil then
+                        tooltip:AddLine("|cFFFF0000Item Model: CLASS NOT ELIGIBLE TO COLLECT|r")
+                    else 
+                        tooltip:AddLine("|cFFFF7F00Item Model: NOT COLLECTED|r")
+                    end
 
-                if isExactKnown then
-                    tooltip:AddLine("|cFF00FF00Exact Item Source: COLLECTED|r")
-                    appearanceCollected = true
-                else
-                    tooltip:AddLine("|cFFFF7F00Exact Item Source: NOT COLLECTED|r")
+                    if isExactKnown then
+                        tooltip:AddLine("|cFF00FF00Exact Item Source: COLLECTED|r")
+                        appearanceCollected = true
+                    else
+                        tooltip:AddLine("|cFFFF7F00Exact Item Source: NOT COLLECTED|r")
+                    end
                 end
 
                 tooltip:Show()
