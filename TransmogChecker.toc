@@ -2,5 +2,6 @@
 ## Title: Transmog Checker
 ## Notes: Displays a tooltip line if the item has been collected as transmog source
 ## Version: 0.0.2
+## Dependencies:Blizzard_AuctionUI
 ## Author: Diamon
 TransmogChecker.lua
