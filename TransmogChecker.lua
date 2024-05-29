@@ -30,7 +30,7 @@ local function isTransmogCollected(itemLink)
 
     local isExactKnown = nil
 
-    if bindType > 0 and validEquipLocs[itemEquipLoc] then
+    if bindType and bindType > 0 and validEquipLocs[itemEquipLoc] then
         local appearanceID, sourceID = C_TransmogCollection.GetItemInfo(itemLink)
         if (appearanceID ~= nil) and (sourceID ~= nil) then
             
@@ -151,7 +151,7 @@ GameTooltip:HookScript("OnTooltipSetItem", function(tooltip)
 
     if link then
         local _, _, _, _, _, _, _, _, itemEquipLoc, _, _, _, _, _, bindType = GetItemInfo(link)
-        if bindType > 0 and validEquipLocs[itemEquipLoc] then
+        if bindType and bindType > 0 and validEquipLocs[itemEquipLoc] then
             local appearanceCollected, isExactKnown = isTransmogCollected(link)
             
             if appearanceCollected then
