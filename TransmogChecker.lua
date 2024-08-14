@@ -152,21 +152,27 @@ GameTooltip:HookScript("OnTooltipSetItem", function(tooltip)
         if bindType and bindType > 0 and itemRarity > 1 and validEquipLocs[itemEquipLoc] then
             local appearanceCollected, isExactKnown = isTransmogCollected(link)
             
-            if appearanceCollected then
-                tooltip:AddLine("|cFF00FF00Item Model: COLLECTED|r")
-            elseif appearanceCollected == nil then
-                tooltip:AddLine("|cFFFF0000Item Model: CLASS NOT ELIGIBLE TO COLLECT|r")
-            else 
-                tooltip:AddLine("|cFFFF7F00Item Model: NOT COLLECTED|r")
-            end
-
             if isExactKnown then
-                tooltip:AddLine("|cFF00FF00Exact Item Source: COLLECTED|r")
+                tooltip:AddLine("|cFF9D9D9DTC:|r |cFF00FF00Exact|r |cFF00FF00V|r")
             else
-                tooltip:AddLine("|cFFFF7F00Exact Item Source: NOT COLLECTED|r")
+                if appearanceCollected then
+                    tooltip:AddLine("|cFF9D9D9DTC:|r |cFF00FF00Model|r |cFF00FF00 V|r |cFFFF7F00Exact|r |cFFFF7F00 X|r")
+                elseif appearanceCollected == nil then
+                   
+                    if isExactKnown then
+                        tooltip:AddLine("|cFF9D9D9DTC:|r |cFF00FF00Exact|r |cFF00FF00 V|r")
+                    else
+                        tooltip:AddLine("|cFF9D9D9DTC:|r |cFFFF0000Exact|r |cFFFF0000 X|r")
+                    end
+
+                    tooltip:AddLine("|cFF9D9D9DTC:|r |cFFFF0000Class invalid|r")
+                else 
+                    tooltip:AddLine("|cFF9D9D9DTC:|r |cFFFF7F00Exact|r |cFFFF7F00 X|r |cFFFF7F00Model|r |cFFFF7F00 X|r")
+                end
             end
 
             tooltip:Show()
         end
     end
 end)
+
