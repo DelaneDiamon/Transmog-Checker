@@ -14,7 +14,6 @@ function TC_AH_Old:Init()
     local applyTransmogFilter = false 
     local orig_AuctionFrameBrowse_Update = AuctionFrameBrowse_Update
 
-    -- Handle single button update
     local function UpdateButtonOverlay(button, index)
         if not button then return end
         
@@ -25,10 +24,12 @@ function TC_AH_Old:Init()
         
         local itemLink = GetAuctionItemLink("list", index)
         if itemLink then
-            local status = select(1, TC_ItemChecker:GetTransmogStatus(itemLink))
-            local isCollected = status == 1 or status == 2
-            if isCollected then
+            local status, eligible, altSources = TC_ItemChecker:GetTransmogStatus(itemLink)
+            if status == 1 or status == 2 then  -- Model or exact is collected: bright green
                 button.transmogOverlay:SetColorTexture(0, 1, 0, 0.3)
+                button.transmogOverlay:Show()
+            elseif status == 4 or status == 5 then  -- Class invalid: red
+                button.transmogOverlay:SetColorTexture(1, 0, 0, 0.3)
                 button.transmogOverlay:Show()
             else
                 button.transmogOverlay:Hide()
@@ -38,7 +39,6 @@ function TC_AH_Old:Init()
         end
     end
 
-    -- Cleanup function
     local function CleanupOverlays()
         for i = 1, NUM_BROWSE_TO_DISPLAY do
             local button = _G["BrowseButton" .. i .. "Item"]
@@ -72,7 +72,6 @@ function TC_AH_Old:Init()
         NewAuctionFrameBrowse_Update()
     end
 
-    -- Create the checkbox (using Blizzard's ChatConfigCheckButtonTemplate).
     local toggleButton = CreateFrame("CheckButton", nil, AuctionFrame, "ChatConfigCheckButtonTemplate")
     toggleButton:SetSize(24, 24)
     toggleButton:SetPoint("TOPLEFT", AuctionFrame, "TOPLEFT", 540, -36)
@@ -83,7 +82,6 @@ function TC_AH_Old:Init()
     checkboxText:SetText("Not collected for transmog")
     checkboxText:SetTextColor(1, 0, 0, 1)
 
-    -- Show the checkbox only when the "Browse" tab is selected.
     AuctionFrame:HookScript("OnUpdate", function()
         if PanelTemplates_GetSelectedTab(AuctionFrame) == 1 then
             toggleButton:Show()
@@ -92,7 +90,6 @@ function TC_AH_Old:Init()
         end
     end)
 
-    -- Toggle the filtering flag when the checkbox is clicked.
     toggleButton:SetScript("OnClick", function(self)
         applyTransmogFilter = not applyTransmogFilter
         NewAuctionFrameBrowse_Update()
