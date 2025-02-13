@@ -120,15 +120,14 @@ function TC_ItemChecker:GetTransmogStatus(itemLink)
     
     -- Check if item belongs to valid equipment slot
     local _, _, _, _, _, _, _, _, itemEquipLoc = GetItemInfo(itemLink)
-    print("Debug - Item Equipment Location:", itemEquipLoc)
     if not itemEquipLoc or not validEquipLocs[itemEquipLoc] then
-        return nil
+        return nil  -- Only return nil for invalid equipment slots
     end
 
     -- Get item class info
     local _, _, _, _, _, itemClassID, itemSubClassID = GetItemInfoInstant(itemLink)
     if itemClassID ~= 4 and itemClassID ~= 2 then -- Not armor or weapon
-        return nil
+        return 5, false  -- Changed from nil to 5,false for non-armor/weapon items
     end
 
     -- Check if armor type is allowed for player
@@ -141,13 +140,13 @@ function TC_ItemChecker:GetTransmogStatus(itemLink)
     -- Get appearance info
     local appearanceID, hoveredSourceID = C_TransmogCollection.GetItemInfo(itemLink)
     if not appearanceID or not hoveredSourceID then
-        return nil
+        return 5, false  -- Changed from nil to 5,false when no appearance info
     end
 
     -- Get all sources for this appearance
     local sources = C_TransmogCollection.GetAppearanceSources(appearanceID)
     if not sources then
-        return nil
+        return 5, false  -- Changed from nil to 5,false when no sources
     end
 
     -- Check if exact appearance is collected
