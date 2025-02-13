@@ -25,7 +25,8 @@ function TC_AH_Old:Init()
         
         local itemLink = GetAuctionItemLink("list", index)
         if itemLink then
-            local isCollected = TC_ItemChecker:IsItemCollected(itemLink)
+            local status = select(1, TC_ItemChecker:GetTransmogStatus(itemLink))
+            local isCollected = status == 1 or status == 2
             if isCollected then
                 button.transmogOverlay:SetColorTexture(0, 1, 0, 0.3)
                 button.transmogOverlay:Show()

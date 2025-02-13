@@ -1,4 +1,20 @@
 TC_ItemChecker = TC_ItemChecker or {}
+TC_ItemChecker.debug = false -- Debug flag, off by default
+
+local function Debug(...)
+    if TC_ItemChecker.debug then
+        print("|cFF9D9D9DTC Debug:|r", ...)
+    end
+end
+
+-- Add command to toggle debug mode
+SLASH_TC1 = "/tc"
+SlashCmdList["TC"] = function(msg)
+    if msg == "debug" then
+        TC_ItemChecker.debug = not TC_ItemChecker.debug
+        print("|cFF9D9D9DTC:|r Debug mode " .. (TC_ItemChecker.debug and "enabled" or "disabled"))
+    end
+end
 
 local validEquipLocs = {
     ["INVTYPE_HEAD"]        = true,
@@ -57,40 +73,48 @@ end
 
 local function ProcessSource(source, hoveredSourceID, allowedType, itemClassID, itemEquipLoc)
     if not source.itemID then 
-        print("Debug: Source has no itemID")
+        Debug("Source has no itemID")
         return false, nil 
     end
     
+    Debug(string.format("Processing source itemID: %d, sourceType: %d", source.itemID, source.sourceType or -1))
+    
     local _, _, _, _, _, sClassID, sSubClassID = GetItemInfoInstant(source.itemID)
-    print(string.format("Debug: Processing source itemID: %d, ClassID: %d, SubClassID: %d", source.itemID, sClassID, sSubClassID))
+    Debug(string.format("Processing source itemID: %d, ClassID: %d, SubClassID: %d", source.itemID, sClassID, sSubClassID))
     
     if sClassID ~= itemClassID then 
-        print("Debug: Class ID mismatch")
+        Debug("Class ID mismatch")
         return false, nil 
     end
     
     if source.sourceID == hoveredSourceID then 
-        print("Debug: Same source, skipping")
+        Debug("Same source, skipping")
         return false, nil 
     end
     
-    -- For armor pieces that require type checking
     if itemClassID == 4 and armorSlotsThatRequireAllowedCheck[itemEquipLoc] then
-        print(string.format("Debug: Checking armor type. Required: %d, Found: %d", allowedType, sSubClassID))
+        Debug(string.format("Checking armor type. Required: %d, Found: %d", allowedType, sSubClassID))
         if sSubClassID ~= allowedType then 
-            print("Debug: Wrong armor type")
+            Debug("Wrong armor type")
             return false, nil 
         end
     end
     
     if source.isCollected then
-        print("Debug: Source is collected")
+        Debug("Source is collected")
         return true, nil
     else
         local name, _, quality = GetItemInfo(source.itemID)
-        print(string.format("Debug: Source not collected. Name: %s", name or "nil"))
+        Debug(string.format("Source not collected. Name: %s", name or "nil"))
         if name then
-            return false, { name = name, quality = quality }
+            -- Include itemID and sourceType in the return
+            return false, {
+                name = name,
+                quality = quality,
+                itemID = source.itemID,
+                sourceType = source.sourceType,
+                sourceInfo = source.sourceInfo  -- Add this to see more details
+            }
         end
         return false, nil
     end
@@ -100,7 +124,7 @@ local function CollectSources(sources, hoveredSourceID, allowedType, itemClassID
     local modelCollected = false
     local altSources = {}
     
-    print(string.format("Debug: Processing %d sources", #sources))
+    Debug(string.format("Processing %d sources", #sources))
     for _, source in pairs(sources) do
         local isCollected, altSource = ProcessSource(source, hoveredSourceID, allowedType, itemClassID, itemEquipLoc)
         if isCollected then
@@ -110,7 +134,7 @@ local function CollectSources(sources, hoveredSourceID, allowedType, itemClassID
         end
     end
     
-    print(string.format("Debug: Found %d alternatives", #altSources))
+    Debug(string.format("Found %d alternatives", #altSources))
     return modelCollected, altSources
 end
 
@@ -158,11 +182,11 @@ function TC_ItemChecker:GetTransmogStatus(itemLink)
     -- Return appropriate status
     if isAllowedArmor then
         if exactCollected then
-            return 1 -- EXACT COLLECTED
+            return 1, true, altSources -- EXACT COLLECTED
         elseif modelCollected then
-            return 2 -- MODEL COLLECTED
+            return 2, true, altSources -- MODEL COLLECTED
         else
-            return 3 -- MODEL NOT COLLECTED
+            return 3, true, altSources -- MODEL NOT COLLECTED
         end
     else
         if #altSources > 0 then
