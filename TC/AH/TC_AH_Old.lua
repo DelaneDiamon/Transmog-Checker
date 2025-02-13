@@ -14,49 +14,62 @@ function TC_AH_Old:Init()
     local applyTransmogFilter = false 
     local orig_AuctionFrameBrowse_Update = AuctionFrameBrowse_Update
 
-    local function NewAuctionFrameBrowse_Update()
-        -- Call original update first so that the browse buttons are refreshed.
-        orig_AuctionFrameBrowse_Update()
-
-        local offset = FauxScrollFrame_GetOffset(BrowseScrollFrame)
+    -- Handle single button update
+    local function UpdateButtonOverlay(button, index)
+        if not button then return end
         
-        if applyTransmogFilter then 
-            for i = 1, NUM_BROWSE_TO_DISPLAY do
-                local index = offset + i
-                local button = _G["BrowseButton" .. i .. "Item"]
-                if button then
-                    if not button.transmogOverlay then
-                        button.transmogOverlay = button:CreateTexture(nil, "OVERLAY")
-                        button.transmogOverlay:SetAllPoints(true)
-                    end
-
-                    local itemLink = GetAuctionItemLink("list", index)
-                    if itemLink then
-                        -- Use the shared function from TC_ItemChecker instead of duplicating logic.
-                        local appearanceCollected, isExactKnown = TC_ItemChecker:IsTransmogCollected(itemLink)
-                        if appearanceCollected or isExactKnown then
-                            button.transmogOverlay:SetColorTexture(0, 1, 0, 0.3) -- Green for collected
-                        elseif appearanceCollected == nil then
-                            button.transmogOverlay:SetColorTexture(1, 0, 0, 0.3) -- Red if not eligible
-                        else
-                            button.transmogOverlay:SetColorTexture(0, 0, 0, 0)   -- Transparent for uncollected
-                        end
-                    end
-                end
+        if not button.transmogOverlay then
+            button.transmogOverlay = button:CreateTexture(nil, "OVERLAY")
+            button.transmogOverlay:SetAllPoints(true)
+        end
+        
+        local itemLink = GetAuctionItemLink("list", index)
+        if itemLink then
+            local isCollected = TC_ItemChecker:IsItemCollected(itemLink)
+            if isCollected then
+                button.transmogOverlay:SetColorTexture(0, 1, 0, 0.3)
+                button.transmogOverlay:Show()
+            else
+                button.transmogOverlay:Hide()
             end
-        else 
-            -- Remove (or hide) the highlight when the filter is off.
-            for i = 1, NUM_BROWSE_TO_DISPLAY do
-                local button = _G["BrowseButton" .. i .. "Item"]
-                if button and button.transmogOverlay then
-                    button.transmogOverlay:SetColorTexture(0, 0, 0, 0)
-                end
+        else
+            button.transmogOverlay:Hide()
+        end
+    end
+
+    -- Cleanup function
+    local function CleanupOverlays()
+        for i = 1, NUM_BROWSE_TO_DISPLAY do
+            local button = _G["BrowseButton" .. i .. "Item"]
+            if button and button.transmogOverlay then
+                button.transmogOverlay:Hide()
+                button.transmogOverlay:SetParent(nil)
+                button.transmogOverlay = nil
             end
         end
     end
 
-    -- Override the browse update function with our custom version.
+    local function NewAuctionFrameBrowse_Update()
+        orig_AuctionFrameBrowse_Update()
+        
+        if applyTransmogFilter then 
+            local offset = FauxScrollFrame_GetOffset(BrowseScrollFrame)
+            for i = 1, NUM_BROWSE_TO_DISPLAY do
+                local button = _G["BrowseButton" .. i .. "Item"]
+                UpdateButtonOverlay(button, offset + i)
+            end
+        else
+            CleanupOverlays()
+        end
+    end
+
     AuctionFrameBrowse_Update = NewAuctionFrameBrowse_Update
+    AuctionFrame:HookScript("OnHide", CleanupOverlays)
+
+    function TC_AH_Old:ToggleTransmogFilter()
+        applyTransmogFilter = not applyTransmogFilter
+        NewAuctionFrameBrowse_Update()
+    end
 
     -- Create the checkbox (using Blizzard's ChatConfigCheckButtonTemplate).
     local toggleButton = CreateFrame("CheckButton", nil, AuctionFrame, "ChatConfigCheckButtonTemplate")
@@ -81,7 +94,7 @@ function TC_AH_Old:Init()
     -- Toggle the filtering flag when the checkbox is clicked.
     toggleButton:SetScript("OnClick", function(self)
         applyTransmogFilter = not applyTransmogFilter
-        AuctionFrameBrowse_Update()
+        NewAuctionFrameBrowse_Update()
     end)
 
     print("TC_AH_Old: Legacy Auction House filter logic loaded.")

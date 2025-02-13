@@ -30,9 +30,6 @@ GameTooltip:HookScript("OnTooltipSetItem", function(tooltip)
                 tooltip:AddLine("|cFF9D9D9DTC:|r |cFFFF0000INVALID CLASS TO COLLECT|r")
             end
             tooltip:Show()
-        elseif not eligible then
-            tooltip:AddLine("|cFF9D9D9DTC:|r |cFFFF0000INVALID CLASS TO COLLECT|r")
-            tooltip:Show()
         end
     end
 end)

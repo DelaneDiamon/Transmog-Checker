@@ -35,18 +35,17 @@ local armorSlotsThatRequireAllowedCheck = {
     ["INVTYPE_FEET"]      = true,
 }
 
--- Returns the allowed armor subtype for the current player.
 local function GetAllowedArmorForPlayer()
     local playerClass = select(2, UnitClass("player"))
     local playerLevel = UnitLevel("player")
     local mapping = {
         DEATHKNIGHT = 4,                           -- Plate
-        WARRIOR     = (playerLevel < 40) and 3 or 4,  -- <40: Mail, else Plate
-        PALADIN     = (playerLevel < 40) and 3 or 4,
-        HUNTER      = (playerLevel < 40) and 2 or 3,  -- <40: Leather, else Mail
+        WARRIOR     = (playerLevel < 40) and 3 or 4,  -- Mail/Plate
+        PALADIN     = (playerLevel < 40) and 3 or 4,  -- Mail/Plate
+        HUNTER      = (playerLevel < 40) and 2 or 3,  -- Leather/Mail
         ROGUE       = 2,                           -- Leather
         PRIEST      = 1,                           -- Cloth
-        SHAMAN      = (playerLevel < 40) and 2 or 3,  -- <40: Leather, else Mail
+        SHAMAN      = (playerLevel < 40) and 2 or 3,  -- Leather/Mail
         MAGE        = 1,                           -- Cloth
         WARLOCK     = 1,                           -- Cloth
         MONK        = 2,                           -- Leather
@@ -56,128 +55,121 @@ local function GetAllowedArmorForPlayer()
     return mapping[playerClass]
 end
 
--- Returns three values:
---   status     : (number)
---                1 = EXACT COLLECTED
---                2 = MODEL COLLECTED (an allowed alternative is collected)
---                3 = MODEL NOT COLLECTED (appearance from allowed armor/weapon not collected)
---                4 = NOT COLLECTABLE BY CLASS, ALTERNATIVES exist
---                5 = INVALID CLASS TO COLLECT (no allowed alternative)
---   eligible   : (boolean) whether the current character can equip the item (from IsEquippableItem)
---   altSources : (table) list of alternative allowed sources (each entry is a table with keys: name and quality)
-function TC_ItemChecker:GetTransmogStatus(itemLink)
-    if not itemLink then
-        return nil, false, nil
+local function ProcessSource(source, hoveredSourceID, allowedType, itemClassID, itemEquipLoc)
+    if not source.itemID then 
+        print("Debug: Source has no itemID")
+        return false, nil 
     end
-
-    local _, _, itemRarity, _, _, _, _, _, itemEquipLoc = GetItemInfo(itemLink)
-    -- If the item does not have an equip slot or its slot is not among valid ones (e.g. ring/neck), return early.
-    if not itemEquipLoc or not validEquipLocs[itemEquipLoc] then
-        return nil, false, nil
+    
+    local _, _, _, _, _, sClassID, sSubClassID = GetItemInfoInstant(source.itemID)
+    print(string.format("Debug: Processing source itemID: %d, ClassID: %d, SubClassID: %d", source.itemID, sClassID, sSubClassID))
+    
+    if sClassID ~= itemClassID then 
+        print("Debug: Class ID mismatch")
+        return false, nil 
     end
-
-    -- Check if the item is equippable by the current character.
-    local eligible = IsEquippableItem(itemLink)
-    -- Note: We no longer return early if not eligible. Even when the current class cannot equip the item,
-    -- we want to check for alternative allowed appearances.
-
-    local _, _, _, _, _, itemClassID, itemSubClassID = GetItemInfoInstant(itemLink)
-    if itemClassID ~= 4 and itemClassID ~= 2 then
-        return nil, eligible, nil
+    
+    if source.sourceID == hoveredSourceID then 
+        print("Debug: Same source, skipping")
+        return false, nil 
     end
-
-    local allowedArmor = false
-    local allowedType = nil
-    if itemClassID == 4 then
-        if armorSlotsThatRequireAllowedCheck[itemEquipLoc] then
-            allowedType = GetAllowedArmorForPlayer()
-            allowedArmor = (itemSubClassID == allowedType)
-        else
-            -- For armor in slots like cloaks, shields, etc., treat them as allowed.
-            allowedArmor = true
+    
+    -- For armor pieces that require type checking
+    if itemClassID == 4 and armorSlotsThatRequireAllowedCheck[itemEquipLoc] then
+        print(string.format("Debug: Checking armor type. Required: %d, Found: %d", allowedType, sSubClassID))
+        if sSubClassID ~= allowedType then 
+            print("Debug: Wrong armor type")
+            return false, nil 
         end
+    end
+    
+    if source.isCollected then
+        print("Debug: Source is collected")
+        return true, nil
     else
-        -- For weapons, they are always considered allowed.
-        allowedArmor = true
+        local name, _, quality = GetItemInfo(source.itemID)
+        print(string.format("Debug: Source not collected. Name: %s", name or "nil"))
+        if name then
+            return false, { name = name, quality = quality }
+        end
+        return false, nil
     end
+end
 
-    local appearanceID, hoveredSourceID = C_TransmogCollection.GetItemInfo(itemLink)
-    if not (appearanceID and hoveredSourceID) then
-        return 5, eligible, nil
-    end
-
-    local exactCollected = false
-    if allowedArmor then
-        exactCollected = C_TransmogCollection.PlayerHasTransmogItemModifiedAppearance(hoveredSourceID)
-    end
-
-    local sources = C_TransmogCollection.GetAppearanceSources(appearanceID)
-    if not sources then
-        return 5, eligible, nil
-    end
-
+local function CollectSources(sources, hoveredSourceID, allowedType, itemClassID, itemEquipLoc)
     local modelCollected = false
     local altSources = {}
+    
+    print(string.format("Debug: Processing %d sources", #sources))
     for _, source in pairs(sources) do
-        if source.itemID then
-            local _, _, _, _, _, sClassID, sSubClassID = GetItemInfoInstant(source.itemID)
-            if sClassID == itemClassID then
-                if itemClassID == 4 then
-                    if armorSlotsThatRequireAllowedCheck[itemEquipLoc] then
-                        if sSubClassID == allowedType then
-                            if source.sourceID ~= hoveredSourceID then
-                                if source.isCollected then
-                                    modelCollected = true
-                                else
-                                    local altName, _, altQuality = GetItemInfo(source.itemID)
-                                    if altName then
-                                        table.insert(altSources, { name = altName, quality = altQuality })
-                                    end
-                                end
-                            end
-                        end
-                    else
-                        -- For armor in non-checked slots (e.g. cloaks, shields), do not filter by armor subclass.
-                        if source.sourceID ~= hoveredSourceID then
-                            if source.isCollected then
-                                modelCollected = true
-                            else
-                                local altName, _, altQuality = GetItemInfo(source.itemID)
-                                if altName then
-                                    table.insert(altSources, { name = altName, quality = altQuality })
-                                end
-                            end
-                        end
-                    end
-                elseif itemClassID == 2 then
-                    if source.sourceID ~= hoveredSourceID then
-                        if source.isCollected then
-                            modelCollected = true
-                        else
-                            local altName, _, altQuality = GetItemInfo(source.itemID)
-                            if altName then
-                                table.insert(altSources, { name = altName, quality = altQuality })
-                            end
-                        end
-                    end
-                end
-            end
+        local isCollected, altSource = ProcessSource(source, hoveredSourceID, allowedType, itemClassID, itemEquipLoc)
+        if isCollected then
+            modelCollected = true
+        elseif altSource then
+            table.insert(altSources, altSource)
         end
     end
+    
+    print(string.format("Debug: Found %d alternatives", #altSources))
+    return modelCollected, altSources
+end
 
-    if allowedArmor then
+function TC_ItemChecker:GetTransmogStatus(itemLink)
+    -- Basic validation
+    if not itemLink then return nil end
+    
+    -- Check if item belongs to valid equipment slot
+    local _, _, _, _, _, _, _, _, itemEquipLoc = GetItemInfo(itemLink)
+    print("Debug - Item Equipment Location:", itemEquipLoc)
+    if not itemEquipLoc or not validEquipLocs[itemEquipLoc] then
+        return nil
+    end
+
+    -- Get item class info
+    local _, _, _, _, _, itemClassID, itemSubClassID = GetItemInfoInstant(itemLink)
+    if itemClassID ~= 4 and itemClassID ~= 2 then -- Not armor or weapon
+        return nil
+    end
+
+    -- Check if armor type is allowed for player
+    local allowedType = GetAllowedArmorForPlayer()
+    local isAllowedArmor = true
+    if itemClassID == 4 and armorSlotsThatRequireAllowedCheck[itemEquipLoc] then
+        isAllowedArmor = (itemSubClassID == allowedType)
+    end
+
+    -- Get appearance info
+    local appearanceID, hoveredSourceID = C_TransmogCollection.GetItemInfo(itemLink)
+    if not appearanceID or not hoveredSourceID then
+        return nil
+    end
+
+    -- Get all sources for this appearance
+    local sources = C_TransmogCollection.GetAppearanceSources(appearanceID)
+    if not sources then
+        return nil
+    end
+
+    -- Check if exact appearance is collected
+    local exactCollected = C_TransmogCollection.PlayerHasTransmogItemModifiedAppearance(hoveredSourceID)
+    
+    -- Process all sources
+    local modelCollected, altSources = CollectSources(sources, hoveredSourceID, allowedType, itemClassID, itemEquipLoc)
+
+    -- Return appropriate status
+    if isAllowedArmor then
         if exactCollected then
-            return 1, eligible, altSources   -- EXACT COLLECTED
+            return 1 -- EXACT COLLECTED
         elseif modelCollected then
-            return 2, eligible, altSources   -- MODEL COLLECTED
+            return 2 -- MODEL COLLECTED
         else
-            return 3, eligible, altSources   -- MODEL NOT COLLECTED
+            return 3 -- MODEL NOT COLLECTED
         end
     else
         if #altSources > 0 then
-            return 4, eligible, altSources   -- NOT COLLECTABLE BY CLASS, ALTERNATIVES exist.
+            return 4, false, altSources -- NOT COLLECTABLE BY CLASS, ALTERNATIVES
         else
-            return 5, eligible, nil          -- INVALID CLASS TO COLLECT (no allowed alternatives)
+            return 5, false -- INVALID CLASS TO COLLECT
         end
     end
 end
