@@ -1,7 +1,11 @@
 ## Interface: 40400
-## Title: Transmog Checker
-## Notes: Displays a tooltip line if the item has been collected as transmog source
-## Version: 0.0.10
-## Dependencies:Blizzard_AuctionUI
-## Author: Diamon
+## Title: TransmogChecker
+## Notes: Transmog Checker Addon for Classic
+## Author: YourName
+
 TransmogChecker.lua
+TC/Common/TC_ItemChecker.lua
+TC/Tooltip/TC_Tooltip.lua
+TC/AH/TC_AHLoader.lua
+TC/AH/TC_AH_New.lua
+TC/AH/TC_AH_Old.lua
