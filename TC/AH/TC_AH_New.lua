@@ -19,6 +19,14 @@ function TC_AH_New:Init()
 
     -- Register tab visibility handler
     self:RegisterTabEvents()
+    
+    -- Register cleanup handler for AH close
+    AuctionHouseFrame:HookScript("OnHide", function()
+        -- Only clean up if we're on our tab
+        if AuctionHouseFrame.selectedTab == self.tabID then
+            self:ClearAppearanceCards()
+        end
+    end)
 end
 
 function TC_AH_New:RegisterTabEvents()
@@ -194,16 +202,21 @@ function TC_AH_New:CreateEquipmentSlotFilters()
 end
 
 function TC_AH_New:CreateAppearanceGrid()
-    -- Create the scroll frame
+    -- Create the scroll frame with proper strata and level
     self.scrollFrame = CreateFrame("ScrollFrame", nil, self.collectorFrame, "ScrollFrameTemplate")
     self.scrollFrame:SetPoint("TOPLEFT", self.filterFrame, "BOTTOMLEFT", 10, -10)
     self.scrollFrame:SetPoint("BOTTOMRIGHT", self.collectorFrame, "BOTTOMRIGHT", -30, 10)
-
+    
+    -- Set proper frame strata and levels
+    self.scrollFrame:SetFrameStrata("HIGH")
+    self.scrollFrame.ScrollBar:SetFrameStrata("HIGH")
+    
     -- Create the content frame
     self.gridFrame = CreateFrame("Frame", nil, self.scrollFrame)
     self.gridFrame:SetSize(self.scrollFrame:GetWidth(), 800) -- Height will be adjusted as needed
+    self.gridFrame:SetFrameStrata("HIGH")
     self.scrollFrame:SetScrollChild(self.gridFrame)
-
+    
     -- Initialize empty grid
     self.appearanceCards = {}
 end
@@ -368,6 +381,7 @@ function TC_AH_New:CreateAppearanceCards(appearances)
         local card = CreateFrame("Frame", nil, self.gridFrame)
         card:SetSize(cardSize, cardSize)
         card:SetPoint("TOPLEFT", (col * (cardSize + padding)), -(row * (cardSize + padding)))
+        card:SetFrameLevel(self.gridFrame:GetFrameLevel() + 1)
         
         -- Create a background for the card
         local bg = card:CreateTexture(nil, "BACKGROUND")
@@ -379,12 +393,14 @@ function TC_AH_New:CreateAppearanceCards(appearances)
         maskFrame:SetSize(cardSize - 10, cardSize - 10)
         maskFrame:SetPoint("CENTER")
         maskFrame:SetClipsChildren(true)
+        maskFrame:SetFrameLevel(card:GetFrameLevel())  -- Same level as card
         
         -- Create the model
         local model = CreateFrame("DressUpModel", nil, maskFrame)
         model:SetAllPoints(maskFrame)
+        model:SetFrameLevel(maskFrame:GetFrameLevel())  -- Same level as mask frame
         model:SetUnit("player")
-        model:Undress()  -- Start with naked model
+        model:Undress()
         
         -- Try to set the appearance
         if appearance.visualID and appearance.itemLink then
@@ -417,6 +433,14 @@ function TC_AH_New:CreateAppearanceCards(appearances)
         local border = card:CreateTexture(nil, "BORDER")
         border:SetAllPoints(maskFrame)
         border:SetColorTexture(0.3, 0.3, 0.3, 1)
+        
+        -- Store model reference in card for cleanup
+        card.model = model
+        
+        -- Set proper frame levels
+        card:SetFrameLevel(self.gridFrame:GetFrameLevel() + 1)
+        maskFrame:SetFrameLevel(card:GetFrameLevel() + 1)
+        model:SetFrameLevel(maskFrame:GetFrameLevel() + 1)
         
         table.insert(self.appearanceCards, card)
         
@@ -589,6 +613,20 @@ function TC_AH_New:CreateTestModel()
     
     self.testModel = model
     self.testFrame = testFrame
+end
+
+-- Add new cleanup function
+function TC_AH_New:CleanupModels()
+    if self.appearanceCards then
+        for _, card in pairs(self.appearanceCards) do
+            if card.model then
+                card.model:ClearModel()
+                card.model:SetCustomCamera(1)
+                card.model:SetUnit("player")
+                card.model:Undress()
+            end
+        end
+    end
 end
 
 print("TC_AH_New: Module loaded.") 
