@@ -46,15 +46,17 @@ function TC_AH_New:CreateEquipmentSlotFilters()
 
     -- Define equipment slots and their icons
     local slots = {
-        { id = "HEAD", icon = 134110 },
-        { id = "SHOULDER", icon = 135040 },
-        { id = "BACK", icon = 133762 },
-        { id = "CHEST", icon = 132624 },
-        { id = "WRIST", icon = 132606 },
-        { id = "HANDS", icon = 132939 },
-        { id = "WAIST", icon = 132514 },
-        { id = "LEGS", icon = 134586 },
-        { id = "FEET", icon = 132537 },
+        { id = "HEAD", icon = 133071 },        -- inv_helmet_04 (T-visor plate helmet)
+        { id = "SHOULDER", icon = 135049 },    -- inv_shoulder_01
+        { id = "CHEST", icon = 132737 },       -- inv_chest_plate_01
+        { id = "WAIST", icon = 132510 },       -- inv_belt_01
+        { id = "LEGS", icon = 132624 },        -- inv_pants_01
+        { id = "FEET", icon = 132606 },        -- inv_boots_01
+        { id = "WRIST", icon = 132492 },       -- inv_bracer_01
+        { id = "HANDS", icon = 132938 },       -- inv_gauntlets_01
+        { id = "BACK", icon = 133762 },        -- inv_misc_cape_01
+        { id = "MAINHAND", icon = 135271 },    -- inv_sword_01
+        { id = "OFFHAND", icon = 134950 },     -- inv_shield_01
     }
 
     -- Create filter buttons
@@ -167,53 +169,43 @@ function TC_AH_New:CreateAppearanceGrid()
 end
 
 function TC_AH_New:FilterBySlot(slotID)
-    print("Filtering by slot:", slotID)
     -- Clear existing cards
     for _, card in pairs(self.appearanceCards) do
         card:Hide()
     end
     wipe(self.appearanceCards)
 
-    -- Create dummy appearance cards for testing
-    local cardSize = 140
-    local padding = 10
-    local cardsPerRow = math.floor((self.scrollFrame:GetWidth() - padding) / (cardSize + padding))
+    -- Create appearance cards grid
+    local cardSize = 140     -- Reduced from 180 to match collection UI
+    local padding = 8        -- Reduced padding for tighter grid
+    local cardsPerRow = 4    -- Changed to 4 cards per row to match UI
     
-    -- Create 20 dummy cards
-    for i = 1, 20 do
+    -- Create test cards
+    for i = 1, 16 do  -- 4x4 grid
         local row = math.floor((i-1) / cardsPerRow)
         local col = (i-1) % cardsPerRow
         
-        local card = CreateFrame("Button", nil, self.gridFrame)
+        local card = CreateFrame("Frame", nil, self.gridFrame)
         card:SetSize(cardSize, cardSize)
         card:SetPoint("TOPLEFT", self.gridFrame, "TOPLEFT", 
             col * (cardSize + padding) + padding,
             -row * (cardSize + padding) - padding)
 
-        -- Card background
+        -- Black background
         local bg = card:CreateTexture(nil, "BACKGROUND")
         bg:SetAllPoints()
-        bg:SetColorTexture(0.1, 0.1, 0.1, 0.8)
+        bg:SetColorTexture(0, 0, 0, 1)
 
-        -- Item icon (using a dummy icon for now)
-        local icon = card:CreateTexture(nil, "ARTWORK")
-        icon:SetSize(cardSize-20, cardSize-20)
-        icon:SetPoint("TOP", card, "TOP", 0, -10)
-        icon:SetTexture("Interface\\Icons\\INV_Misc_QuestionMark")
-
-        -- Item name
-        local name = card:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-        name:SetPoint("BOTTOM", card, "BOTTOM", 0, 5)
-        name:SetText("Item " .. i)
-
-        card:SetScript("OnClick", function()
-            print("Clicked appearance card", i, "for slot", slotID)
-        end)
+        -- Create model view (placeholder for now)
+        local model = CreateFrame("DressUpModel", nil, card)
+        model:SetPoint("TOPLEFT", 5, -5)
+        model:SetPoint("BOTTOMRIGHT", -5, 5)
+        model:SetCustomCamera(1)
 
         table.insert(self.appearanceCards, card)
     end
 
-    -- Adjust grid frame height based on number of cards
+    -- Adjust grid frame height
     local rows = math.ceil(#self.appearanceCards / cardsPerRow)
     self.gridFrame:SetHeight(rows * (cardSize + padding) + padding)
 end
