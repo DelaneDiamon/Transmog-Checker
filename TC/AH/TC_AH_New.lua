@@ -57,10 +57,24 @@ end
 function TC_AH_New:ClearAppearanceCards()
     if self.appearanceCards then
         for _, card in pairs(self.appearanceCards) do
+            if card.model then
+                card.model:ClearModel()
+            end
             card:Hide()
             card:SetParent(nil)
         end
         wipe(self.appearanceCards)
+    end
+    
+    -- Clear filter selection
+    if self.filterButtons then
+        for _, btn in pairs(self.filterButtons) do
+            btn.selected = false
+            btn.icon:SetDesaturated(true)
+            btn.border:SetVertexColor(0.7, 0.7, 0.7, 0.9)
+            btn.glow:Hide()
+            btn.bg:SetVertexColor(0.1, 0.1, 0.1, 1)
+        end
     end
 end
 
@@ -89,6 +103,7 @@ function TC_AH_New:CreateEquipmentSlotFilters()
     self.filterFrame = CreateFrame("Frame", nil, self.collectorFrame)
     self.filterFrame:SetSize(600, 50)
     self.filterFrame:SetPoint("TOP", self.searchBox, "BOTTOM", 0, -20)
+    self.filterFrame:SetFrameStrata("HIGH")  -- Set filter frame to HIGH strata
 
     -- Define equipment slots and their icons (updated with standard base icons)
     local slots = {
@@ -202,23 +217,80 @@ function TC_AH_New:CreateEquipmentSlotFilters()
 end
 
 function TC_AH_New:CreateAppearanceGrid()
-    -- Create the scroll frame with proper strata and level
-    self.scrollFrame = CreateFrame("ScrollFrame", nil, self.collectorFrame, "ScrollFrameTemplate")
-    self.scrollFrame:SetPoint("TOPLEFT", self.filterFrame, "BOTTOMLEFT", 10, -10)
-    self.scrollFrame:SetPoint("BOTTOMRIGHT", self.collectorFrame, "BOTTOMRIGHT", -30, 10)
+    -- Create the grid frame
+    self.gridFrame = CreateFrame("Frame", nil, self.collectorFrame)
+    self.gridFrame:SetPoint("TOPLEFT", self.filterFrame, "BOTTOMLEFT", 10, -10)
+    self.gridFrame:SetPoint("BOTTOMRIGHT", self.collectorFrame, "BOTTOMRIGHT", -30, 40)  -- Leave space for pagination
     
-    -- Set proper frame strata and levels
-    self.scrollFrame:SetFrameStrata("HIGH")
-    self.scrollFrame.ScrollBar:SetFrameStrata("HIGH")
+    -- Create pagination controls
+    self.paginationFrame = CreateFrame("Frame", nil, self.collectorFrame)
+    self.paginationFrame:SetSize(200, 30)
+    self.paginationFrame:SetPoint("BOTTOM", self.collectorFrame, "BOTTOM", 0, 10)
     
-    -- Create the content frame
-    self.gridFrame = CreateFrame("Frame", nil, self.scrollFrame)
-    self.gridFrame:SetSize(self.scrollFrame:GetWidth(), 800) -- Height will be adjusted as needed
-    self.gridFrame:SetFrameStrata("HIGH")
-    self.scrollFrame:SetScrollChild(self.gridFrame)
+    -- Previous page button
+    self.prevButton = CreateFrame("Button", nil, self.paginationFrame, "UIPanelButtonTemplate")
+    self.prevButton:SetSize(30, 25)
+    self.prevButton:SetPoint("RIGHT", self.paginationFrame, "CENTER", -10, 0)
+    self.prevButton:SetText("<")
+    self.prevButton:SetScript("OnClick", function() self:ChangePage(-1) end)
     
-    -- Initialize empty grid
+    -- Next page button
+    self.nextButton = CreateFrame("Button", nil, self.paginationFrame, "UIPanelButtonTemplate")
+    self.nextButton:SetSize(30, 25)
+    self.nextButton:SetPoint("LEFT", self.paginationFrame, "CENTER", 10, 0)
+    self.nextButton:SetText(">")
+    self.nextButton:SetScript("OnClick", function() self:ChangePage(1) end)
+    
+    -- Page text
+    self.pageText = self.paginationFrame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+    self.pageText:SetPoint("CENTER", self.paginationFrame, "CENTER", 0, 0)
+    self.pageText:SetText("0/0")
+    
+    -- Initialize variables
+    self.currentPage = 1
+    self.itemsPerPage = 12  -- 3x4 grid
     self.appearanceCards = {}
+end
+
+function TC_AH_New:ChangePage(delta)
+    if not self.allAppearances then return end
+    
+    local totalPages = math.ceil(#self.allAppearances / self.itemsPerPage)
+    self.currentPage = math.min(math.max(1, self.currentPage + delta), totalPages)
+    
+    self:UpdatePageDisplay()
+    self:DisplayCurrentPage()
+end
+
+function TC_AH_New:UpdatePageDisplay()
+    if not self.allAppearances then return end
+    
+    local totalPages = math.ceil(#self.allAppearances / self.itemsPerPage)
+    self.pageText:SetText(string.format("%d/%d", self.currentPage, totalPages))
+    
+    -- Update button states
+    self.prevButton:SetEnabled(self.currentPage > 1)
+    self.nextButton:SetEnabled(self.currentPage < totalPages)
+end
+
+function TC_AH_New:DisplayCurrentPage()
+    -- Clear existing cards
+    self:ClearAppearanceCards()
+    
+    if not self.allAppearances then return end
+    
+    -- Calculate which items to show
+    local startIndex = (self.currentPage - 1) * self.itemsPerPage + 1
+    local endIndex = math.min(startIndex + self.itemsPerPage - 1, #self.allAppearances)
+    
+    -- Create subset of appearances for current page
+    local pageAppearances = {}
+    for i = startIndex, endIndex do
+        table.insert(pageAppearances, self.allAppearances[i])
+    end
+    
+    -- Display the current page
+    self:CreateAppearanceCards(pageAppearances)
 end
 
 function TC_AH_New:FilterBySlot(slotID)
@@ -300,8 +372,11 @@ function TC_AH_New:FilterBySlot(slotID)
                 end
                 print("TC: Found", #appearances, "matching appearances")
                 
-                -- Update the grid with new appearances
-                self:CreateAppearanceCards(appearances)
+                -- Store all appearances and display first page
+                self.allAppearances = appearances
+                self.currentPage = 1
+                self:UpdatePageDisplay()
+                self:DisplayCurrentPage()
             end
         end
     end)
@@ -360,15 +435,6 @@ end
 function TC_AH_New:CreateAppearanceCards(appearances)
     if not appearances or #appearances == 0 then return end
     
-    -- Get the currently selected slot
-    local selectedSlot
-    for _, btn in pairs(self.filterButtons or {}) do
-        if btn.selected then
-            selectedSlot = btn.slotID
-            break
-        end
-    end
-    
     local cardSize = 140
     local padding = 8
     local cardsPerRow = 4
@@ -381,7 +447,6 @@ function TC_AH_New:CreateAppearanceCards(appearances)
         local card = CreateFrame("Frame", nil, self.gridFrame)
         card:SetSize(cardSize, cardSize)
         card:SetPoint("TOPLEFT", (col * (cardSize + padding)), -(row * (cardSize + padding)))
-        card:SetFrameLevel(self.gridFrame:GetFrameLevel() + 1)
         
         -- Create a background for the card
         local bg = card:CreateTexture(nil, "BACKGROUND")
@@ -393,54 +458,30 @@ function TC_AH_New:CreateAppearanceCards(appearances)
         maskFrame:SetSize(cardSize - 10, cardSize - 10)
         maskFrame:SetPoint("CENTER")
         maskFrame:SetClipsChildren(true)
-        maskFrame:SetFrameLevel(card:GetFrameLevel())  -- Same level as card
         
         -- Create the model
         local model = CreateFrame("DressUpModel", nil, maskFrame)
         model:SetAllPoints(maskFrame)
-        model:SetFrameLevel(maskFrame:GetFrameLevel())  -- Same level as mask frame
         model:SetUnit("player")
         model:Undress()
         
         -- Try to set the appearance
         if appearance.visualID and appearance.itemLink then
-            print("TC: Trying on item:", appearance.visualID, "Link:", appearance.itemLink)
-            
-            -- Try using the item link
             model:TryOn(appearance.itemLink)
             
-            -- Alternative attempt using item string format if needed
-            if not model:GetItemTransmogInfo(8) then  -- If feet slot is empty
-                local itemString = string.format("item:%d:0:0:0:0:0:0:0:0:0:0:0", appearance.visualID)
-                print("TC: Trying alternative format:", itemString)
-                model:TryOn(itemString)
-            end
-            
-            -- Set up camera after model is ready
-            model:SetCustomCamera(1)  -- Enable custom camera mode
-            
-            -- Apply camera settings
-            local cameraConfig = self:GetCameraConfigForSlot(selectedSlot)
+            -- Apply camera settings for the slot
+            local cameraConfig = self:GetCameraConfigForSlot("FEET")
             model:SetPosition(cameraConfig.modelPosition.x, cameraConfig.modelPosition.y, cameraConfig.modelPosition.z)
             model:SetModelScale(cameraConfig.modelScale)
+            model:SetCustomCamera(1)
             model:SetCameraPosition(cameraConfig.position.x, cameraConfig.position.y, cameraConfig.position.z)
             model:SetCameraTarget(cameraConfig.target.x, cameraConfig.target.y, cameraConfig.target.z)
             model:SetCameraDistance(cameraConfig.distance)
             model:SetFacing(cameraConfig.facing)
         end
         
-        -- Create a border
-        local border = card:CreateTexture(nil, "BORDER")
-        border:SetAllPoints(maskFrame)
-        border:SetColorTexture(0.3, 0.3, 0.3, 1)
-        
         -- Store model reference in card for cleanup
         card.model = model
-        
-        -- Set proper frame levels
-        card:SetFrameLevel(self.gridFrame:GetFrameLevel() + 1)
-        maskFrame:SetFrameLevel(card:GetFrameLevel() + 1)
-        model:SetFrameLevel(maskFrame:GetFrameLevel() + 1)
         
         table.insert(self.appearanceCards, card)
         
