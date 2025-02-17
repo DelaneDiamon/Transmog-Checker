@@ -2,11 +2,10 @@ local loaderFrame = CreateFrame("Frame")
 loaderFrame:RegisterEvent("AUCTION_HOUSE_SHOW")
 loaderFrame:SetScript("OnEvent", function(self, event)
     if AuctionHouseFrame and AuctionHouseFrame.Tabs then
-        print("TC_AHLoader: Detected new AH UI.")
-        if TC_AH_New and TC_AH_New.Init then 
-            TC_AH_New:Init() 
-        end
-        self:UnregisterEvent("AUCTION_HOUSE_SHOW")
+        -- if TC_AH_New and TC_AH_New.Init then 
+        --     TC_AH_New:Init() 
+        -- end
+        -- self:UnregisterEvent("AUCTION_HOUSE_SHOW")
     elseif AuctionFrame then
         print("TC_AHLoader: Detected old AH UI.")
         if TC_AH_Old and TC_AH_Old.Init then 
