@@ -1,7 +1,7 @@
 TC_ItemChecker = TC_ItemChecker or {}
 TC_ItemChecker.debug = false -- Debug flag, off by default
 
-local function Debug(...)
+function TC_ItemChecker:Debug(...)
     if TC_ItemChecker.debug then
         print("|cFF9D9D9DTC Debug:|r", ...)
     end
@@ -73,39 +73,39 @@ end
 
 local function ProcessSource(source, hoveredSourceID, allowedType, itemClassID, itemEquipLoc)
     if not source.itemID then 
-        Debug("Source has no itemID")
+        TC_ItemChecker:Debug("Source has no itemID")
         return false, nil 
     end
     
-    Debug(string.format("Processing source itemID: %d, sourceType: %d", source.itemID, source.sourceType or -1))
+    TC_ItemChecker:Debug(string.format("Processing source itemID: %d, sourceType: %d", source.itemID, source.sourceType or -1))
     
     local _, _, _, _, _, sClassID, sSubClassID = GetItemInfoInstant(source.itemID)
-    Debug(string.format("Processing source itemID: %d, ClassID: %d, SubClassID: %d", source.itemID, sClassID, sSubClassID))
+    TC_ItemChecker:Debug(string.format("Processing source itemID: %d, ClassID: %d, SubClassID: %d", source.itemID, sClassID, sSubClassID))
     
     if sClassID ~= itemClassID then 
-        Debug("Class ID mismatch")
+        TC_ItemChecker:Debug("Class ID mismatch")
         return false, nil 
     end
     
     if source.sourceID == hoveredSourceID then 
-        Debug("Same source, skipping")
+        TC_ItemChecker:Debug("Same source, skipping")
         return false, nil 
     end
     
     if itemClassID == 4 and armorSlotsThatRequireAllowedCheck[itemEquipLoc] then
-        Debug(string.format("Checking armor type. Required: %d, Found: %d", allowedType, sSubClassID))
+        TC_ItemChecker:Debug(string.format("Checking armor type. Required: %d, Found: %d", allowedType, sSubClassID))
         if sSubClassID ~= allowedType then 
-            Debug("Wrong armor type")
+            TC_ItemChecker:Debug("Wrong armor type")
             return false, nil 
         end
     end
     
     if source.isCollected then
-        Debug("Source is collected")
+        TC_ItemChecker:Debug("Source is collected")
         return true, nil
     else
         local name, _, quality = GetItemInfo(source.itemID)
-        Debug(string.format("Source not collected. Name: %s", name or "nil"))
+        TC_ItemChecker:Debug(string.format("Source not collected. Name: %s", name or "nil"))
         if name then
             -- Include itemID and sourceType in the return
             return false, {
@@ -124,7 +124,7 @@ local function CollectSources(sources, hoveredSourceID, allowedType, itemClassID
     local modelCollected = false
     local altSources = {}
     
-    Debug(string.format("Processing %d sources", #sources))
+    TC_ItemChecker:Debug(string.format("Processing %d sources", #sources))
     for _, source in pairs(sources) do
         local isCollected, altSource = ProcessSource(source, hoveredSourceID, allowedType, itemClassID, itemEquipLoc)
         if isCollected then
@@ -134,23 +134,29 @@ local function CollectSources(sources, hoveredSourceID, allowedType, itemClassID
         end
     end
     
-    Debug(string.format("Found %d alternatives", #altSources))
+    TC_ItemChecker:Debug(string.format("Found %d alternatives", #altSources))
     return modelCollected, altSources
 end
 
 function TC_ItemChecker:GetTransmogStatus(itemLink)
     -- Basic validation
-    if not itemLink then return nil end
-    
+    if not itemLink then 
+        TC_ItemChecker:Debug(string.format("No item link"))
+        return nil 
+    end
+
     -- Check if item belongs to valid equipment slot
     local _, _, _, _, _, _, _, _, itemEquipLoc = GetItemInfo(itemLink)
     if not itemEquipLoc or not validEquipLocs[itemEquipLoc] then
+        TC_ItemChecker:Debug(string.format("No valid equipment slot"))
         return nil  -- Only return nil for invalid equipment slots
     end
+    
 
     -- Get item class info
     local _, _, _, _, _, itemClassID, itemSubClassID = GetItemInfoInstant(itemLink)
     if itemClassID ~= 4 and itemClassID ~= 2 then -- Not armor or weapon
+        TC_ItemChecker:Debug(string.format("Not armor or weapon"))
         return 5, false  -- Changed from nil to 5,false for non-armor/weapon items
     end
 
@@ -159,42 +165,53 @@ function TC_ItemChecker:GetTransmogStatus(itemLink)
     local isAllowedArmor = true
     if itemClassID == 4 and armorSlotsThatRequireAllowedCheck[itemEquipLoc] then
         isAllowedArmor = (itemSubClassID == allowedType)
+        TC_ItemChecker:Debug(string.format("Armor type is allowed: %d", isAllowedArmor))
     end
 
     -- Get appearance info
     local appearanceID, hoveredSourceID = C_TransmogCollection.GetItemInfo(itemLink)
-    if not appearanceID or not hoveredSourceID then
+
+    -- Check if exact appearance is collected
+    local exactCollected = C_TransmogCollection.PlayerHasTransmogItemModifiedAppearance(hoveredSourceID)
+
+    if not exactCollected and (not appearanceID or not hoveredSourceID) then
+        TC_ItemChecker:Debug(string.format("No appearance info"))
         return 5, false  -- Changed from nil to 5,false when no appearance info
     end
 
     -- Get all sources for this appearance
     local sources = C_TransmogCollection.GetAppearanceSources(appearanceID)
-    if not sources then
+    if not exactCollected and not sources then
+        TC_ItemChecker:Debug(string.format("No sources"))
         return 5, false  -- Changed from nil to 5,false when no sources
     end
 
-    -- Check if exact appearance is collected
-    local exactCollected = C_TransmogCollection.PlayerHasTransmogItemModifiedAppearance(hoveredSourceID)
-    
-    -- Process all sources
-    local modelCollected, altSources = CollectSources(sources, hoveredSourceID, allowedType, itemClassID, itemEquipLoc)
-
-    -- Return appropriate status
-    if isAllowedArmor then
-        if exactCollected then
-            return 1, true, altSources -- EXACT COLLECTED
-        elseif modelCollected then
-            return 2, true, altSources -- MODEL COLLECTED
-        else
-            return 3, true, altSources -- MODEL NOT COLLECTED
-        end
-    else
-        if #altSources > 0 then
-            return 4, false, altSources -- NOT COLLECTABLE BY CLASS, ALTERNATIVES
-        else
-            return 5, false -- INVALID CLASS TO COLLECT
-        end
+    local modelCollected, altSources
+    if sources then
+        -- Process all sources
+        modelCollected, altSources = CollectSources(sources, hoveredSourceID, allowedType, itemClassID, itemEquipLoc)
     end
+    print(altSources)
+    -- Return appropriate status
+    if exactCollected then
+        TC_ItemChecker:Debug(string.format("Exact collected"))
+        return 1, true, altSources -- EXACT COLLECTED
+    elseif modelCollected then
+        TC_ItemChecker:Debug(string.format("Model collected"))
+        return 2, true, altSources -- MODEL COLLECTED
+    elseif isAllowedArmor and sources and #sources > 0 then
+        TC_ItemChecker:Debug(string.format("Allowed armor"))
+        return 3, true, altSources -- MODEL NOT COLLECTED
+    end
+
+    if sources and #altSources > 0 then
+        TC_ItemChecker:Debug(string.format("Not collectable by class, alternatives: %d", #altSources))
+        return 4, false, altSources -- NOT COLLECTABLE BY CLASS, ALTERNATIVES
+    else
+        TC_ItemChecker:Debug(string.format("Invalid class to collect"))
+        return 5, false -- INVALID CLASS TO COLLECT
+    end
+
 end
 
 print("TC_ItemChecker: Module loaded.") 

@@ -20,8 +20,9 @@ GameTooltip:HookScript("OnTooltipSetItem", function(tooltip)
     local _, itemLink = tooltip:GetItem()
     if itemLink then
         local status, eligible, altSources = TC_ItemChecker:GetTransmogStatus(itemLink)
-        
+
         if status then
+            TC_ItemChecker:Debug('Checking status %d', status)
             if status == 1 then
                 tooltip:AddLine("|c" .. TC_PREFIX_COLOR .. "TC:|r |cFF00FF00EXACT COLLECTED|r")
             elseif status == 2 then
@@ -33,6 +34,8 @@ GameTooltip:HookScript("OnTooltipSetItem", function(tooltip)
             elseif status == 5 then
                 tooltip:AddLine("|c" .. TC_PREFIX_COLOR .. "TC:|r |cFFFF0000INVALID CLASS TO COLLECT|r")
             end
+
+            TC_ItemChecker:Debug('Showing alternatives %s', altSources)
 
             -- Show alternative sources for statuses 1, 2, 3, and 4
             if (status == 1 or status == 2 or status == 3 or status == 4) and altSources then
