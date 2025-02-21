@@ -191,7 +191,6 @@ function TC_ItemChecker:GetTransmogStatus(itemLink)
         -- Process all sources
         modelCollected, altSources = CollectSources(sources, hoveredSourceID, allowedType, itemClassID, itemEquipLoc)
     end
-    print(altSources)
     -- Return appropriate status
     if exactCollected then
         TC_ItemChecker:Debug(string.format("Exact collected"))
