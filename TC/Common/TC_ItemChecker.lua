@@ -171,6 +171,11 @@ function TC_ItemChecker:GetTransmogStatus(itemLink)
     -- Get appearance info
     local appearanceID, hoveredSourceID = C_TransmogCollection.GetItemInfo(itemLink)
 
+    if not hoveredSourceID then
+        TC_ItemChecker:Debug(string.format("No hovered source ID"))
+        return nil
+    end
+
     -- Check if exact appearance is collected
     local exactCollected = C_TransmogCollection.PlayerHasTransmogItemModifiedAppearance(hoveredSourceID)
 
