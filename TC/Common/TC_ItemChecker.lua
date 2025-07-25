@@ -67,6 +67,7 @@ local function GetAllowedArmorForPlayer()
         MONK        = 2,                           -- Leather
         DRUID       = 2,                           -- Leather
         DEMONHUNTER = 2,                           -- Leather
+        MONK        = 2,                           -- Leather
     }
     return mapping[playerClass]
 end
