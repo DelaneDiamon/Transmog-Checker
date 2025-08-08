@@ -7,6 +7,14 @@ function TC_ItemChecker:Debug(...)
     end
 end
 
+-- Status codes
+local STATUS_EXACT_COLLECTED = 1
+local STATUS_MODEL_COLLECTED = 2
+local STATUS_MODEL_NOT_COLLECTED = 3
+local STATUS_NOT_COLLECTABLE_BY_CLASS = 4
+local STATUS_INVALID_CLASS_TO_COLLECT = 5
+local STATUS_NO_INFO_YET = 6 -- New: neutral state for missing/uncached API data
+
 -- Add command to toggle debug mode
 SLASH_TC1 = "/tc"
 SlashCmdList["TC"] = function(msg)
@@ -39,6 +47,20 @@ local validEquipLocs = {
     ["INVTYPE_RANGEDRIGHT"] = true,
 }
 
+-- Helper to obtain class/subclass across Classic/Retail differences of GetItemInfoInstant
+local function GetItemClassAndSubClass(item)
+    local r1, r2, r3, r4, r5, r6, r7 = GetItemInfoInstant(item)
+    -- Retail (7 returns): classID=r6, subClassID=r7
+    -- Classic variants (6 returns): classID=r5, subClassID=r6
+    local classID, subClassID
+    if r7 ~= nil then
+        classID, subClassID = r6, r7
+    else
+        classID, subClassID = r5, r6
+    end
+    return classID, subClassID
+end
+
 -- List of equipment slots where the allowed armor subtype check applies.
 local armorSlotsThatRequireAllowedCheck = {
     ["INVTYPE_HEAD"]      = true,
@@ -67,9 +89,55 @@ local function GetAllowedArmorForPlayer()
         MONK        = 2,                           -- Leather
         DRUID       = 2,                           -- Leather
         DEMONHUNTER = 2,                           -- Leather
-        MONK        = 2,                           -- Leather
     }
     return mapping[playerClass]
+end
+
+-- Determine if the player can collect the given source/item by class rules
+local function IsPlayerEligibleForItem(hoveredSourceID, itemClassID, itemEquipLoc, itemSubClassID)
+    -- For armor, use strict armor-type rule first. Do not trust source info flags
+    -- because playerCanCollect may be false for BoE or not-in-inventory items.
+    if itemClassID == 4 and armorSlotsThatRequireAllowedCheck[itemEquipLoc] then
+        local allowedType = GetAllowedArmorForPlayer()
+        local eligible = (itemSubClassID == allowedType)
+        TC_ItemChecker:Debug(string.format("Armor eligibility fallback: itemSubClass=%s, allowed=%s -> %s",
+            tostring(itemSubClassID), tostring(allowedType), tostring(eligible)))
+        return eligible
+    end
+
+    -- For weapons/others, prefer source info when available
+    if hoveredSourceID and C_TransmogCollection and C_TransmogCollection.GetSourceInfo then
+        local si = C_TransmogCollection.GetSourceInfo(hoveredSourceID)
+        if si then
+            if si.isValidSourceForPlayer == false then
+                TC_ItemChecker:Debug("Eligibility: source is not valid for player")
+                return false
+            end
+            if si.isValidSourceForPlayer == true then
+                TC_ItemChecker:Debug("Eligibility: source is valid for player")
+                return true
+            end
+            if si.playerCanCollect == false then
+                TC_ItemChecker:Debug("Eligibility: player cannot collect source")
+                return false
+            end
+            if si.playerCanCollect == true then
+                TC_ItemChecker:Debug("Eligibility: player can collect source")
+                return true
+            end
+        end
+    end
+
+    -- For weapons/others, consult API when available; trust explicit false, but
+    -- if API returns true/nil, allow it.
+    if hoveredSourceID and C_TransmogCollection and C_TransmogCollection.PlayerCanCollectSource then
+        local ok = C_TransmogCollection.PlayerCanCollectSource(hoveredSourceID)
+        if ok == false then return false end
+        if ok == true then return true end
+    end
+
+    -- Default to eligible for non-armor slots if no better signal is available
+    return true
 end
 
 local function ProcessSource(source, hoveredSourceID, allowedType, itemClassID, itemEquipLoc)
@@ -80,7 +148,7 @@ local function ProcessSource(source, hoveredSourceID, allowedType, itemClassID, 
     
     TC_ItemChecker:Debug(string.format("Processing source itemID: %d, sourceType: %d", source.itemID, source.sourceType or -1))
     
-    local _, _, _, _, _, sClassID, sSubClassID = GetItemInfoInstant(source.itemID)
+    local sClassID, sSubClassID = GetItemClassAndSubClass(source.itemID)
     TC_ItemChecker:Debug(string.format("Processing source itemID: %d, ClassID: %d, SubClassID: %d", source.itemID, sClassID, sSubClassID))
     
     if sClassID ~= itemClassID then 
@@ -139,6 +207,37 @@ local function CollectSources(sources, hoveredSourceID, allowedType, itemClassID
     return modelCollected, altSources
 end
 
+-- Build alternative sources using MoP-compatible API
+local function BuildAlternativeSources(appearanceID, hoveredSourceID)
+    if not appearanceID or not C_TransmogCollection or not C_TransmogCollection.GetAllAppearanceSources then
+        return nil
+    end
+    local sourceIDs = C_TransmogCollection.GetAllAppearanceSources(appearanceID)
+    if not sourceIDs or #sourceIDs == 0 then return nil end
+
+    local alternatives = {}
+    for _, sid in ipairs(sourceIDs) do
+        if sid ~= hoveredSourceID then
+            local info = C_TransmogCollection.GetSourceInfo and C_TransmogCollection.GetSourceInfo(sid)
+            if info and info.itemID then
+                local name = info.name
+                if not name then
+                    name = (GetItemInfo(info.itemID))
+                end
+                table.insert(alternatives, {
+                    name = name or ("item:" .. tostring(info.itemID)),
+                    quality = info.quality,
+                    itemID = info.itemID,
+                    sourceType = info.sourceType or info.categoryID, -- try sourceType; fallback to categoryID
+                })
+            end
+        end
+    end
+
+    if #alternatives == 0 then return nil end
+    return alternatives
+end
+
 function TC_ItemChecker:GetTransmogStatus(itemLink)
     -- Basic validation
     if not itemLink then 
@@ -155,10 +254,10 @@ function TC_ItemChecker:GetTransmogStatus(itemLink)
     
 
     -- Get item class info
-    local _, _, _, _, _, itemClassID, itemSubClassID = GetItemInfoInstant(itemLink)
+    local itemClassID, itemSubClassID = GetItemClassAndSubClass(itemLink)
     if itemClassID ~= 4 and itemClassID ~= 2 then -- Not armor or weapon
         TC_ItemChecker:Debug(string.format("Not armor or weapon"))
-        return 5, false  -- Changed from nil to 5,false for non-armor/weapon items
+        return STATUS_NO_INFO_YET, false  -- Neutral for non-armor/weapon
     end
 
     -- Check if armor type is allowed for player
@@ -174,48 +273,45 @@ function TC_ItemChecker:GetTransmogStatus(itemLink)
 
     if not hoveredSourceID then
         TC_ItemChecker:Debug(string.format("No hovered source ID"))
-        return nil
+        -- Attempt to request item data to load if available
+        local itemID = select(1, GetItemInfoInstant(itemLink))
+        if itemID and C_Item and C_Item.IsItemDataCachedByID and not C_Item.IsItemDataCachedByID(itemID) then
+            if C_Item.RequestLoadItemDataByID then C_Item.RequestLoadItemDataByID(itemID) end
+        end
+        return STATUS_NO_INFO_YET, false
     end
 
     -- Check if exact appearance is collected
     local exactCollected = C_TransmogCollection.PlayerHasTransmogItemModifiedAppearance(hoveredSourceID)
 
-    if not exactCollected and (not appearanceID or not hoveredSourceID) then
-        TC_ItemChecker:Debug(string.format("No appearance info"))
-        return 5, false  -- Changed from nil to 5,false when no appearance info
+    -- Appearance-level collection without relying on enumerating sources
+    local modelCollected = false
+    if appearanceID and C_TransmogCollection.PlayerHasTransmog then
+        modelCollected = C_TransmogCollection.PlayerHasTransmog(appearanceID) and true or false
     end
 
-    -- Get all sources for this appearance
-    local sources = C_TransmogCollection.GetAppearanceSources(appearanceID)
-    if not exactCollected and not sources then
-        TC_ItemChecker:Debug(string.format("No sources"))
-        return 5, false  -- Changed from nil to 5,false when no sources
-    end
+    local altSources = BuildAlternativeSources(appearanceID, hoveredSourceID)
 
-    local modelCollected, altSources
-    if sources then
-        -- Process all sources
-        modelCollected, altSources = CollectSources(sources, hoveredSourceID, allowedType, itemClassID, itemEquipLoc)
-    end
     -- Return appropriate status
     if exactCollected then
         TC_ItemChecker:Debug(string.format("Exact collected"))
-        return 1, true, altSources -- EXACT COLLECTED
+        return STATUS_EXACT_COLLECTED, true, altSources -- EXACT COLLECTED
     elseif modelCollected then
         TC_ItemChecker:Debug(string.format("Model collected"))
-        return 2, true, altSources -- MODEL COLLECTED
-    elseif isAllowedArmor and sources and #sources > 0 then
+        return STATUS_MODEL_COLLECTED, true, altSources -- MODEL COLLECTED
+    elseif IsPlayerEligibleForItem(hoveredSourceID, itemClassID, itemEquipLoc, itemSubClassID) then
         TC_ItemChecker:Debug(string.format("Allowed armor"))
-        return 3, true, altSources -- MODEL NOT COLLECTED
+        return STATUS_MODEL_NOT_COLLECTED, true, altSources -- MODEL NOT COLLECTED
     end
 
-    if sources and #altSources > 0 then
-        TC_ItemChecker:Debug(string.format("Not collectable by class, alternatives: %d", #altSources))
-        return 4, false, altSources -- NOT COLLECTABLE BY CLASS, ALTERNATIVES
-    else
-        TC_ItemChecker:Debug(string.format("Invalid class to collect"))
-        return 5, false -- INVALID CLASS TO COLLECT
+    if not IsPlayerEligibleForItem(hoveredSourceID, itemClassID, itemEquipLoc, itemSubClassID) then
+        TC_ItemChecker:Debug("Not collectable by class")
+        return STATUS_NOT_COLLECTABLE_BY_CLASS, false
     end
+
+    TC_ItemChecker:Debug(string.format("No definitive info; neutral state"))
+    -- Switch to neutral state if we reached here without definitive info
+    return STATUS_NO_INFO_YET, false
 
 end
 

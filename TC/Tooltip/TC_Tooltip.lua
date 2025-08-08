@@ -16,6 +16,14 @@ local SOURCE_TYPES = {
     [6] = "Profession",
 }
 
+-- Status mapping (keep in sync with TC_ItemChecker)
+local STATUS_EXACT_COLLECTED = 1
+local STATUS_MODEL_COLLECTED = 2
+local STATUS_MODEL_NOT_COLLECTED = 3
+local STATUS_NOT_COLLECTABLE_BY_CLASS = 4
+local STATUS_INVALID_CLASS_TO_COLLECT = 5
+local STATUS_NO_INFO_YET = 6
+
 GameTooltip:HookScript("OnTooltipSetItem", function(tooltip)
     local _, itemLink = tooltip:GetItem()
     if itemLink then
@@ -23,33 +31,45 @@ GameTooltip:HookScript("OnTooltipSetItem", function(tooltip)
 
         if status then
             TC_ItemChecker:Debug('Checking status %d', status)
-            if status == 1 then
+            if status == STATUS_EXACT_COLLECTED then
                 tooltip:AddLine("|c" .. TC_PREFIX_COLOR .. "TC:|r |cFF00FF00EXACT COLLECTED|r")
-            elseif status == 2 then
+            elseif status == STATUS_MODEL_COLLECTED then
                 tooltip:AddLine("|c" .. TC_PREFIX_COLOR .. "TC:|r |cFF00FF00MODEL COLLECTED|r")
-            elseif status == 3 then
+            elseif status == STATUS_MODEL_NOT_COLLECTED then
                 tooltip:AddLine("|c" .. TC_PREFIX_COLOR .. "TC:|r |cFFFF7F00MODEL NOT COLLECTED|r")
-            elseif status == 4 then
+            elseif status == STATUS_NOT_COLLECTABLE_BY_CLASS then
                 tooltip:AddLine("|c" .. TC_PREFIX_COLOR .. "TC:|r |cFFFF7F00NOT COLLECTABLE BY CLASS|r")
-            elseif status == 5 then
+            elseif status == STATUS_INVALID_CLASS_TO_COLLECT then
                 tooltip:AddLine("|c" .. TC_PREFIX_COLOR .. "TC:|r |cFFFF0000INVALID CLASS TO COLLECT|r")
+            elseif status == STATUS_NO_INFO_YET then
+                tooltip:AddLine("|c" .. TC_PREFIX_COLOR .. "TC:|r |cFFAAAAAANo transmog info yet|r")
             end
 
             TC_ItemChecker:Debug('Showing alternatives %s', altSources)
 
             -- Show alternative sources for statuses 1, 2, 3, and 4
-            if (status == 1 or status == 2 or status == 3 or status == 4) and altSources then
+            if (status == STATUS_EXACT_COLLECTED or status == STATUS_MODEL_COLLECTED or status == STATUS_MODEL_NOT_COLLECTED or status == STATUS_NOT_COLLECTABLE_BY_CLASS) and altSources then
                 for _, alt in ipairs(altSources) do
                     local altHex = select(4, GetItemQualityColor(alt.quality)) or "FFFFFFFF"
-                    local sourceType = SOURCE_TYPES[alt.sourceType] or "Unknown"
-                    tooltip:AddLine(string.format("|c%sALT:|r |c%s%s|r |c%s[%d] (%s)|r", 
-                        TC_PREFIX_COLOR,
-                        altHex,
-                        alt.name,
-                        TC_PREFIX_COLOR,
-                        alt.itemID,
-                        sourceType
-                    ))
+                    local sourceType = SOURCE_TYPES[alt.sourceType]
+                    if sourceType then
+                        tooltip:AddLine(string.format("|c%sALT:|r |c%s%s|r |c%s[%d] (%s)|r", 
+                            TC_PREFIX_COLOR,
+                            altHex,
+                            alt.name,
+                            TC_PREFIX_COLOR,
+                            alt.itemID,
+                            sourceType
+                        ))
+                    else
+                        tooltip:AddLine(string.format("|c%sALT:|r |c%s%s|r |c%s[%d]|r", 
+                            TC_PREFIX_COLOR,
+                            altHex,
+                            alt.name,
+                            TC_PREFIX_COLOR,
+                            alt.itemID
+                        ))
+                    end
                 end
             end
             
