@@ -7,6 +7,3 @@ TransmogChecker.lua
 TC/Common/TC_Constants.lua
 TC/Common/TC_ItemChecker.lua
 TC/Tooltip/TC_Tooltip.lua
-TC/AH/TC_AHLoader.lua
-TC/AH/TC_AH_New.lua
-TC/AH/TC_AH_Old.lua
