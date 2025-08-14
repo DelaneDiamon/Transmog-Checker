@@ -81,16 +81,16 @@ end
 function TC_AH_New:CreateSearchBar()
     -- Create search bar
     self.searchBox = CreateFrame("EditBox", nil, self.collectorFrame, "SearchBoxTemplate")
-    self.searchBox:SetSize(250, 25)
+    self.searchBox:SetSize(TC.UI_SIZES.SEARCH_BOX.width, TC.UI_SIZES.SEARCH_BOX.height)
     -- Center the search box horizontally and place it near the top
-    self.searchBox:SetPoint("TOP", self.collectorFrame, "TOP", -45, -35)  -- -45 to account for the button width
+    self.searchBox:SetPoint("TOP", self.collectorFrame, "TOP", TC.UI_OFFSETS.SEARCH_BOX.x, TC.UI_OFFSETS.SEARCH_BOX.y)
     self.searchBox:SetAutoFocus(false)
 
     -- Create search button
     self.searchButton = CreateFrame("Button", nil, self.collectorFrame, "UIPanelButtonTemplate")
-    self.searchButton:SetSize(80, 25)
+    self.searchButton:SetSize(TC.UI_SIZES.SEARCH_BUTTON.width, TC.UI_SIZES.SEARCH_BUTTON.height)
     self.searchButton:SetPoint("LEFT", self.searchBox, "RIGHT", 5, 0)
-    self.searchButton:SetText("Search")
+    self.searchButton:SetText(TC.UI_TEXT.SEARCH)
     self.searchButton:SetScript("OnClick", function()
         local searchText = self.searchBox:GetText()
         print("TC_AH_New: Search for:", searchText)
@@ -101,31 +101,17 @@ end
 function TC_AH_New:CreateEquipmentSlotFilters()
     -- Create a container frame for the slot filters
     self.filterFrame = CreateFrame("Frame", nil, self.collectorFrame)
-    self.filterFrame:SetSize(600, 50)
-    self.filterFrame:SetPoint("TOP", self.searchBox, "BOTTOM", 0, -20)
+    self.filterFrame:SetSize(TC.UI_SIZES.FILTER_FRAME.width, TC.UI_SIZES.FILTER_FRAME.height)
+    self.filterFrame:SetPoint("TOP", self.searchBox, "BOTTOM", 0, TC.UI_OFFSETS.FILTER_FRAME_Y)
     self.filterFrame:SetFrameStrata("HIGH")  -- Set filter frame to HIGH strata
 
     -- Define equipment slots and their icons (updated with standard base icons)
-    local slots = {
-        { id = "HEAD", icon = 133136 },        -- inv_helmet_01
-        { id = "SHOULDER", icon = 135040 },    -- inv_shoulder_01
-        { id = "BACK", icon = 133763 },        -- inv_misc_cape_01
-        { id = "CHEST", icon = 132644 },       -- inv_chest_01
-        { id = "TABARD", icon = 135027 },      -- inv_shirt_01
-        { id = "SHIRT", icon = 135022 },       -- inv_shirt_01
-        { id = "WRIST", icon = 132602 },       -- inv_bracer_01
-        { id = "HANDS", icon = 132939 },       -- inv_gauntlets_01
-        { id = "WAIST", icon = 132514 },       -- inv_belt_01
-        { id = "LEGS", icon = 134586 },        -- inv_pants_01
-        { id = "FEET", icon = 132537 },        -- inv_boots_01
-        { id = "MAINHAND", icon = 135274 },    -- inv_sword_01
-        { id = "OFFHAND", icon = 134955 },     -- inv_shield_01
-    }
+    local slots = TC.AH_SLOTS
 
     -- Create filter buttons
     self.filterButtons = {}
-    local buttonSize = 45
-    local spacing = 8
+    local buttonSize = TC.UI_SIZES.FILTER_BUTTON.size
+    local spacing = TC.UI_SIZES.FILTER_BUTTON.spacing
     local totalWidth = (#slots * (buttonSize + spacing)) - spacing
     local startX = -totalWidth/2
 
@@ -136,9 +122,9 @@ function TC_AH_New:CreateEquipmentSlotFilters()
         
         -- Dark background
         local bg = button:CreateTexture(nil, "BACKGROUND")
-        bg:SetTexture("Interface\\Buttons\\UI-Quickslot")
+        bg:SetTexture(TC.UI_TEXTURES.QUICKSLOT)
         bg:SetAllPoints()
-        bg:SetVertexColor(0.1, 0.1, 0.1, 1)
+        bg:SetVertexColor(unpack(TC.UI_COLORS.FILTER.BG_DEFAULT))
         
         -- Icon (desaturated by default)
         local icon = button:CreateTexture(nil, "ARTWORK")
@@ -149,19 +135,19 @@ function TC_AH_New:CreateEquipmentSlotFilters()
         
         -- White border
         local border = button:CreateTexture(nil, "OVERLAY")
-        border:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
+        border:SetTexture(TC.UI_TEXTURES.ACTION_BUTTON_BORDER)
         border:SetBlendMode("ADD")
         border:SetPoint("CENTER")
         border:SetSize(buttonSize+15, buttonSize+15)
-        border:SetVertexColor(0.7, 0.7, 0.7, 0.9)
+        border:SetVertexColor(unpack(TC.UI_COLORS.FILTER.BORDER_DEFAULT))
 
         -- Glow effect for hover and selection
         local glow = button:CreateTexture(nil, "OVERLAY", nil, 1)
-        glow:SetTexture("Interface\\Buttons\\CheckButtonGlow")
+        glow:SetTexture(TC.UI_TEXTURES.CHECK_GLOW)
         glow:SetPoint("CENTER")
         glow:SetSize(buttonSize+20, buttonSize+20)
         glow:SetBlendMode("ADD")
-        glow:SetVertexColor(0.4, 0.6, 1, 0.3)  -- Desaturated blue glow
+        glow:SetVertexColor(unpack(TC.UI_COLORS.FILTER.GLOW_DEFAULT))
         glow:Hide()
 
         -- Store references
@@ -184,7 +170,7 @@ function TC_AH_New:CreateEquipmentSlotFilters()
         button:SetScript("OnLeave", function(self)
             if not self.selected then
                 self.icon:SetDesaturated(true)
-                self.border:SetVertexColor(0.7, 0.7, 0.7, 0.9)
+                self.border:SetVertexColor(unpack(TC.UI_COLORS.FILTER.BORDER_DEFAULT))
                 self.glow:Hide()
             end
         end)
@@ -195,19 +181,19 @@ function TC_AH_New:CreateEquipmentSlotFilters()
                 if btn ~= self then
                     btn.selected = false
                     btn.icon:SetDesaturated(true)
-                    btn.border:SetVertexColor(0.7, 0.7, 0.7, 0.9)
+                    btn.border:SetVertexColor(unpack(TC.UI_COLORS.FILTER.BORDER_DEFAULT))
                     btn.glow:Hide()
-                    btn.bg:SetVertexColor(0.1, 0.1, 0.1, 1)
+                    btn.bg:SetVertexColor(unpack(TC.UI_COLORS.FILTER.BG_DEFAULT))
                 end
             end
             
             -- Select this button
             self.selected = true
             self.icon:SetDesaturated(false)
-            self.border:SetVertexColor(1, 0.8, 0, 1)
-            self.glow:SetVertexColor(1, 0.8, 0, 0.4)
+            self.border:SetVertexColor(unpack(TC.UI_COLORS.FILTER.BORDER_SELECTED))
+            self.glow:SetVertexColor(unpack(TC.UI_COLORS.FILTER.GLOW_SELECTED))
             self.glow:Show()
-            self.bg:SetVertexColor(0.3, 0.3, 0.3, 1)
+            self.bg:SetVertexColor(unpack(TC.UI_COLORS.FILTER.BG_SELECTED))
             
             TC_AH_New:FilterBySlot(self.slotID)
         end)
@@ -219,26 +205,26 @@ end
 function TC_AH_New:CreateAppearanceGrid()
     -- Create the grid frame
     self.gridFrame = CreateFrame("Frame", nil, self.collectorFrame)
-    self.gridFrame:SetPoint("TOPLEFT", self.filterFrame, "BOTTOMLEFT", 10, -10)
-    self.gridFrame:SetPoint("BOTTOMRIGHT", self.collectorFrame, "BOTTOMRIGHT", -30, 40)  -- Leave space for pagination
+    self.gridFrame:SetPoint("TOPLEFT", self.filterFrame, "BOTTOMLEFT", TC.UI_OFFSETS.GRID.left, TC.UI_OFFSETS.GRID.top)
+    self.gridFrame:SetPoint("BOTTOMRIGHT", self.collectorFrame, "BOTTOMRIGHT", TC.UI_OFFSETS.GRID.right, TC.UI_OFFSETS.GRID.bottom)  -- Leave space for pagination
     
     -- Create pagination controls
     self.paginationFrame = CreateFrame("Frame", nil, self.collectorFrame)
-    self.paginationFrame:SetSize(200, 30)
-    self.paginationFrame:SetPoint("BOTTOM", self.collectorFrame, "BOTTOM", 0, 10)
+    self.paginationFrame:SetSize(TC.UI_SIZES.PAGINATION.width, TC.UI_SIZES.PAGINATION.height)
+    self.paginationFrame:SetPoint("BOTTOM", self.collectorFrame, "BOTTOM", 0, TC.UI_OFFSETS.PAGINATION_Y)
     
     -- Previous page button
     self.prevButton = CreateFrame("Button", nil, self.paginationFrame, "UIPanelButtonTemplate")
-    self.prevButton:SetSize(30, 25)
+    self.prevButton:SetSize(TC.UI_SIZES.PAGINATION.buttonWidth, TC.UI_SIZES.PAGINATION.buttonHeight)
     self.prevButton:SetPoint("RIGHT", self.paginationFrame, "CENTER", -10, 0)
-    self.prevButton:SetText("<")
+    self.prevButton:SetText(TC.UI_TEXT.PREV_PAGE)
     self.prevButton:SetScript("OnClick", function() self:ChangePage(-1) end)
     
     -- Next page button
     self.nextButton = CreateFrame("Button", nil, self.paginationFrame, "UIPanelButtonTemplate")
-    self.nextButton:SetSize(30, 25)
+    self.nextButton:SetSize(TC.UI_SIZES.PAGINATION.buttonWidth, TC.UI_SIZES.PAGINATION.buttonHeight)
     self.nextButton:SetPoint("LEFT", self.paginationFrame, "CENTER", 10, 0)
-    self.nextButton:SetText(">")
+    self.nextButton:SetText(TC.UI_TEXT.NEXT_PAGE)
     self.nextButton:SetScript("OnClick", function() self:ChangePage(1) end)
     
     -- Page text
@@ -248,7 +234,7 @@ function TC_AH_New:CreateAppearanceGrid()
     
     -- Initialize variables
     self.currentPage = 1
-    self.itemsPerPage = 12  -- 3x4 grid
+    self.itemsPerPage = TC.UI_SIZES.ITEMS_PER_PAGE  -- 3x4 grid
     self.appearanceCards = {}
 end
 
@@ -295,21 +281,7 @@ end
 
 function TC_AH_New:FilterBySlot(slotID)
     -- Convert our slot ID to inventory type
-    local slotToInvType = {
-        HEAD = "INVTYPE_HEAD",
-        SHOULDER = "INVTYPE_SHOULDER",
-        BACK = "INVTYPE_CLOAK",
-        CHEST = "INVTYPE_CHEST",
-        WRIST = "INVTYPE_WRIST",
-        HANDS = "INVTYPE_HAND",
-        WAIST = "INVTYPE_WAIST",
-        LEGS = "INVTYPE_LEGS",
-        FEET = "INVTYPE_FEET",
-        MAINHAND = "INVTYPE_WEAPON",
-        OFFHAND = "INVTYPE_WEAPON",
-    }
-
-    local invType = slotToInvType[slotID]
+    local invType = TC.SLOT_TO_INVTYPE[slotID]
     if not invType then return end
 
     print("TC: Filtering for slot:", slotID, "invType:", invType)
@@ -320,18 +292,8 @@ function TC_AH_New:FilterBySlot(slotID)
     end
 
     -- Create the browse query following the documentation
-    local query = {
-        searchString = "",
-        sorts = {
-            {sortOrder = Enum.AuctionHouseSortOrder.Price, reverseSort = false},
-            {sortOrder = Enum.AuctionHouseSortOrder.Name, reverseSort = false},
-        },
-        filters = {
-            Enum.AuctionHouseFilter.UncommonQuality,
-            Enum.AuctionHouseFilter.RareQuality,
-            Enum.AuctionHouseFilter.EpicQuality,
-        }
-    }
+    local query = TC.BuildAHQuery()
+    query.searchString = ""
 
     print("TC: Sending browse query:", query)
 
@@ -387,57 +349,15 @@ function TC_AH_New:FilterBySlot(slotID)
 end
 
 function TC_AH_New:GetCameraConfigForSlot(slotID)
-    local configs = {
-        FEET = {
-            modelPosition = { x = 0, y = 0, z = 0.69733393192291 },
-            modelScale = 1.0,
-            position = { x = 1.5532778501511, y = 0.010369626805186, z = 0.71548467874527 },
-            facing = 24.784032821655,
-            distance = 1.5,
-            target = { x = -0.041362285614014, y = 0.011449351906776, z = 0.70138305425644 }
-        },
-        HEAD = {
-            modelPosition = { x = 0, y = 0, z = 0 },
-            modelScale = 1.0,
-            position = { x = 0, y = 0, z = 1 },
-            facing = 0,
-            distance = 0.3,
-            target = { x = 0, y = 0, z = 0 }
-        },
-        CHEST = {
-            modelPosition = { x = 0, y = 0, z = 1.5 },
-            modelScale = 1.2,
-            position = { x = 0, y = 0, z = 0 },
-            facing = 0,
-            distance = 0.7,
-            target = { x = 0, y = 0, z = 0 }
-        },
-        LEGS = {
-            modelPosition = { x = 0, y = 0, z = 3 },
-            modelScale = 1.3,
-            position = { x = 0, y = 0, z = -0.5 },
-            facing = 0,
-            distance = 0.8,
-            target = { x = 0, y = 0, z = 0 }
-        }
-    }
-    
-    return configs[slotID] or {
-        modelPosition = { x = 0, y = 0, z = 0 },
-        modelScale = 1.0,
-        position = { x = 0, y = 0, z = 0 },
-        facing = 0,
-        distance = 1,
-        target = { x = 0, y = 0, z = 0 }
-    }
+    return (TC.CAMERA_CONFIGS and TC.CAMERA_CONFIGS[slotID]) or TC.DEFAULT_CAMERA
 end
 
 function TC_AH_New:CreateAppearanceCards(appearances)
     if not appearances or #appearances == 0 then return end
     
-    local cardSize = 140
-    local padding = 8
-    local cardsPerRow = 4
+    local cardSize = TC.UI_SIZES.GRID.cardSize
+    local padding = TC.UI_SIZES.GRID.padding
+    local cardsPerRow = TC.UI_SIZES.GRID.cardsPerRow
     
     for i, appearance in ipairs(appearances) do
         local row = math.floor((i-1) / cardsPerRow)
@@ -499,8 +419,8 @@ function TC_AH_New:CreateTab()
     -- Create a tab button using the correct template
     local tab = CreateFrame("Button", "TC_TransmogTab_New", AuctionHouseFrame, "AuctionHouseFrameTabTemplate")
     tab:SetID(tabID)
-    tab:SetText("Transmog")
-    tab:SetPoint("LEFT", AuctionHouseFrame.Tabs[numTabs], "RIGHT", -15, 0)
+    tab:SetText(TC.UI_TEXT.TAB)
+    tab:SetPoint("LEFT", AuctionHouseFrame.Tabs[numTabs], "RIGHT", TC.UI_OFFSETS.TAB_BUTTON_X_OFFSET, 0)
 
     -- Store tabID for visibility handling
     self.tabID = tabID

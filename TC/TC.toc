@@ -3,6 +3,7 @@
 ## Notes: Transmog Checker Addon for Classic (using TC naming convention)
 ## Author: YourName
 
+Common/TC_Constants.lua
 Common/TC_ItemChecker.lua
 Tooltip/TC_Tooltip.lua
 AH/TC_AHLoader.lua

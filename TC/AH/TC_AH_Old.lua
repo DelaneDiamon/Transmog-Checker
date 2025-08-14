@@ -25,11 +25,11 @@ function TC_AH_Old:Init()
         local itemLink = GetAuctionItemLink("list", index)
         if itemLink then
             local status, eligible, altSources = TC_ItemChecker:GetTransmogStatus(itemLink)
-            if status == 1 or status == 2 then  -- Model or exact is collected: bright green
-                button.transmogOverlay:SetColorTexture(0, 1, 0, 0.3)
+            if status == TC.STATUS.EXACT_COLLECTED or status == TC.STATUS.MODEL_COLLECTED then  -- collected
+                button.transmogOverlay:SetColorTexture(unpack(TC.UI_COLORS.OLD_AH.OVERLAY_COLLECTED))
                 button.transmogOverlay:Show()
-            elseif status == 4 or status == 5 then  -- Class invalid: red
-                button.transmogOverlay:SetColorTexture(1, 0, 0, 0.3)
+            elseif status == TC.STATUS.NOT_COLLECTABLE_BY_CLASS then  -- Class invalid
+                button.transmogOverlay:SetColorTexture(unpack(TC.UI_COLORS.OLD_AH.OVERLAY_INVALID))
                 button.transmogOverlay:Show()
             else
                 button.transmogOverlay:Hide()
@@ -73,14 +73,14 @@ function TC_AH_Old:Init()
     end
 
     local toggleButton = CreateFrame("CheckButton", nil, AuctionFrame, "ChatConfigCheckButtonTemplate")
-    toggleButton:SetSize(24, 24)
-    toggleButton:SetPoint("TOPLEFT", AuctionFrame, "TOPLEFT", 540, -36)
-    toggleButton.tooltip = "Hide items that are either already collected or not eligible for transmog."
+    toggleButton:SetSize(TC.OLD_AH_TOGGLE.WIDTH, TC.OLD_AH_TOGGLE.HEIGHT)
+    toggleButton:SetPoint("TOPLEFT", AuctionFrame, "TOPLEFT", TC.OLD_AH_TOGGLE.POINT.x, TC.OLD_AH_TOGGLE.POINT.y)
+    toggleButton.tooltip = TC.OLD_AH_TOGGLE.TOOLTIP
 
     local checkboxText = toggleButton:CreateFontString(nil, "ARTWORK", "GameFontNormalSmall")
     checkboxText:SetPoint("LEFT", toggleButton, "RIGHT", 5, 0)
-    checkboxText:SetText("Not collected for transmog")
-    checkboxText:SetTextColor(1, 0, 0, 1)
+    checkboxText:SetText(TC.OLD_AH_TOGGLE.LABEL)
+    checkboxText:SetTextColor(unpack(TC.UI_COLORS.OLD_AH.LABEL_COLOR))
 
     AuctionFrame:HookScript("OnUpdate", function()
         if PanelTemplates_GetSelectedTab(AuctionFrame) == 1 then

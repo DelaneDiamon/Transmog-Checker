@@ -1,3 +1,4 @@
+TC = TC or {}
 TC_ItemChecker = TC_ItemChecker or {}
 TC_ItemChecker.debug = false -- Debug flag, off by default
 
@@ -6,14 +7,6 @@ function TC_ItemChecker:Debug(...)
         print("|cFF9D9D9DTC Debug:|r", ...)
     end
 end
-
--- Status codes
-local STATUS_EXACT_COLLECTED = 1
-local STATUS_MODEL_COLLECTED = 2
-local STATUS_MODEL_NOT_COLLECTED = 3
-local STATUS_NOT_COLLECTABLE_BY_CLASS = 4
-local STATUS_INVALID_CLASS_TO_COLLECT = 5
-local STATUS_NO_INFO_YET = 6 -- New: neutral state for missing/uncached API data
 
 -- Add command to toggle debug mode
 SLASH_TC1 = "/tc"
@@ -24,28 +17,6 @@ SlashCmdList["TC"] = function(msg)
     end
 end
 
-local validEquipLocs = {
-    ["INVTYPE_HEAD"]        = true,
-    ["INVTYPE_SHOULDER"]    = true,
-    ["INVTYPE_BODY"]        = true,
-    ["INVTYPE_CHEST"]       = true,
-    ["INVTYPE_ROBE"]        = true,
-    ["INVTYPE_WAIST"]       = true,
-    ["INVTYPE_LEGS"]        = true,
-    ["INVTYPE_FEET"]        = true,
-    ["INVTYPE_WRIST"]       = true,
-    ["INVTYPE_HAND"]        = true,
-    ["INVTYPE_CLOAK"]       = true,
-    ["INVTYPE_WEAPON"]      = true,
-    ["INVTYPE_SHIELD"]      = true,
-    ["INVTYPE_2HWEAPON"]    = true,
-    ["INVTYPE_WEAPONMAINHAND"] = true,
-    ["INVTYPE_WEAPONOFFHAND"]  = true,
-    ["INVTYPE_HOLDABLE"]    = true,
-    ["INVTYPE_TABARD"]      = true,
-    ["INVTYPE_RANGED"]      = true, 
-    ["INVTYPE_RANGEDRIGHT"] = true,
-}
 
 -- Helper to obtain class/subclass across Classic/Retail differences of GetItemInfoInstant
 local function GetItemClassAndSubClass(item)
@@ -61,43 +32,23 @@ local function GetItemClassAndSubClass(item)
     return classID, subClassID
 end
 
--- List of equipment slots where the allowed armor subtype check applies.
-local armorSlotsThatRequireAllowedCheck = {
-    ["INVTYPE_HEAD"]      = true,
-    ["INVTYPE_SHOULDER"]  = true,
-    ["INVTYPE_CHEST"]     = true,
-    ["INVTYPE_WRIST"]     = true,
-    ["INVTYPE_HAND"]      = true,
-    ["INVTYPE_WAIST"]     = true,  -- belt
-    ["INVTYPE_LEGS"]      = true,
-    ["INVTYPE_FEET"]      = true,
-}
 
 local function GetAllowedArmorForPlayer()
     local playerClass = select(2, UnitClass("player"))
     local playerLevel = UnitLevel("player")
-    local mapping = {
-        DEATHKNIGHT = 4,                           -- Plate
-        WARRIOR     = (playerLevel < 40) and 3 or 4,  -- Mail/Plate
-        PALADIN     = (playerLevel < 40) and 3 or 4,  -- Mail/Plate
-        HUNTER      = (playerLevel < 40) and 2 or 3,  -- Leather/Mail
-        ROGUE       = 2,                           -- Leather
-        PRIEST      = 1,                           -- Cloth
-        SHAMAN      = (playerLevel < 40) and 2 or 3,  -- Leather/Mail
-        MAGE        = 1,                           -- Cloth
-        WARLOCK     = 1,                           -- Cloth
-        MONK        = 2,                           -- Leather
-        DRUID       = 2,                           -- Leather
-        DEMONHUNTER = 2,                           -- Leather
-    }
-    return mapping[playerClass]
+    local classRule = TC.CLASS_TO_ARMOR[playerClass]
+    if type(classRule) == "table" then
+        return (playerLevel < TC.CLASS_ARMOR_UPGRADE_LEVEL) and classRule.low or classRule.high
+    else
+        return classRule
+    end
 end
 
 -- Determine if the player can collect the given source/item by class rules
 local function IsPlayerEligibleForItem(hoveredSourceID, itemClassID, itemEquipLoc, itemSubClassID)
     -- For armor, use strict armor-type rule first. Do not trust source info flags
     -- because playerCanCollect may be false for BoE or not-in-inventory items.
-    if itemClassID == 4 and armorSlotsThatRequireAllowedCheck[itemEquipLoc] then
+    if itemClassID == TC.ITEM_CLASS.ARMOR and TC.ARMOR_SLOTS_REQUIRE_CHECK[itemEquipLoc] then
         local allowedType = GetAllowedArmorForPlayer()
         local eligible = (itemSubClassID == allowedType)
         TC_ItemChecker:Debug(string.format("Armor eligibility fallback: itemSubClass=%s, allowed=%s -> %s",
@@ -161,7 +112,7 @@ local function ProcessSource(source, hoveredSourceID, allowedType, itemClassID, 
         return false, nil 
     end
     
-    if itemClassID == 4 and armorSlotsThatRequireAllowedCheck[itemEquipLoc] then
+    if itemClassID == 4 and TC.ARMOR_SLOTS_REQUIRE_CHECK[itemEquipLoc] then
         TC_ItemChecker:Debug(string.format("Checking armor type. Required: %d, Found: %d", allowedType, sSubClassID))
         if sSubClassID ~= allowedType then 
             TC_ItemChecker:Debug("Wrong armor type")
@@ -247,7 +198,7 @@ function TC_ItemChecker:GetTransmogStatus(itemLink)
 
     -- Check if item belongs to valid equipment slot
     local _, _, _, _, _, _, _, _, itemEquipLoc = GetItemInfo(itemLink)
-    if not itemEquipLoc or not validEquipLocs[itemEquipLoc] then
+    if not itemEquipLoc or not TC.VALID_EQUIP_LOCS[itemEquipLoc] then
         TC_ItemChecker:Debug(string.format("No valid equipment slot"))
         return nil  -- Only return nil for invalid equipment slots
     end
@@ -255,15 +206,15 @@ function TC_ItemChecker:GetTransmogStatus(itemLink)
 
     -- Get item class info
     local itemClassID, itemSubClassID = GetItemClassAndSubClass(itemLink)
-    if itemClassID ~= 4 and itemClassID ~= 2 then -- Not armor or weapon
+    if itemClassID ~= TC.ITEM_CLASS.ARMOR and itemClassID ~= TC.ITEM_CLASS.WEAPON then -- Not armor or weapon
         TC_ItemChecker:Debug(string.format("Not armor or weapon"))
-        return STATUS_NO_INFO_YET, false  -- Neutral for non-armor/weapon
+        return TC.STATUS.NO_INFO_YET, false  -- Neutral for non-armor/weapon
     end
 
     -- Check if armor type is allowed for player
     local allowedType = GetAllowedArmorForPlayer()
     local isAllowedArmor = true
-    if itemClassID == 4 and armorSlotsThatRequireAllowedCheck[itemEquipLoc] then
+    if itemClassID == TC.ITEM_CLASS.ARMOR and TC.ARMOR_SLOTS_REQUIRE_CHECK[itemEquipLoc] then
         isAllowedArmor = (itemSubClassID == allowedType)
         TC_ItemChecker:Debug(string.format("Armor type is allowed: %d", isAllowedArmor))
     end
@@ -278,7 +229,7 @@ function TC_ItemChecker:GetTransmogStatus(itemLink)
         if itemID and C_Item and C_Item.IsItemDataCachedByID and not C_Item.IsItemDataCachedByID(itemID) then
             if C_Item.RequestLoadItemDataByID then C_Item.RequestLoadItemDataByID(itemID) end
         end
-        return STATUS_NO_INFO_YET, false
+        return TC.STATUS.NO_INFO_YET, false
     end
 
     -- Check if exact appearance is collected
@@ -295,23 +246,23 @@ function TC_ItemChecker:GetTransmogStatus(itemLink)
     -- Return appropriate status
     if exactCollected then
         TC_ItemChecker:Debug(string.format("Exact collected"))
-        return STATUS_EXACT_COLLECTED, true, altSources -- EXACT COLLECTED
+        return TC.STATUS.EXACT_COLLECTED, true, altSources -- EXACT COLLECTED
     elseif modelCollected then
         TC_ItemChecker:Debug(string.format("Model collected"))
-        return STATUS_MODEL_COLLECTED, true, altSources -- MODEL COLLECTED
+        return TC.STATUS.MODEL_COLLECTED, true, altSources -- MODEL COLLECTED
     elseif IsPlayerEligibleForItem(hoveredSourceID, itemClassID, itemEquipLoc, itemSubClassID) then
         TC_ItemChecker:Debug(string.format("Allowed armor"))
-        return STATUS_MODEL_NOT_COLLECTED, true, altSources -- MODEL NOT COLLECTED
+        return TC.STATUS.MODEL_NOT_COLLECTED, true, altSources -- MODEL NOT COLLECTED
     end
 
     if not IsPlayerEligibleForItem(hoveredSourceID, itemClassID, itemEquipLoc, itemSubClassID) then
         TC_ItemChecker:Debug("Not collectable by class")
-        return STATUS_NOT_COLLECTABLE_BY_CLASS, false
+        return TC.STATUS.NOT_COLLECTABLE_BY_CLASS, false
     end
 
     TC_ItemChecker:Debug(string.format("No definitive info; neutral state"))
     -- Switch to neutral state if we reached here without definitive info
-    return STATUS_NO_INFO_YET, false
+    return TC.STATUS.NO_INFO_YET, false
 
 end
 
