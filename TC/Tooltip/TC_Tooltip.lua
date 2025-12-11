@@ -26,7 +26,22 @@ GameTooltip:HookScript("OnTooltipSetItem", function(tooltip)
             -- Show alternative sources for statuses 1, 2, 3, and 4
             if (status == TC.STATUS.EXACT_COLLECTED or status == TC.STATUS.MODEL_COLLECTED or status == TC.STATUS.MODEL_NOT_COLLECTED or status == TC.STATUS.NOT_COLLECTABLE_BY_CLASS) and altSources then
                 for _, alt in ipairs(altSources) do
-                    local altHex = select(4, GetItemQualityColor(alt.quality)) or "FFFFFFFF"
+                    -- Defensive: try to resolve quality via API if missing to keep color accurate for new items
+                    local altQuality = alt.quality
+                    if not altQuality and alt.itemID then
+                        local _, _, fetchedQuality = GetItemInfo(alt.itemID)
+                        if fetchedQuality then
+                            altQuality = fetchedQuality
+                        elseif C_Item and C_Item.RequestLoadItemDataByID then
+                            C_Item.RequestLoadItemDataByID(alt.itemID)
+                        end
+                    end
+
+                    local altHex = "FFFFFFFF"
+                    if altQuality ~= nil then
+                        local _, _, _, qHex = GetItemQualityColor(altQuality)
+                        if qHex then altHex = qHex end
+                    end
                     local sourceType = TC.SOURCE_TYPES[alt.sourceType]
                     if sourceType then
                         tooltip:AddLine(string.format("|c%sALT:|r |c%s%s|r |c%s[%d] (%s)|r", 

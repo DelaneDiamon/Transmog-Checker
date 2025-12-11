@@ -172,15 +172,22 @@ local function BuildAlternativeSources(appearanceID, hoveredSourceID)
             local info = C_TransmogCollection.GetSourceInfo and C_TransmogCollection.GetSourceInfo(sid)
             if info and info.itemID then
                 local name = info.name
-                if not name then
-                    name = (GetItemInfo(info.itemID))
+                local quality = info.quality
+                local fetchedName, _, fetchedQuality = GetItemInfo(info.itemID)
+                if not name and fetchedName then name = fetchedName end
+                if quality == nil and fetchedQuality then quality = fetchedQuality end
+
+                -- If data isn't cached yet, request it and skip showing placeholders
+                if not name and C_Item and C_Item.IsItemDataCachedByID and not C_Item.IsItemDataCachedByID(info.itemID) then
+                    if C_Item.RequestLoadItemDataByID then C_Item.RequestLoadItemDataByID(info.itemID) end
+                else
+                    table.insert(alternatives, {
+                        name = name or ("item:" .. tostring(info.itemID)),
+                        quality = quality,
+                        itemID = info.itemID,
+                        sourceType = info.sourceType or info.categoryID, -- try sourceType; fallback to categoryID
+                    })
                 end
-                table.insert(alternatives, {
-                    name = name or ("item:" .. tostring(info.itemID)),
-                    quality = info.quality,
-                    itemID = info.itemID,
-                    sourceType = info.sourceType or info.categoryID, -- try sourceType; fallback to categoryID
-                })
             end
         end
     end
