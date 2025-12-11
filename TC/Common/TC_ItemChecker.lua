@@ -1,19 +1,9 @@
 TC = TC or {}
 TC_ItemChecker = TC_ItemChecker or {}
-TC_ItemChecker.debug = false -- Debug flag, off by default
 
 function TC_ItemChecker:Debug(...)
-    if TC_ItemChecker.debug then
+    if TC.Config and TC.Config.debug then
         print("|cFF9D9D9DTC Debug:|r", ...)
-    end
-end
-
--- Add command to toggle debug mode
-SLASH_TC1 = "/tc"
-SlashCmdList["TC"] = function(msg)
-    if msg == "debug" then
-        TC_ItemChecker.debug = not TC_ItemChecker.debug
-        print("|cFF9D9D9DTC:|r Debug mode " .. (TC_ItemChecker.debug and "enabled" or "disabled"))
     end
 end
 
@@ -38,9 +28,9 @@ local function GetAllowedArmorForPlayer()
     local playerLevel = UnitLevel("player")
     local classRule = TC.CLASS_TO_ARMOR[playerClass]
     if type(classRule) == "table" then
-        return (playerLevel < TC.CLASS_ARMOR_UPGRADE_LEVEL) and classRule.low or classRule.high
+        return (playerLevel < TC.CLASS_ARMOR_UPGRADE_LEVEL) and classRule.low or classRule.high, classRule
     else
-        return classRule
+        return classRule, classRule
     end
 end
 
@@ -203,12 +193,26 @@ function TC_ItemChecker:GetTransmogStatus(itemLink)
         return nil 
     end
 
-    -- Check if item belongs to valid equipment slot
-    local _, _, _, _, _, _, _, _, itemEquipLoc = GetItemInfo(itemLink)
+    local itemID = select(1, GetItemInfoInstant(itemLink))
+    local _, _, itemQuality, _, requiredLevel, _, _, _, itemEquipLoc = GetItemInfo(itemLink)
+    local playerLevel = UnitLevel("player")
+
     if not itemEquipLoc or not TC.VALID_EQUIP_LOCS[itemEquipLoc] then
         TC_ItemChecker:Debug(string.format("No valid equipment slot"))
         return nil  -- Only return nil for invalid equipment slots
     end
+
+    -- Skip non-moggable poor/common items if configured
+    if TC.Config and TC.Config.skipPoorAndCommon and itemQuality and itemQuality <= 1 then
+        TC_ItemChecker:Debug("Skipping grey/white item due to config")
+        return nil
+    end
+
+    if not itemQuality and itemID and C_Item and C_Item.IsItemDataCachedByID and not C_Item.IsItemDataCachedByID(itemID) then
+        if C_Item.RequestLoadItemDataByID then C_Item.RequestLoadItemDataByID(itemID) end
+    end
+
+    -- Check if item belongs to valid equipment slot
     
 
     -- Get item class info
@@ -218,12 +222,25 @@ function TC_ItemChecker:GetTransmogStatus(itemLink)
         return TC.STATUS.NO_INFO_YET, false  -- Neutral for non-armor/weapon
     end
 
-    -- Check if armor type is allowed for player
-    local allowedType = GetAllowedArmorForPlayer()
-    local isAllowedArmor = true
+    -- Armor/class eligibility, including future upgrade at level 40
+    local allowedTypeNow, classRule = GetAllowedArmorForPlayer()
+    local armorUnlockLevel = nil
+    local eligibleByArmor = true
+    local armorNever = false
     if itemClassID == TC.ITEM_CLASS.ARMOR and TC.ARMOR_SLOTS_REQUIRE_CHECK[itemEquipLoc] then
-        isAllowedArmor = (itemSubClassID == allowedType)
-        TC_ItemChecker:Debug(string.format("Armor type is allowed: %d", isAllowedArmor))
+        eligibleByArmor = (itemSubClassID == allowedTypeNow)
+        if not eligibleByArmor then
+            if type(classRule) == "table" then
+                if itemSubClassID == classRule.high and playerLevel < TC.CLASS_ARMOR_UPGRADE_LEVEL then
+                    armorUnlockLevel = TC.CLASS_ARMOR_UPGRADE_LEVEL
+                else
+                    armorNever = true
+                end
+            else
+                armorNever = true
+            end
+        end
+        TC_ItemChecker:Debug(string.format("Armor allowed now=%s, unlock=%s, never=%s", tostring(eligibleByArmor), tostring(armorUnlockLevel), tostring(armorNever)))
     end
 
     -- Get appearance info
@@ -250,6 +267,18 @@ function TC_ItemChecker:GetTransmogStatus(itemLink)
 
     local altSources = BuildAlternativeSources(appearanceID, hoveredSourceID)
 
+    -- Consolidated required level: item requirement and armor proficiency unlock
+    local gateLevel = requiredLevel or 0
+    if armorUnlockLevel and armorUnlockLevel > gateLevel then
+        gateLevel = armorUnlockLevel
+    end
+
+    -- Determine eligibility for non-armor or already-allowed armor
+    local eligibleByClass = eligibleByArmor
+    if itemClassID ~= TC.ITEM_CLASS.ARMOR or not TC.ARMOR_SLOTS_REQUIRE_CHECK[itemEquipLoc] then
+        eligibleByClass = IsPlayerEligibleForItem(hoveredSourceID, itemClassID, itemEquipLoc, itemSubClassID)
+    end
+
     -- Return appropriate status
     if exactCollected then
         TC_ItemChecker:Debug(string.format("Exact collected"))
@@ -257,12 +286,18 @@ function TC_ItemChecker:GetTransmogStatus(itemLink)
     elseif modelCollected then
         TC_ItemChecker:Debug(string.format("Model collected"))
         return TC.STATUS.MODEL_COLLECTED, true, altSources -- MODEL COLLECTED
-    elseif IsPlayerEligibleForItem(hoveredSourceID, itemClassID, itemEquipLoc, itemSubClassID) then
+    elseif armorNever then
+        TC_ItemChecker:Debug("Not collectable by class (armor type never available)")
+        return TC.STATUS.NOT_COLLECTABLE_BY_CLASS, false
+    elseif gateLevel > 0 and playerLevel < gateLevel then
+        TC_ItemChecker:Debug(string.format("Level gate: player %d, required %d", playerLevel, gateLevel))
+        return TC.STATUS.LEVEL_TOO_LOW, false, altSources, gateLevel
+    elseif eligibleByClass then
         TC_ItemChecker:Debug(string.format("Allowed armor"))
         return TC.STATUS.MODEL_NOT_COLLECTED, true, altSources -- MODEL NOT COLLECTED
     end
 
-    if not IsPlayerEligibleForItem(hoveredSourceID, itemClassID, itemEquipLoc, itemSubClassID) then
+    if not eligibleByClass then
         TC_ItemChecker:Debug("Not collectable by class")
         return TC.STATUS.NOT_COLLECTABLE_BY_CLASS, false
     end

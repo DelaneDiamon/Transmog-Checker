@@ -2,10 +2,42 @@ if not TC_ItemChecker then
     print("TC_Tooltip: Missing dependency TC_ItemChecker!")
     return
 end
+
+local hideStrings
+local function StripBlizzardNotCollected(tooltip)
+    if not (TC.Config and TC.Config.filterBlizzNotCollectedLine) then return end
+    if not hideStrings then
+        hideStrings = {}
+        local candidates = {
+            _G.TRANSMOGRIFY_TOOLTIP_APPEARANCE_UNKNOWN,
+            _G.TRANSMOGRIFY_TOOLTIP_APPEARANCE_UNCOLLECTED,
+            _G.TRANSMOGRIFY_TOOLTIP_APPEARANCE_NOT_COLLECTED,
+            _G.TRANSMOGRIFY_TOOLTIP_ITEM_UNKNOWN_APPEARANCE,
+        }
+        for _, s in ipairs(candidates) do
+            if type(s) == "string" and s ~= "" then
+                hideStrings[s] = true
+            end
+        end
+    end
+
+    local name = tooltip:GetName()
+    for i = 1, tooltip:NumLines() do
+        local line = _G[name .. "TextLeft" .. i]
+        if line then
+            local text = line:GetText()
+            if text and hideStrings[text] then
+                line:SetText("")
+                line:Hide()
+            end
+        end
+    end
+end
+
 GameTooltip:HookScript("OnTooltipSetItem", function(tooltip)
     local _, itemLink = tooltip:GetItem()
     if itemLink then
-        local status, eligible, altSources = TC_ItemChecker:GetTransmogStatus(itemLink)
+        local status, eligible, altSources, requiredLevel = TC_ItemChecker:GetTransmogStatus(itemLink)
 
         if status then
             TC_ItemChecker:Debug('Checking status %d', status)
@@ -17,14 +49,29 @@ GameTooltip:HookScript("OnTooltipSetItem", function(tooltip)
                 tooltip:AddLine("|c" .. TC.COLORS.PREFIX .. "TC:|r |c" .. (TC.COLORS.STATUS.MODEL_NOT) .. "MODEL NOT COLLECTED|r")
             elseif status == TC.STATUS.NOT_COLLECTABLE_BY_CLASS then
                 tooltip:AddLine("|c" .. TC.COLORS.PREFIX .. "TC:|r |c" .. (TC.COLORS.STATUS.NOT_COLLECTABLE) .. "NOT COLLECTABLE BY CLASS|r")
+            elseif status == TC.STATUS.LEVEL_TOO_LOW then
+                local reqText = requiredLevel and tostring(requiredLevel) or "?"
+                tooltip:AddLine("|c" .. TC.COLORS.PREFIX .. "TC:|r |c" .. (TC.COLORS.STATUS.MODEL_NOT) .. "MODEL NOT COLLECTED|r")
+                tooltip:AddLine("|c" .. TC.COLORS.PREFIX .. "TC:|r |c" .. (TC.COLORS.STATUS.LEVEL_LOW) .. "REQUIRES LEVEL " .. reqText .. " TO COLLECT|r")
             elseif status == TC.STATUS.NO_INFO_YET then
                 tooltip:AddLine("|c" .. TC.COLORS.PREFIX .. "TC:|r |c" .. (TC.COLORS.STATUS.NO_INFO) .. "No transmog info yet|r")
             end
 
             TC_ItemChecker:Debug('Showing alternatives %s', altSources)
 
-            -- Show alternative sources for statuses 1, 2, 3, and 4
-            if (status == TC.STATUS.EXACT_COLLECTED or status == TC.STATUS.MODEL_COLLECTED or status == TC.STATUS.MODEL_NOT_COLLECTED or status == TC.STATUS.NOT_COLLECTABLE_BY_CLASS) and altSources then
+            local showAlts = altSources
+                and (status == TC.STATUS.EXACT_COLLECTED
+                    or status == TC.STATUS.MODEL_COLLECTED
+                    or status == TC.STATUS.MODEL_NOT_COLLECTED
+                    or status == TC.STATUS.NOT_COLLECTABLE_BY_CLASS
+                    or status == TC.STATUS.LEVEL_TOO_LOW)
+
+            if showAlts and TC.Config and TC.Config.hideCollectedAlts
+                and (status == TC.STATUS.EXACT_COLLECTED or status == TC.STATUS.MODEL_COLLECTED) then
+                showAlts = false
+            end
+
+            if showAlts then
                 for _, alt in ipairs(altSources) do
                     -- Defensive: try to resolve quality via API if missing to keep color accurate for new items
                     local altQuality = alt.quality
@@ -64,6 +111,7 @@ GameTooltip:HookScript("OnTooltipSetItem", function(tooltip)
                 end
             end
             
+            StripBlizzardNotCollected(tooltip)
             tooltip:Show()
         end
     end

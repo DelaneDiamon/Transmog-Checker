@@ -2,6 +2,7 @@
 ## Title: TransmogChecker
 ## Notes: Transmog Checker Addon for Classic
 ## Author: YourName
+## SavedVariables: TransmogCheckerDB
 
 TransmogChecker.lua
 TC/Common/TC_Constants.lua
