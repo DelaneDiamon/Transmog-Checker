@@ -1,0 +1,50 @@
+name: Release on push
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Determine next version
+        id: vars
+        shell: bash
+        run: |
+          git fetch --tags --force
+          # Keep only semantic tags like 0.0.18 or v0.0.18
+          mapfile -t tags < <(git tag -l | sed 's/^v//' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$')
+
+          latest="0.0.0"
+          if [ ${#tags[@]} -gt 0 ]; then
+            latest=$(printf "%s\n" "${tags[@]}" | sort -V | tail -1)
+          fi
+
+          IFS='.' read -r major minor patch <<<"$latest"
+          if [ -z "$major" ] || [ -z "$minor" ] || [ -z "$patch" ]; then
+            echo "Unexpected tag format: $latest" >&2
+            exit 1
+          fi
+
+          next_tag="$major.$minor.$((patch + 1))"
+
+          echo "latest_tag=$latest" >> "$GITHUB_OUTPUT"
+          echo "next_tag=$next_tag" >> "$GITHUB_OUTPUT"
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.vars.outputs.next_tag }}
+          name: ${{ steps.vars.outputs.next_tag }}
+          target_commitish: ${{ github.sha }}
+          generate_release_notes: true
