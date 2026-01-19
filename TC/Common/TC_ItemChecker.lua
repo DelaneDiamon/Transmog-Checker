@@ -265,7 +265,27 @@ function TC_ItemChecker:GetTransmogStatus(itemLink)
         modelCollected = C_TransmogCollection.PlayerHasTransmog(appearanceID) and true or false
     end
 
-    local altSources = BuildAlternativeSources(appearanceID, hoveredSourceID)
+    -- Enumerate appearance sources to detect collected variants and build filtered alts
+    local altSources
+    if appearanceID and C_TransmogCollection and C_TransmogCollection.GetAppearanceSources then
+        local sources = C_TransmogCollection.GetAppearanceSources(appearanceID)
+        if sources and #sources > 0 then
+            local collectedFromSources, altsFromSources = CollectSources(sources, hoveredSourceID, allowedTypeNow, itemClassID, itemEquipLoc)
+            if collectedFromSources then
+                modelCollected = true
+            end
+            if altsFromSources and #altsFromSources > 0 then
+                altSources = altsFromSources
+            end
+            TC_ItemChecker:Debug(string.format("Appearance sources scanned: %d, collected=%s, alts=%d",
+                #sources, tostring(collectedFromSources), altsFromSources and #altsFromSources or 0))
+        end
+    end
+
+    -- Fallback alt list for clients without GetAppearanceSources
+    if not altSources then
+        altSources = BuildAlternativeSources(appearanceID, hoveredSourceID)
+    end
 
     -- Consolidated required level: item requirement and armor proficiency unlock
     local gateLevel = requiredLevel or 0

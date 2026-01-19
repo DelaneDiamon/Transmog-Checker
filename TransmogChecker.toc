@@ -1,7 +1,7 @@
 ## Interface: 50500
 ## Title: TransmogChecker
 ## Notes: Transmog Checker Addon for Classic
-## Author: YourName
+## Author: DelaneDiamon
 ## SavedVariables: TransmogCheckerDB
 
 TransmogChecker.lua
