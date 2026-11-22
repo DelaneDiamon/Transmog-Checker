@@ -1,3 +1,5 @@
+local addonName = ...
+
 TC = TC or {}
 
 -- Persistent config with defaults
@@ -8,14 +10,23 @@ local defaults = {
     debug = false,
 }
 
-TransmogCheckerDB = TransmogCheckerDB or {}
-for k, v in pairs(defaults) do
-    if TransmogCheckerDB[k] == nil then
-        TransmogCheckerDB[k] = v
-    end
-end
+-- The client loads TransmogCheckerDB after this file has run, so the config
+-- is bound once ADDON_LOADED says the saved table is in place.
+local loader = CreateFrame("Frame")
+loader:RegisterEvent("ADDON_LOADED")
+loader:SetScript("OnEvent", function(self, _, loadedAddon)
+    if loadedAddon ~= addonName then return end
+    self:UnregisterEvent("ADDON_LOADED")
 
-TC.Config = TransmogCheckerDB
+    TransmogCheckerDB = TransmogCheckerDB or {}
+    for k, v in pairs(defaults) do
+        if TransmogCheckerDB[k] == nil then
+            TransmogCheckerDB[k] = v
+        end
+    end
+
+    TC.Config = TransmogCheckerDB
+end)
 
 local function statusLabel(flag)
     return flag and "ON" or "OFF"
