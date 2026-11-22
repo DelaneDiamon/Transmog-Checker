@@ -1,4 +1,4 @@
-## Interface: 50500
+## Interface: 16001
 ## Title: TransmogChecker
 ## Notes: Transmog Checker Addon for Classic
 ## Author: DelaneDiamon

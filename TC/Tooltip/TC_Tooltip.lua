@@ -3,6 +3,10 @@ if not TC_ItemChecker then
     return
 end
 
+-- WoW: Forever has these only under C_Item; MoP Classic has the globals.
+local GetItemInfo = GetItemInfo or (C_Item and C_Item.GetItemInfo)
+local GetItemQualityColor = GetItemQualityColor or (C_Item and C_Item.GetItemQualityColor)
+
 local hideStrings
 local function StripBlizzardNotCollected(tooltip)
     if not (TC.Config and TC.Config.filterBlizzNotCollectedLine) then return end
@@ -34,7 +38,7 @@ local function StripBlizzardNotCollected(tooltip)
     end
 end
 
-GameTooltip:HookScript("OnTooltipSetItem", function(tooltip)
+local function AnnotateTooltip(tooltip)
     local _, itemLink = tooltip:GetItem()
     if itemLink then
         local status, eligible, altSources, requiredLevel = TC_ItemChecker:GetTransmogStatus(itemLink)
@@ -115,6 +119,18 @@ GameTooltip:HookScript("OnTooltipSetItem", function(tooltip)
             tooltip:Show()
         end
     end
-end)
+end
 
-print("TC_Tooltip: Module loaded.") 
+-- MoP Classic tooltips have the OnTooltipSetItem script; WoW: Forever dropped
+-- it and reports item tooltips through TooltipDataProcessor.
+if GameTooltip:HasScript("OnTooltipSetItem") then
+    GameTooltip:HookScript("OnTooltipSetItem", AnnotateTooltip)
+elseif TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall then
+    TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, function(tooltip)
+        if tooltip == GameTooltip then
+            AnnotateTooltip(tooltip)
+        end
+    end)
+end
+
+print("TC_Tooltip: Module loaded.")

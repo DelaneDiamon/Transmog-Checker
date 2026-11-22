@@ -1,6 +1,10 @@
 TC = TC or {}
 TC_ItemChecker = TC_ItemChecker or {}
 
+-- WoW: Forever has these only under C_Item; MoP Classic has the globals.
+local GetItemInfo = GetItemInfo or (C_Item and C_Item.GetItemInfo)
+local GetItemInfoInstant = GetItemInfoInstant or (C_Item and C_Item.GetItemInfoInstant)
+
 function TC_ItemChecker:Debug(...)
     if TC.Config and TC.Config.debug then
         print("|cFF9D9D9DTC Debug:|r", ...)
