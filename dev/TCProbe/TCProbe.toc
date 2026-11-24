@@ -1,0 +1,6 @@
+## Interface: 16001
+## Title: TCProbe
+## Notes: Dev probe for TransmogChecker. Records which transmog and auction APIs work on this client into SavedVariables.
+## SavedVariables: TCProbeDB
+
+TCProbe.lua
