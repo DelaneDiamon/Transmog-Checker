@@ -4372,9 +4372,15 @@ logout:SetScript("OnEvent", putBack)
 
 -- Each variant: written on one frame, read on the next and put back, read
 -- back on the frame after.
+-- Whether a run's filter readings are stepping through their frames: a
+-- second run would share unrestored and read the first run's writes as found.
+local running = false
 local function measure(entry, list, index, found)
     local variant = list[index]
-    if not variant then return say("filter readings done.") end
+    if not variant then
+        running = false
+        return say("filter readings done.")
+    end
     local problems = {}
     for _, write in ipairs(variant.writes) do
         local result = write.put(write.to)
@@ -4404,6 +4410,7 @@ local function probeSlot(word)
         for _, e in ipairs(TC and TC.Slots or {}) do keys[#keys + 1] = e.key end
         return print("TCProbe: /tcprobe slot <slot>, one of: " .. (keys[1] and table.concat(keys, " ") or "(TransmogChecker is not loaded)"))
     end
+    if running then return print(PREFIX .. "a run is still in progress; wait for \"filter readings done.\" (or /reload).") end
     db.slotProbe = {}
     say(("%s (inventory slot %d), auction house shown %s"):format(entry.key, entry.slotID,
         tostring(AuctionHouseFrame ~= nil and AuctionHouseFrame:IsShown() == true)))
@@ -4417,6 +4424,7 @@ local function probeSlot(word)
     if busy or not (C_Timer and C_Timer.After) then
         return say("filter readings skipped: close the auction house and Collections, then run this again.")
     end
+    running = true
     measure(entry, list, 1, found)
 end
 
