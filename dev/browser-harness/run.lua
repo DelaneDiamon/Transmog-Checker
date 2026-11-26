@@ -781,6 +781,55 @@ test("Items answers once, at most 2 s after the call, and marks the items that n
     equal(r.calls, 1, "done calls after the late item loaded")
 end)
 
+-- Testpass-1 B1: "invalid key to 'next'" at TC_Appearances.lua:612 when a
+-- waiter's done asked for more items (a click's next check) while the
+-- ITEM_DATA_LOAD_RESULT handler walked the waiters.
+local function itemsWalk(raises)
+    local appearances, sourceItems = {}, {}
+    for i = 1, 12 do
+        appearances[i] = { id = i, uiOrder = i, sources = { i * 10 + 1 }, classes = { [9] = true } }
+        -- 1 to 8 wait on the item that fails; 9 to 12 on items that load late
+        sourceItems[i * 10 + 1] = i <= 8 and 223250 or 600 + i
+    end
+    local items = { [223250] = { load = "fail" } }
+    for i = 9, 12 do items[600 + i] = { name = "Late " .. i, quality = 2, bindType = 2, load = 5 } end
+    local c = boot({ appearances = appearances, sourceItems = sourceItems, items = items })
+    local answers, next9 = {}, 9
+    for i = 1, 8 do
+        TC.Appearances.Items({ id = i, slot = "head" }, function(got)
+            answers[i] = (answers[i] or 0) + 1
+            equal(got[1].failed, true, "waiter " .. i .. ": the item marked failed")
+            -- new work while the walk runs, as a queued check starts
+            if next9 <= 12 then
+                local id = next9
+                next9 = next9 + 1
+                TC.Appearances.Items({ id = id, slot = "head" }, function() answers[id] = (answers[id] or 0) + 1 end)
+            end
+            if raises and i % 3 == 0 then error("fake: a waiter's done raised") end
+        end)
+    end
+    local ok, err = pcall(c.advance, 0.2)
+    check(ok, "no error from the item data handler, got " .. tostring(err))
+    for i = 1, 8 do equal(answers[i], 1, "waiter " .. i .. " answered at the failure") end
+    if raises then
+        equal(#c.errors, 2, "each raising done reported through the error handler")
+        for _, e in ipairs(c.errors) do check(e:find("a waiter's done raised", 1, true), "only the done's error, got " .. e) end
+    else
+        equal(#c.errors, 0, "errors reported")
+    end
+    c.advance(6)
+    for i = 9, 12 do equal(answers[i], 1, "waiter " .. i .. " registered during the walk answered") end
+    for i = 1, 8 do equal(answers[i], 1, "waiter " .. i .. " answered once") end
+end
+
+test("Items: every waiter is answered when an item fails, though a done asks for more items", function()
+    itemsWalk(false)
+end)
+
+test("Items: a waiter's done that raises is reported and stops no other waiter", function()
+    itemsWalk(true)
+end)
+
 ---------------------------------------------------------------- Check
 
 local BOE, BOP, QUEST = 2, 1, 4

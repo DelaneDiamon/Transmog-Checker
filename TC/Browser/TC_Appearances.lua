@@ -593,15 +593,24 @@ local function allLoaded(request)
     return true
 end
 
+-- An error in a done goes to the client's error handler and stops nothing
+-- here, as in the auction queue.
+local function report(err)
+    local handler = geterrorhandler and geterrorhandler()
+    if handler then handler(err) end
+end
+
 local function answer(request)
     if request.answered then return end
     request.answered = true
     pending[request] = nil
-    request.done(request.items)
+    xpcall(function() request.done(request.items) end, report)
 end
 
 local itemFrame = CreateFrame("Frame")
 -- ITEM_DATA_LOAD_RESULT(itemID, success), ItemDocumentation.lua:1855-1864.
+-- The waiters are walked from a copy: a done may ask for more items (the
+-- next check starts), which adds to pending while it is walked.
 itemFrame:RegisterEvent("ITEM_DATA_LOAD_RESULT")
 itemFrame:SetScript("OnEvent", function(_, _, itemID, success)
     if success == false then
@@ -609,7 +618,9 @@ itemFrame:SetScript("OnEvent", function(_, _, itemID, success)
     elseif asked[itemID] and Appearances.ItemName(itemID) and nameListener then
         nameListener(itemID)
     end
-    for request in pairs(pending) do
+    local waiters = {}
+    for request in pairs(pending) do waiters[#waiters + 1] = request end
+    for _, request in ipairs(waiters) do
         for _, item in ipairs(request.items) do
             if item.itemID == itemID and not readItem(item) and success == false then item.failed = true end
         end
