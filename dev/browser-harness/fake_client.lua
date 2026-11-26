@@ -148,6 +148,11 @@ end
 --   fileIDs         GetFileIDFromPath exists and answers these ({ [path] = id })
 --   realSortSources CollectionWardrobeUtil.SortSources is Blizzard's
 --   drops           { [sourceID] = drops } for GetAppearanceSourceDrops
+--   useErrors       { [sourceID] = text }: the sources' useError
+--   holidays        { [sourceID] = name } for GetSourceRequiredHoliday;
+--                   holidayRaises: it raises
+--   sets, setInfo, noSets: C_TransmogSets (see there)
+--   items also take minLevel and equipLoc (GetItemInfo, GetItemInfoInstant)
 --   an appearance's sourceTypes: the source type of each source (default 4)
 function Fake.new(opts)
     opts = opts or {}
@@ -481,6 +486,12 @@ function Fake.new(opts)
     WARDROBE_TOOLTIP_ENCOUNTER_SOURCE, WARDROBE_TOOLTIP_BOSS_DROP_FORMAT = "%s (%s)", "Drop: %s"
     WARDROBE_TOOLTIP_BOSS_DROP_FORMAT_WITH_DIFFICULTIES = "Drop: %s (%s)"
     WARDROBE_TOOLTIP_CYCLE_ARROW_ICON, WARDROBE_TOOLTIP_CYCLE_SPACER_ICON = "> ", "  "
+    TRANSMOG_APPEARANCE_USABLE_HOLIDAY = "Requires the holiday %s."
+    TRANSMOG_SOURCE_5 = "Achievement"
+    -- slot names by equip location (GlobalStrings, as Blizzard_EncounterJournal.lua:170-190 reads them)
+    INVTYPE_HEAD, INVTYPE_FEET, INVTYPE_WAIST, INVTYPE_BODY, INVTYPE_CLOAK = "Head", "Feet", "Waist", "Shirt", "Back"
+    INVTYPE_WEAPON, INVTYPE_SHIELD, INVTYPE_HOLDABLE, INVTYPE_RANGED = "One-Hand", "Off Hand", "Held In Off-hand", "Ranged"
+    INVTYPE_RANGEDRIGHT, INVTYPE_CHEST = "Ranged", "Chest"
     TooltipDataProcessor = { AddTooltipPostCall = function() end }
     UIParent = c.newWidget("Frame", "UIParent")
     GameFontNormal = not opts.noFontObjects and c.newWidget("Font", "GameFontNormal") or nil
@@ -869,7 +880,7 @@ function Fake.new(opts)
             c.instantCalls = (c.instantCalls or 0) + 1
             local d = itemDef(itemID)
             if not d.classID then return nil end
-            return itemID, "Armor", d.subType or "", "INVTYPE_FEET", 0, d.classID, d.subClassID
+            return itemID, "Armor", d.subType or "", d.equipLoc or "INVTYPE_FEET", 0, d.classID, d.subClassID
         end or nil,
         -- c.qualityColorRaises: the next that many calls raise
         GetItemQualityColor = function(quality)
@@ -883,13 +894,16 @@ function Fake.new(opts)
             if color then return color[1], color[2], color[3], "ff000000" end
             return 1, 1, 1, "ffffffff"
         end,
-        -- ItemDocumentation.lua: 1 name, 3 quality, 7 subtype, 14 bind type;
-        -- nothing until the data has loaded.
+        -- ItemDocumentation.lua:626-656: 1 name, 3 quality, 4 item level,
+        -- 5 required level (minLevel, default 1), 7 subtype, 9 equip
+        -- location (equipLoc, default INVTYPE_FEET), 14 bind type; nothing
+        -- until the data has loaded.
         GetItemInfo = function(itemID)
             c.itemInfoCalls = c.itemInfoCalls + 1
             if type(itemID) ~= "number" or not isLoaded(itemID) then return nil end
             local d = itemDef(itemID)
-            return d.name, "link", d.quality, 1, 1, "Armor", d.subType, 1, "INVTYPE_FEET", 0, 0, 4, 1, d.bindType
+            return d.name, "link", d.quality, 1, d.minLevel == nil and 1 or d.minLevel, "Armor", d.subType, 1,
+                d.equipLoc or "INVTYPE_FEET", 0, 0, d.classID or 4, d.subClassID or 1, d.bindType
         end,
         IsItemDataCachedByID = function(itemID) return isLoaded(itemID) end,
         -- ItemDocumentation.lua:1020-1036; the names are the fake's
@@ -1293,12 +1307,20 @@ function Fake.new(opts)
                 local loaded = isLoaded(itemID)
                 infos[i] = { sourceID = s, visualID = id, itemID = itemID, isCollected = collectedSources[s] == true,
                     sourceType = a.sourceTypes and a.sourceTypes[i] or 4, isValidSourceForPlayer = true,
-                    name = loaded and itemDef(itemID).name or nil, quality = loaded and itemDef(itemID).quality or nil }
+                    name = loaded and itemDef(itemID).name or nil, quality = loaded and itemDef(itemID).quality or nil,
+                    useError = (opts.useErrors or {})[s] }
             end
             return infos
         end,
         -- TransmogItemsDocumentation: a boss drop's encounters, from opts.drops[sourceID]
         GetAppearanceSourceDrops = function(sourceID) return (opts.drops or {})[sourceID] end,
+        -- TransmogItemsDocumentation.lua:647-661: the holiday's name or
+        -- nothing, from opts.holidays; holidayRaises: it raises
+        GetSourceRequiredHoliday = function(sourceID)
+            misuse(type(sourceID) == "number", "GetSourceRequiredHoliday with " .. type(sourceID))
+            if opts.holidayRaises then error("fake: GetSourceRequiredHoliday failed") end
+            return (opts.holidays or {})[sourceID]
+        end,
         PlayerHasTransmogItemModifiedAppearance = function(sourceID)
             return collectedSources[sourceID] == true
         end,
@@ -1366,6 +1388,19 @@ function Fake.new(opts)
     if opts.noList then T.GetCategoryAppearances = nil end
     if opts.noItemTransmog then T.GetItemInfo = nil end
     C_TransmogCollection = not opts.noTransmog and T or nil
+    -- TransmogSetsDocumentation.lua:167-181, 215-229, 520-540: the sets of
+    -- a source (opts.sets, { [sourceID] = { setID } }) and a set's info
+    -- (opts.setInfo, { [setID] = { name, label } }); noSets: no C_TransmogSets.
+    C_TransmogSets = not opts.noSets and {
+        GetSetsContainingSourceID = function(sourceID)
+            misuse(type(sourceID) == "number", "GetSetsContainingSourceID with " .. type(sourceID))
+            return (opts.sets or {})[sourceID]
+        end,
+        GetSetInfo = function(setID)
+            misuse(type(setID) == "number", "GetSetInfo with " .. type(setID))
+            return (opts.setInfo or {})[setID]
+        end,
+    } or nil
 
     -- What Blizzard's AUCTION_HOUSE_SHOW handler does before an addon's runs:
     -- load Blizzard_AuctionHouseUI, which makes the frame with its three tabs.

@@ -6855,12 +6855,13 @@ test("TC-35 tooltip: items in Collections' order with sources, collected marked,
     local c, frames = tipFixture()
     local requestsBefore = #c.loadRequests
     enter(frames[1])
-    equal(tipText(c), table.concat({ "Felcloth Boots", " ", "Other items using this appearance:",
+    equal(tipText(c), table.concat({ "Felcloth Boots", "Cloth, Feet",
+        "Binds when equipped: equip it or sell it to a vendor to collect.", " ", "Other items using this appearance:",
         "> Felcloth Boots | Collected", "  Abjurer's Boots | World Drop", "  Retrieving item information | Quest",
         "Click to check the auction house." }, "\n"), "the lines")
     local lines = GameTooltip.lines
-    equal(lines[4].rg .. "," .. lines[4].rb, "1,0.1", "Collected in green")
-    equal(lines[6].r .. "," .. lines[6].g, "1,0.125", "the loading name in red")
+    equal(lines[6].rg .. "," .. lines[6].rb, "1,0.1", "Collected in green")
+    equal(lines[8].r .. "," .. lines[8].g, "1,0.125", "the loading name in red")
     equal(#c.loadRequests - requestsBefore, 1, "item data asked for on hover")
     equal(requested(c, 503), 1, "for the item without a name, of this appearance")
     leave(frames[1])
@@ -6871,7 +6872,8 @@ test("TC-35 tooltip: items in Collections' order with sources, collected marked,
     -- one item: no list, its source under its name
     leave(frames[1])
     enter(frames[2])
-    equal(tipText(c), "Patchwork Shoes\nVendor\nClick to check the auction house.", "one item")
+    equal(tipText(c), "Patchwork Shoes\nVendor\nCloth, Feet\nBinds when equipped: equip it or sell it to a vendor to collect.\n"
+        .. "Click to check the auction house.", "one item")
     sentNothing(c, "hovering")
     noErrors(c, "tooltip")
 end)
@@ -7698,6 +7700,386 @@ test("TC-38 whole: opening the tab, the three weapon slots and every class entry
     c.advance(5)
     sentNothing(c, "weapon slots and classes")
     noErrors(c, "weapon slots and classes")
+end)
+
+---------------------------------------------------------------- TC-35 second part: a tooltip that says more than Collections
+
+-- One Head appearance with sources 21, 22, ... (types: their source types,
+-- default one boss drop), item 601, 602, ... each; the tile under the pointer.
+-- Every other opts field goes to the fake. Answers the client and the
+-- tooltip's texts.
+local function moreTip(opts, types)
+    types = types or { 1 }
+    local sources, sourceItems = {}, opts.sourceItems or {}
+    for i = 1, #types do
+        sources[i] = 20 + i
+        sourceItems[20 + i] = sourceItems[20 + i] or 600 + i
+    end
+    opts.appearances = opts.appearances or { { id = 2, uiOrder = 1, sources = sources, sourceTypes = types,
+        collectedSource = opts.collectedSource, classes = { [9] = true } } }
+    opts.sourceItems = sourceItems
+    local c, tabs = visitTwice(opts)
+    tabs[1].scripts.OnClick(tabs[1])
+    TC.BrowserState.SetFilter("All")
+    -- a class that wears every armor type, so no item type hides the tile
+    TC.BrowserState.SelectClass(1)
+    enter(tileFrames(c)[1])
+    return c, c.tooltipTexts()
+end
+local function drop(encounter, instance, difficulties)
+    return { encounter = encounter, instance = instance, instanceType = 1, tiers = { "Classic" }, difficulties = difficulties or {} }
+end
+-- texts[from .. to] joined by newlines
+local function span(texts, from, to)
+    return table.concat({ unpack(texts, from, to) }, "\n")
+end
+-- an item whose data is in, bind on pickup so no bind line is in the way
+local function item(fields)
+    local d = { name = "Thing", quality = 2, bindType = 0, subType = "Cloth", classID = 4, subClassID = 1 }
+    for k, v in pairs(fields or {}) do d[k] = v end
+    return d
+end
+
+test("TC-35b drops: a single drop with and without difficulties, as Collections words it", function()
+    local c, t = moreTip({ drops = { [21] = { drop("Ragnaros", "Molten Core") } } })
+    equal(t[2], "Drop: Ragnaros (Molten Core)", "one drop, no difficulties")
+    equal(t[3] and t[3]:find("^Boss drop") , nil, "no list header")
+    noErrors(c, "one drop")
+    c, t = moreTip({ drops = { [21] = { drop("Ragnaros", "Molten Core", { "Normal", "Heroic" }) } } })
+    equal(t[2], "Drop: Ragnaros (Molten Core) (Normal, Heroic)", "one drop with difficulties")
+    noErrors(c, "one drop with difficulties")
+end)
+
+test("TC-35b drops: several drops, one line each in the client's order, at most 6 and then and N more", function()
+    local function drops(n)
+        local list = {}
+        for i = 1, n do list[i] = drop("Boss " .. i, "Keep " .. i, i == 2 and { "Heroic" } or nil) end
+        return list
+    end
+    local c, t = moreTip({ drops = { [21] = drops(2) }, items = { [601] = item() } })
+    equal(span(t, 2, 5), "Boss drop:\nBoss 1 (Keep 1)\nBoss 2 (Keep 2) (Heroic)\nCloth, Feet", "two drops")
+    noErrors(c, "two drops")
+    c, t = moreTip({ drops = { [21] = drops(6) }, items = { [601] = item() } })
+    equal(span(t, 2, 9), "Boss drop:\nBoss 1 (Keep 1)\nBoss 2 (Keep 2) (Heroic)\nBoss 3 (Keep 3)\nBoss 4 (Keep 4)\n"
+        .. "Boss 5 (Keep 5)\nBoss 6 (Keep 6)\nCloth, Feet", "six drops: no more line")
+    c, t = moreTip({ drops = { [21] = drops(9) }, items = { [601] = item() } })
+    equal(span(t, 2, 10), "Boss drop:\nBoss 1 (Keep 1)\nBoss 2 (Keep 2) (Heroic)\nBoss 3 (Keep 3)\nBoss 4 (Keep 4)\n"
+        .. "Boss 5 (Keep 5)\nBoss 6 (Keep 6)\nand 3 more\nCloth, Feet", "nine drops")
+    noErrors(c, "nine drops")
+end)
+
+test("TC-35b drops: a boss source with no drop data, or an empty list, shows the source type", function()
+    for _, drops in ipairs({ {}, { [21] = {} } }) do
+        local c, t = moreTip({ drops = drops, items = { [601] = item() } })
+        equal(span(t, 1, 3), "Thing\nBoss Drop\nCloth, Feet", "no drop data")
+        noErrors(c, "no drop data")
+    end
+end)
+
+test("TC-35b profession: named only where the item's type settles it, plain Profession otherwise", function()
+    local cases = {
+        { "cloth robe", item({ classID = 4, subClassID = 1, equipLoc = "INVTYPE_CHEST" }), "Profession: Tailoring" },
+        { "leather", item({ classID = 4, subClassID = 2, subType = "Leather", equipLoc = "INVTYPE_WAIST" }), "Profession: Leatherworking" },
+        { "plate", item({ classID = 4, subClassID = 4, subType = "Plate" }), "Profession: Blacksmithing" },
+        { "wand", item({ classID = 2, subClassID = 19, subType = "Wands", equipLoc = "INVTYPE_RANGEDRIGHT" }), "Profession: Enchanting" },
+        { "gun", item({ classID = 2, subClassID = 3, subType = "Guns", equipLoc = "INVTYPE_RANGEDRIGHT" }), "Profession: Engineering" },
+        { "shirt", item({ classID = 4, subClassID = 0, subType = "Miscellaneous", equipLoc = "INVTYPE_BODY" }), "Profession: Tailoring" },
+        { "mail", item({ classID = 4, subClassID = 3, subType = "Mail" }), "Profession" },
+        { "cloak", item({ classID = 4, subClassID = 1, equipLoc = "INVTYPE_CLOAK" }), "Profession" },
+        { "shield", item({ classID = 4, subClassID = 6, subType = "Shields", equipLoc = "INVTYPE_SHIELD" }), "Profession" },
+        { "held in off-hand", item({ classID = 4, subClassID = 0, subType = "Miscellaneous", equipLoc = "INVTYPE_HOLDABLE" }), "Profession" },
+        { "sword", item({ classID = 2, subClassID = 7, subType = "Swords", equipLoc = "INVTYPE_WEAPON" }), "Profession" },
+        { "unknown class", item({ classID = false, subClassID = false }), "Profession" },
+    }
+    for _, case in ipairs(cases) do
+        if case[2].classID == false then case[2].classID, case[2].subClassID = nil, nil end
+        local c, t = moreTip({ items = { [601] = case[2] } }, { 6 })
+        equal(t[2], case[3], case[1])
+        noErrors(c, case[1])
+    end
+end)
+
+test("TC-35b profession: never named for a source whose type is not profession, whatever the item", function()
+    for _, kind in ipairs({ 1, 2, 3, 4, 5 }) do
+        for _, def in ipairs({ item({ classID = 4, subClassID = 1 }), item({ classID = 2, subClassID = 19, subType = "Wands" }),
+            item({ classID = 4, subClassID = 0, equipLoc = "INVTYPE_BODY" }) }) do
+            local c, t = moreTip({ items = { [601] = def } }, { kind })
+            local text = table.concat(t, "\n")
+            check(not text:find("Tailoring", 1, true) and not text:find("Enchanting", 1, true)
+                and not text:find("Profession", 1, true), "source type " .. kind .. ", got\n" .. text)
+            noErrors(c, "not profession")
+        end
+    end
+end)
+
+test("TC-35b item line: level and type joined by a middle dot, dimmed; level 1 or 0 left out", function()
+    local c, t = moreTip({ items = { [601] = item({ minLevel = 42, subType = "Leather", classID = 4, subClassID = 2,
+        equipLoc = "INVTYPE_WAIST" }) } }, { 4 })
+    equal(t[3], "Requires level 42 \194\183 Leather, Waist", "level and type")
+    local line = GameTooltip.lines[3]
+    equal(line.r .. "," .. line.g .. "," .. line.b, "0.5,0.5,0.5", "dimmed")
+    for _, level in ipairs({ 1, 0 }) do
+        c, t = moreTip({ items = { [601] = item({ minLevel = level, subType = "Swords", classID = 2, subClassID = 7,
+            equipLoc = "INVTYPE_WEAPON" }) } }, { 4 })
+        equal(t[3], "Swords, One-Hand", "level " .. level .. ": the weapon type only")
+    end
+    c, t = moreTip({ items = { [601] = item({ equipLoc = "INVTYPE_NOT_A_SLOT" }) } }, { 4 })
+    equal(t[3], "Cloth", "a slot without a client name: the subtype alone")
+    noErrors(c, "item line")
+end)
+
+test("TC-35b item line: left out with nothing loaded, then shown when the item's data arrives", function()
+    local c, t = moreTip({ items = { [601] = item({ minLevel = 10, load = 1 }) } }, { 4 })
+    equal(span(t, 1, 3), "Retrieving item information\nWorld Drop\nClick to check the auction house.", "nothing loaded")
+    c.advance(1.1)
+    t = c.tooltipTexts()
+    equal(span(t, 1, 3), "Thing\nWorld Drop\nRequires level 10 \194\183 Cloth, Feet", "loaded")
+    equal(requested(c, 601), 1, "asked for once")
+    sentNothing(c, "item line")
+    noErrors(c, "item line loads")
+end)
+
+test("TC-35b bind line: one for bind on equip, one for bind on pickup, none for other bind types", function()
+    local want = { [2] = "Binds when equipped: equip it or sell it to a vendor to collect.", [1] = "Binds when picked up." }
+    for _, bindType in ipairs({ 0, 1, 2, 3, 4, 7, 8 }) do
+        local c, t = moreTip({ items = { [601] = item({ bindType = bindType }) } }, { 4 })
+        equal(t[4], want[bindType] or "Click to check the auction house.", "bind type " .. bindType)
+        noErrors(c, "bind")
+    end
+end)
+
+test("TC-35b set line: the first set's name, with its label when it has one that differs", function()
+    local cases = {
+        { { name = "Battlegear of Might", label = "Tier 1" }, "Part of set: Battlegear of Might (Tier 1)" },
+        { { name = "Battlegear of Might", label = "" }, "Part of set: Battlegear of Might" },
+        { { name = "Battlegear of Might" }, "Part of set: Battlegear of Might" },
+        { { name = "Dusk", label = "Dusk" }, "Part of set: Dusk" },
+    }
+    for _, case in ipairs(cases) do
+        local c, t = moreTip({ items = { [601] = item() }, sets = { [21] = { 7, 8 } },
+            setInfo = { [7] = case[1], [8] = { name = "Second" } } }, { 4 })
+        equal(t[4], case[2], case[2])
+        noErrors(c, "set")
+    end
+    for _, opts in ipairs({ { sets = { [21] = {} } }, { sets = { [21] = { 7 } } }, { noSets = true } }) do
+        opts.items = { [601] = item() }
+        local c, t = moreTip(opts, { 4 })
+        equal(t[4], "Click to check the auction house.", "no set")
+        noErrors(c, "no set")
+    end
+end)
+
+test("TC-35b holiday line: for a collected and a not collected appearance, in light blue", function()
+    for _, collected in ipairs({ false, true }) do
+        local c, t = moreTip({ items = { [601] = item() }, holidays = { [21] = "Hallow's End" },
+            collectedSource = collected and 21 or nil }, { 4 })
+        local text = table.concat(t, "\n")
+        check(text:find("Requires the holiday Hallow's End.", 1, true), "collected " .. tostring(collected) .. ", got\n" .. text)
+        equal(text:find("World Drop", 1, true) ~= nil, not collected, "the source line only when not collected")
+        for _, line in ipairs(GameTooltip.lines) do
+            if line.text:find("holiday", 1, true) then equal(line.r .. "," .. line.g .. "," .. line.b, "0.53,0.67,1", "light blue") end
+        end
+        noErrors(c, "holiday")
+    end
+end)
+
+test("TC-35b use error: the client's text for the head source, in red; nothing when empty", function()
+    local c, t = moreTip({ items = { [601] = item() }, useErrors = { [21] = "Your class can't use that." } }, { 4 })
+    equal(span(t, 3, 4), "Cloth, Feet\nYour class can't use that.", "the use error")
+    local line = GameTooltip.lines[4]
+    equal(line.r .. "," .. line.g, "1,0.125", "in red")
+    c, t = moreTip({ items = { [601] = item() }, useErrors = { [21] = "" } }, { 4 })
+    equal(t[4], "Click to check the auction house.", "empty: no line")
+    noErrors(c, "use error")
+end)
+
+test("TC-35b other items: the short source in each form; Collected still wins", function()
+    local tailored = item({ name = "Robe" })
+    local mail = item({ name = "Hauberk", subType = "Mail", subClassID = 3 })
+    local c, t = moreTip({ collectedSource = 26, items = { [601] = item({ name = "A" }), [602] = item({ name = "B" }),
+        [603] = tailored, [604] = mail, [605] = item({ name = "E" }), [606] = item({ name = "F" }) },
+        drops = { [21] = { drop("Ragnaros", "Molten Core") },
+            [22] = { drop("Lucifron", "Molten Core"), drop("Magmadar", "Molten Core"), drop("Gehennas", "Molten Core") },
+            [26] = { drop("Onyxia", "Onyxia's Lair") } } }, { 1, 1, 6, 6, 3, 1 })
+    local text = table.concat(t, "\n")
+    for _, want in ipairs({ "A | Ragnaros", "B | Lucifron +2", "Robe | Tailoring", "Hauberk | Profession",
+        "E | Vendor", "F | Collected" }) do
+        check(text:find(want, 1, true), want .. ", got\n" .. text)
+    end
+    noErrors(c, "other items")
+end)
+
+test("TC-35b limit: never more than 20 lines; the list is cut with and N more items", function()
+    local types, items = {}, {}
+    for i = 1, 25 do types[i], items[600 + i] = 4, item({ name = "Item " .. i }) end
+    local c, t = moreTip({ items = items }, types)
+    equal(#t, 20, "20 lines")
+    equal(t[19], "and 12 more items", "the cut")
+    equal(t[18], "  Item 13 | World Drop", "the last row shown")
+    equal(t[20], "Click to check the auction house.", "the hint stays last")
+    -- exactly as many as fit: no cut
+    types, items = {}, {}
+    for i = 1, 14 do types[i], items[600 + i] = 4, item({ name = "Item " .. i }) end
+    c, t = moreTip({ items = items }, types)
+    equal(#t, 20, "14 items fit")
+    check(not table.concat(t, "\n"):find("more items", 1, true), "no cut")
+    -- a long head: nine drops, a set, a holiday, a use error, and a price kept
+    types, items = {}, {}
+    for i = 1, 10 do types[i], items[600 + i] = 1, item({ name = "Item " .. i, bindType = 2 }) end
+    local nine = {}
+    for i = 1, 9 do nine[i] = drop("Boss " .. i, "Keep") end
+    c, t = moreTip({ items = items, drops = { [21] = nine }, sets = { [21] = { 7 } }, setInfo = { [7] = { name = "S" } },
+        holidays = { [21] = "Brewfest" }, useErrors = { [21] = "No." } }, types)
+    check(#t <= 20, "a long head: at most 20, got " .. #t .. "\n" .. table.concat(t, "\n"))
+    noErrors(c, "limit")
+end)
+
+test("TC-35b fallbacks: each client string nil in turn raises nothing and shows the English text", function()
+    local cases = {
+        { "WARDROBE_TOOLTIP_ENCOUNTER_SOURCE", { drops = { [21] = { drop("Rag", "MC") } } }, { 1 }, "Drop: Rag (MC)" },
+        { "WARDROBE_TOOLTIP_BOSS_DROP_FORMAT", { drops = { [21] = { drop("Rag", "MC") } } }, { 1 }, "Drop: Rag (MC)" },
+        { "WARDROBE_TOOLTIP_BOSS_DROP_FORMAT_WITH_DIFFICULTIES", { drops = { [21] = { drop("Rag", "MC", { "Heroic" }) } } }, { 1 },
+            "Drop: Rag (MC) (Heroic)" },
+        { "PLAYER_LIST_DELIMITER", { drops = { [21] = { drop("Rag", "MC", { "Normal", "Heroic" }) } } }, { 1 },
+            "Drop: Rag (MC) (Normal, Heroic)" },
+        { "TRANSMOG_APPEARANCE_USABLE_HOLIDAY", { holidays = { [21] = "Brewfest" } }, { 4 }, "Usable only during Brewfest." },
+        { "TRANSMOG_SOURCE_4", {}, { 4 }, "World Drop" },
+        { "TRANSMOG_SOURCE_6", { items = { [601] = item() } }, { 6 }, "Profession: Tailoring" },
+        { "TRANSMOG_SOURCE_BOSS_DROP", { drops = { [21] = { drop("Rag", "MC") } } }, { 1 }, "Drop: Rag (MC)" },
+        { "INVTYPE_FEET", { items = { [601] = item() } }, { 4 }, "Cloth" },
+        { "TRANSMOG_COLLECTED", { collectedSource = 21 }, { 4, 4 }, "Item 601 | Collected" },
+        { "WARDROBE_OTHER_ITEMS", {}, { 4, 4 }, "Other items using this appearance:" },
+        { "RETRIEVING_ITEM_INFO", { items = { [601] = item({ load = 1 }) } }, { 4 }, "Retrieving item information" },
+    }
+    for _, case in ipairs(cases) do
+        -- the global is cleared after the fake made it and before the hover
+        local name, opts = case[1], case[2]
+        local types = case[3]
+        local sources, sourceItems = {}, {}
+        for i = 1, #types do sources[i], sourceItems[20 + i] = 20 + i, 600 + i end
+        opts.appearances = { { id = 2, uiOrder = 1, sources = sources, sourceTypes = types,
+            collectedSource = opts.collectedSource, classes = { [9] = true } } }
+        opts.sourceItems = sourceItems
+        local c, tabs = visitTwice(opts)
+        tabs[1].scripts.OnClick(tabs[1])
+        TC.BrowserState.SetFilter("All")
+        TC.BrowserState.SelectClass(1)
+        _G[name] = nil
+        enter(tileFrames(c)[1])
+        local text = table.concat(c.tooltipTexts(), "\n")
+        check(text:find(case[4], 1, true), name .. " nil: " .. case[4] .. ", got\n" .. text)
+        noErrors(c, name .. " nil")
+    end
+end)
+
+test("TC-35b limit: the list of other items never vanishes; a long head shows fewer drops and the notice, the price lines stay", function()
+    local types, items = {}, {}
+    for i = 1, 5 do types[i], items[600 + i] = 1, item({ name = "Item " .. i, bindType = 2, minLevel = 40 }) end
+    local nine = {}
+    for i = 1, 9 do nine[i] = drop("Boss " .. i, "Keep", i == 1 and { "Heroic" } or nil) end
+    -- every source alike, so whichever heads the tooltip has the longest head
+    local d, s, h, u = {}, {}, {}, {}
+    for i = 21, 25 do d[i], s[i], h[i], u[i] = nine, { 7 }, "Brewfest", "No." end
+    local c, t = moreTip({ items = items, drops = d, sets = s, setInfo = { [7] = { name = "S" } },
+        holidays = h, useErrors = u }, types)
+    local frame = tileFrames(c)[1]
+    leave(frame)
+    c.ah.listings = { listing("Item 1", 601, 500) }
+    c.click(frame.button)
+    c.advance(10)
+    enter(frame)
+    t = c.tooltipTexts()
+    local text = table.concat(t, "\n")
+    check(#t <= 20, "at most 20, got " .. #t .. "\n" .. text)
+    equal(t[#t - 2], "Lowest price | 5s", "the price line")
+    equal(t[#t - 1], "Checked just now", "the age")
+    equal(t[#t], "Click to see the items for sale.", "the hint")
+    local more, shown = nil, 0
+    for _, line in ipairs(t) do
+        if line:find("^and %d+ more items$") then more = line end
+        if line:find("^Boss %d") then shown = shown + 1 end
+    end
+    check(more, "the notice, got\n" .. text)
+    check(text:find("and %d+ more\n"), "the drops row stays right, got\n" .. text)
+    equal(text:find("and " .. (9 - shown) .. " more\n") ~= nil, true, "the drops' own count matches the drops shown")
+    -- every other item is either listed or counted
+    local rows = 0
+    for _, line in ipairs(t) do if line:find("^[> ] +Item %d") or line:find("^[> ] Item %d") then rows = rows + 1 end end
+    local n = tonumber(more:match("%d+"))
+    equal(rows + n, 5, "listed rows plus the count are all the items")
+    noErrors(c, "long head")
+end)
+
+test("TC-35b drops: an empty or bad difficulty adds nothing; the source line stays", function()
+    local cases = {
+        { { "" }, "Drop: Boss (Dungeon)" },
+        { { "", "" }, "Drop: Boss (Dungeon)" },
+        { { "", "Heroic" }, "Drop: Boss (Dungeon) (Heroic)" },
+        { { {}, "Heroic" }, "Drop: Boss (Dungeon) (Heroic)" },
+        { { 5, "Normal", false, "Heroic" }, "Drop: Boss (Dungeon) (Normal, Heroic)" },
+        { { {} }, "Drop: Boss (Dungeon)" },
+    }
+    for _, case in ipairs(cases) do
+        local c, t = moreTip({ items = { [601] = item() }, drops = { [21] = { drop("Boss", "Dungeon", case[1]) } } })
+        equal(t[2], case[2], "difficulties " .. #case[1])
+        equal(#c.errors, 0, "nothing reported")
+        noErrors(c, "difficulties")
+    end
+    -- several drops: the same
+    local c, t = moreTip({ items = { [601] = item() },
+        drops = { [21] = { drop("A", "X", { "" }), drop("B", "Y", { {}, "Heroic" }) } } })
+    equal(span(t, 2, 4), "Boss drop:\nA (X)\nB (Y) (Heroic)", "two drops")
+    noErrors(c, "several")
+end)
+
+test("TC-35b profession: cloth and leather head pieces keep plain Profession; a cloth chest is still Tailoring", function()
+    local cases = {
+        { "cloth head", item({ classID = 4, subClassID = 1, equipLoc = "INVTYPE_HEAD" }), "Profession" },
+        { "leather head", item({ classID = 4, subClassID = 2, subType = "Leather", equipLoc = "INVTYPE_HEAD" }), "Profession" },
+        { "cloth chest", item({ classID = 4, subClassID = 1, equipLoc = "INVTYPE_CHEST" }), "Profession: Tailoring" },
+        { "leather chest", item({ classID = 4, subClassID = 2, subType = "Leather", equipLoc = "INVTYPE_CHEST" }), "Profession: Leatherworking" },
+    }
+    for _, case in ipairs(cases) do
+        local c, t = moreTip({ items = { [601] = case[2] } }, { 6 })
+        equal(t[2], case[3], case[1])
+        noErrors(c, case[1])
+    end
+end)
+
+test("TC-35b awkward names: percent signs and escapes are shown verbatim and raise nothing", function()
+    local boss, dungeon, difficulty = "100% |cffff0000Ra'g|r %s %d", "M%C", "He%roic"
+    local c, t = moreTip({ items = { [601] = item() }, drops = { [21] = { drop(boss, dungeon, { difficulty }) } },
+        sets = { [21] = { 7 } }, setInfo = { [7] = { name = "S%s" } }, holidays = { [21] = "Hal%low" } })
+    equal(t[2], "Drop: " .. boss .. " (" .. dungeon .. ") (" .. difficulty .. ")", "the drop")
+    check(table.concat(t, "\n"):find("Part of set: S%s", 1, true), "the set")
+    check(table.concat(t, "\n"):find("Requires the holiday Hal%low.", 1, true), "the holiday")
+    equal(#c.errors, 0, "nothing reported")
+    noErrors(c, "awkward")
+    -- several drops and the other items' short form
+    c, t = moreTip({ items = { [601] = item(), [602] = item({ name = "Other" }) },
+        drops = { [21] = { drop(boss, dungeon), drop("B%d", "I%s") }, [22] = { drop(boss, dungeon), drop("B%d", "I%s") } } }, { 1, 1 })
+    equal(span(t, 2, 4), "Boss drop:\n" .. boss .. " (" .. dungeon .. ")\nB%d (I%s)", "several")
+    check(table.concat(t, "\n"):find("Other | " .. boss:gsub("%p", "%%%0") .. " %+1"), "the short form")
+    noErrors(c, "awkward several")
+end)
+
+test("TC-35b robustness: a rule that raises leaves only its line out, reported once; hovering sends nothing", function()
+    local c, t = moreTip({ items = { [601] = item({ bindType = 2 }) }, holidayRaises = true, sets = { [21] = { 7 } },
+        setInfo = { [7] = { name = "S" } }, useErrors = { [21] = "No." } }, { 4 })
+    equal(table.concat(t, "\n"), table.concat({ "Thing", "World Drop", "Cloth, Feet",
+        "Binds when equipped: equip it or sell it to a vendor to collect.", "Part of set: S", "No.",
+        "Click to check the auction house." }, "\n"), "every line but the holiday")
+    equal(#c.errors, 1, "reported once")
+    check(c.errors[1]:find("GetSourceRequiredHoliday", 1, true), "the holiday's error: " .. tostring(c.errors[1]))
+    leave(tileFrames(c)[1])
+    enter(tileFrames(c)[1])
+    equal(#c.errors, 1, "a second hover reports nothing more")
+    -- a malformed difficulty no longer loses the source line (F3), and raises nothing
+    c, t = moreTip({ items = { [601] = item() }, drops = { [21] = { { encounter = "Rag", instance = "MC", difficulties = { {} } } } } })
+    equal(span(t, 1, 3), "Thing\nDrop: Rag (MC)\nCloth, Feet", "the source line stays")
+    equal(#c.errors, 0, "nothing reported")
+    equal(#c.misuse, 0, "no misuse")
+    sentNothing(c, "hovering")
 end)
 
 ---------------------------------------------------------------- run

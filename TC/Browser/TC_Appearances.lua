@@ -391,6 +391,42 @@ function Appearances.UsableBy(appearance, classID)
     return false
 end
 
+-- The profession that makes a crafted item (TC-35): an inference from the
+-- item's type, applied only to a source the client itself marks as
+-- profession; the client cannot name the profession. Only the types one
+-- profession alone makes are named. Each entry: ItemClass key, subclass key
+-- (ItemArmorSubclass for Armor, ItemWeaponSubclass for Weapon), the
+-- profession; slot: only for that equip location; notSlot: not for those
+-- equip locations (a set). Head pieces of cloth and leather are left out:
+-- engineers make goggles of both in the classic game, so a crafted head
+-- piece stays plain "Profession", as cloaks do.
+local PROFESSION_OF_TYPE = {
+    { "Armor", "Cloth", "Tailoring", notSlot = { INVTYPE_CLOAK = true, INVTYPE_HEAD = true } },
+    { "Armor", "Leather", "Leatherworking", notSlot = { INVTYPE_HEAD = true } },
+    { "Armor", "Plate", "Blacksmithing" },
+    { "Armor", "Generic", "Tailoring", slot = "INVTYPE_BODY" },
+    { "Weapon", "Wand", "Enchanting" },
+    { "Weapon", "Guns", "Engineering" },
+}
+
+-- The English name of the profession the item's type settles, or nil. It
+-- reads C_Item.GetItemInfoInstant (equip location 4th, class 6th, subclass
+-- 7th, ItemDocumentation.lua:659-679), which needs no item data.
+function Appearances.Profession(itemID)
+    local E, instant = Enum, C_Item and C_Item.GetItemInfoInstant
+    if not (itemID and E and E.ItemClass and instant) then return nil end
+    local _, _, _, equipLoc, _, classID, subClassID = instant(itemID)
+    if classID == nil or subClassID == nil then return nil end
+    for _, entry in ipairs(PROFESSION_OF_TYPE) do
+        local subclasses = entry[1] == "Armor" and E.ItemArmorSubclass or E.ItemWeaponSubclass
+        if classID == E.ItemClass[entry[1]] and subclasses and subClassID == subclasses[entry[2]]
+            and (entry.slot == nil or entry.slot == equipLoc) and not (entry.notSlot and entry.notSlot[equipLoc]) then
+            return entry[3]
+        end
+    end
+    return nil
+end
+
 -- Spec Assumption A5: a check waits at most 2 seconds for item names.
 local ITEM_WAIT = 2
 

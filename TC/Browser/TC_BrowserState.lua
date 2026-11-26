@@ -1120,9 +1120,11 @@ end
 -- CollectionsUtil.lua:183-384). The client's strings and colours are read
 -- when it has them; the English texts after them are the board's wording,
 -- used only without them (their wording on Forever is unverified).
+local function nonEmpty(s)
+    return type(s) == "string" and s ~= "" and s or nil
+end
 local function clientText(name, fallback)
-    local s = _G[name]
-    return type(s) == "string" and s or fallback
+    return nonEmpty(_G[name]) or fallback
 end
 local function fontColour(name, r, g, b)
     local c = _G[name]
@@ -1154,29 +1156,100 @@ local function sourceName(source, c)
     return name, qualityColour(quality, c.white)
 end
 
--- A source's source text: "Collected" in green, or the client's name of its
--- source type (TRANSMOG_SOURCE_n) in white (GetAppearanceSourceTextAndColor,
--- CollectionsUtil.lua:156-170).
-local function sourceText(source, c)
-    if source.isCollected then return clientText("TRANSMOG_COLLECTED", "Collected"), c.green end
-    local text = source.sourceType and _G["TRANSMOG_SOURCE_" .. source.sourceType]
-    return type(text) == "string" and text or "", c.white
+-- A rule of the tooltip that raises is reported once (by rule name) and
+-- answers nil, so only its line is left out.
+local failedRules = {}
+local function rule(name, fn, ...)
+    local ok, a, b = pcall(fn, ...)
+    if ok then return a, b end
+    if not failedRules[name] then
+        failedRules[name] = true
+        report(a)
+    end
 end
 
--- The boss of a boss drop with a single drop, as the header's source line
--- says it (CollectionsUtil.lua:221-232, 298-306, 312-318); nil otherwise.
-local function dropText(source)
+-- The client's name of a source's source type (TRANSMOG_SOURCE_n, a
+-- 1-based index), else the English one (TC.SOURCE_TYPES), else "".
+local function typeText(source)
+    local n = source.sourceType
+    return n and clientText("TRANSMOG_SOURCE_" .. n, TC.SOURCE_TYPES and TC.SOURCE_TYPES[n] or "") or ""
+end
+
+-- Source type 6 is profession (recorded in game on tailored items, TC-35).
+local PROFESSION_SOURCE = 6
+local MAX_DROPS = 6
+
+-- A boss drop's drops (C_TransmogCollection.GetAppearanceSourceDrops,
+-- TransmogItemsDocumentation.lua:180-195, 1161-1171: names only), those
+-- with an encounter or instance name, in the client's order; nil for
+-- another source type or without any.
+local function drops(source)
     local TCol = C_TransmogCollection
     if source.sourceType ~= (TRANSMOG_SOURCE_BOSS_DROP or 1) or not (TCol and TCol.GetAppearanceSourceDrops) then return nil end
-    local drops = TCol.GetAppearanceSourceDrops(source.sourceID)
-    if type(drops) ~= "table" or #drops ~= 1 then return nil end
-    local drop = drops[1]
-    local where = clientText("WARDROBE_TOOLTIP_ENCOUNTER_SOURCE", "%s (%s)"):format(drop.encounter, drop.instance)
-    if type(drop.difficulties) == "table" and drop.difficulties[1] then
-        return clientText("WARDROBE_TOOLTIP_BOSS_DROP_FORMAT_WITH_DIFFICULTIES", "Drop: %s (%s)"):format(where,
-            table.concat(drop.difficulties, clientText("PLAYER_LIST_DELIMITER", ", ")))
+    local list = {}
+    for _, drop in ipairs(type(source.sourceID) == "number" and TCol.GetAppearanceSourceDrops(source.sourceID) or {}) do
+        if type(drop) == "table" and (nonEmpty(drop.encounter) or nonEmpty(drop.instance)) then list[#list + 1] = drop end
     end
-    return clientText("WARDROBE_TOOLTIP_BOSS_DROP_FORMAT", "Drop: %s"):format(where)
+    return list[1] and list or nil
+end
+
+-- A drop's "<encounter> (<instance>)" (CollectionsUtil.lua:232) and its
+-- difficulties joined as Collections joins them (:298-306), or nil.
+local function dropPlace(drop)
+    local encounter, instance = nonEmpty(drop.encounter), nonEmpty(drop.instance)
+    local place = encounter and instance
+        and clientText("WARDROBE_TOOLTIP_ENCOUNTER_SOURCE", "%s (%s)"):format(encounter, instance) or encounter or instance
+    local texts = {}
+    for _, text in ipairs(type(drop.difficulties) == "table" and drop.difficulties or {}) do
+        if nonEmpty(text) then texts[#texts + 1] = text end
+    end
+    local difficulties = texts[1] and table.concat(texts, clientText("PLAYER_LIST_DELIMITER", ", ")) or nil
+    return place, difficulties
+end
+
+-- The head source's source lines, as text: one drop as Collections words
+-- it (CollectionsUtil.lua:312-318); several drops each on a line under
+-- "Boss drop:", at most 6 and then "and N more"; a profession named where
+-- the item's type settles it; else the source type.
+local function sourceLines(source, maxDrops)
+    local list = rule("drops", drops, source)
+    if list and not list[2] then
+        local place, difficulties = dropPlace(list[1])
+        if difficulties then
+            return { clientText("WARDROBE_TOOLTIP_BOSS_DROP_FORMAT_WITH_DIFFICULTIES", "Drop: %s (%s)"):format(place, difficulties) }
+        end
+        return { clientText("WARDROBE_TOOLTIP_BOSS_DROP_FORMAT", "Drop: %s"):format(place) }
+    elseif list then
+        local lines = { "Boss drop:" }
+        for i, drop in ipairs(list) do
+            if i > maxDrops then
+                lines[#lines + 1] = ("and %d more"):format(#list - maxDrops)
+                break
+            end
+            local place, difficulties = dropPlace(drop)
+            lines[#lines + 1] = difficulties and ("%s (%s)"):format(place, difficulties) or place
+        end
+        return lines
+    end
+    local text = typeText(source)
+    local profession = source.sourceType == PROFESSION_SOURCE and rule("profession", TC.Appearances.Profession, source.itemID)
+    if profession then return { text .. ": " .. profession } end
+    return { text ~= "" and text or nil }
+end
+
+-- A source's text in the list of other items: "Collected" in green, or in
+-- white the short form of its source (GetAppearanceSourceTextAndColor,
+-- CollectionsUtil.lua:156-170): one drop's encounter, "<first> +N" for
+-- several, the inferred profession, else the source type.
+local function sourceText(source, c)
+    if source.isCollected then return clientText("TRANSMOG_COLLECTED", "Collected"), c.green end
+    local list = rule("drops", drops, source)
+    if list then
+        local first = nonEmpty(list[1].encounter) or list[1].instance
+        return list[2] and ("%s +%d"):format(first, #list - 1) or first, c.white
+    end
+    local profession = source.sourceType == PROFESSION_SOURCE and rule("profession", TC.Appearances.Profession, source.itemID)
+    return profession or typeText(source), c.white
 end
 
 -- The source the tooltip heads with (CollectionWardrobeUtil.
@@ -1188,20 +1261,100 @@ local function headIndex(sources)
     return ok and sources[index] and index or 1
 end
 
+-- C_Item.GetItemInfo (ItemDocumentation.lua:626-656) of an item whose data
+-- is in, else nothing: it never asks the client to load it.
+local function loadedInfo(itemID)
+    if not (itemID and C_Item and C_Item.GetItemInfo and TC.Appearances.ItemName(itemID)) then return nil end
+    return C_Item.GetItemInfo(itemID)
+end
+
+-- "Requires level N" (above 1) and "<subtype>, <slot>" (the slot is the
+-- client's INVTYPE_ name of the equip location), what is loaded of them,
+-- joined by a middle dot; nil with nothing loaded.
+local function itemLine(itemID)
+    local _, _, _, _, minLevel, _, subType, _, equipLoc = loadedInfo(itemID)
+    local parts = {}
+    if type(minLevel) == "number" and minLevel > 1 then parts[1] = ("Requires level %d"):format(minLevel) end
+    local kind, slot = nonEmpty(subType), nonEmpty(equipLoc) and nonEmpty(_G[equipLoc])
+    parts[#parts + 1] = kind and slot and (kind .. ", " .. slot) or kind or slot
+    return parts[1] and table.concat(parts, " \194\183 ") or nil
+end
+
+-- How the item binds, for the two kinds that matter for collecting (bind
+-- type 14th, Enum.ItemBind, ItemConstantsDocumentation.lua:249-261).
+local function bindLine(itemID)
+    local bindType = select(14, loadedInfo(itemID))
+    local binds = Enum and Enum.ItemBind
+    if bindType ~= nil and bindType == (binds and binds.OnEquip or 2) then
+        return "Binds when equipped: equip it or sell it to a vendor to collect."
+    elseif bindType ~= nil and bindType == (binds and binds.OnAcquire or 1) then
+        return "Binds when picked up."
+    end
+end
+
+-- "Part of set: <name> (<label>)" for the first transmog set holding the
+-- source (C_TransmogSets.GetSetsContainingSourceID, GetSetInfo,
+-- TransmogSetsDocumentation.lua:167-181, 215-229, 520-540), or nil.
+local function setLine(sourceID)
+    local Sets = C_TransmogSets
+    if not (type(sourceID) == "number" and Sets and Sets.GetSetsContainingSourceID and Sets.GetSetInfo) then return nil end
+    local ids = Sets.GetSetsContainingSourceID(sourceID)
+    local setID = type(ids) == "table" and ids[1]
+    local info = type(setID) == "number" and Sets.GetSetInfo(setID)
+    local name = type(info) == "table" and nonEmpty(info.name)
+    if not name then return nil end
+    local label = nonEmpty(info.label)
+    return "Part of set: " .. name .. (label and label ~= name and (" (" .. label .. ")") or "")
+end
+
+-- The holiday the source requires (GetSourceRequiredHoliday,
+-- TransmogItemsDocumentation.lua:647-661), in Collections' wording
+-- (CollectionsUtil.lua:373-377), or nil.
+local function holidayLine(sourceID)
+    local TCol = C_TransmogCollection
+    local name = type(sourceID) == "number" and TCol and TCol.GetSourceRequiredHoliday
+        and nonEmpty(TCol.GetSourceRequiredHoliday(sourceID))
+    return name and clientText("TRANSMOG_APPEARANCE_USABLE_HOLIDAY", "Usable only during %s."):format(name) or nil
+end
+
+-- The tooltip never has more lines than this.
+local MAX_LINES = 20
+
+-- The lines about the head source, after its name: its source in full when
+-- not collected; the item's level and type; how it binds; its set; the
+-- holiday it requires; the client's use error, in red. Each rule is
+-- protected: one that raises leaves its own line out.
+local function headLines(lines, source, c, maxDrops)
+    if not source.isCollected then
+        for _, text in ipairs(rule("source", sourceLines, source, maxDrops) or {}) do lines[#lines + 1] = { text = text, color = c.white } end
+    end
+    local text = rule("item", itemLine, source.itemID)
+    if text then lines[#lines + 1] = { text = text, color = c.grey } end
+    text = rule("bind", bindLine, source.itemID)
+    if text then lines[#lines + 1] = { text = text, color = c.white } end
+    text = rule("set", setLine, source.sourceID)
+    if text then lines[#lines + 1] = { text = text, color = c.normal } end
+    text = rule("holiday", holidayLine, source.sourceID)
+    if text then lines[#lines + 1] = { text = text, color = c.lightBlue } end
+    text = nonEmpty(source.useError)
+    if text then lines[#lines + 1] = { text = text, color = c.red } end
+end
+
 -- The tile tooltip's lines for an appearance, each { text, color, right,
--- rightColor, money }: the head item's name and, when not collected, its
--- source; then, with more than one item, "Other items using this
--- appearance:" and every item with its source or "Collected", collected
--- ones included (Collections hides the list for a collected appearance,
--- CollectionsUtil.lua:330); no "Tab to cycle" line. Then, when the browser
--- keeps a result for the tile, the lowest price or "Not for sale" and its
--- age, and the click hint. It reads the game's appearance data, never the
--- auction house; it asks for the data of this appearance's items whose
--- names are not loaded, once a visit (LoadNames).
+-- rightColor, money }: the head item's name and the lines about it
+-- (headLines); then, with more than one item, "Other items using this
+-- appearance:" and every item with its short source or "Collected",
+-- collected ones included (Collections hides the list for a collected
+-- appearance, CollectionsUtil.lua:330), cut with "and N more items" so the
+-- tooltip has at most 20 lines; no "Tab to cycle" line. Then, when the
+-- browser keeps a result for the tile, the lowest price or "Not for sale"
+-- and its age, and the click hint. It reads the game's appearance and item
+-- data, never the auction house; it asks for the data of this appearance's
+-- items whose names are not loaded, once a visit (LoadNames).
 function State.TileTooltip(appearance)
     local c = { white = fontColour("HIGHLIGHT_FONT_COLOR", 1, 1, 1), normal = fontColour("NORMAL_FONT_COLOR", 1, 0.82, 0),
         green = fontColour("GREEN_FONT_COLOR", 0.1, 1, 0.1), red = fontColour("RED_FONT_COLOR", 1, 0.125, 0.125),
-        grey = fontColour("GRAY_FONT_COLOR", 0.5, 0.5, 0.5) }
+        grey = fontColour("GRAY_FONT_COLOR", 0.5, 0.5, 0.5), lightBlue = fontColour("LIGHTBLUE_FONT_COLOR", 0.53, 0.67, 1) }
     local sources = TC.Appearances.Sources(appearance)
     local lines, missing = {}, {}
     for _, source in ipairs(sources) do
@@ -1212,43 +1365,53 @@ function State.TileTooltip(appearance)
     if head then
         local name, colour = sourceName(sources[head], c)
         lines[1] = { text = name, color = colour }
-        if not sources[head].isCollected then
-            local text, textColour = sourceText(sources[head], c)
-            local ok, drop = pcall(dropText, sources[head])
-            text = ok and drop or text
-            if text ~= "" then lines[#lines + 1] = { text = text, color = textColour } end
-        end
+        headLines(lines, sources[head], c, MAX_DROPS)
     end
-    if #sources > 1 then
+    local tail = {}
+    local result = view.mode == "For sale" and forSaleResult(appearance.id) or tileResult(appearance.id)
+    if result then
+        tail[#tail + 1] = { text = " " }
+        local first = result.rows[1]
+        if first then
+            local parts = money(first.minPrice)
+            tail[#tail + 1] = { text = LOWEST_PRICE, color = c.normal, right = moneyText(parts), money = parts, rightColor = c.white }
+        else
+            tail[#tail + 1] = { text = LOWEST_PRICE, color = c.normal, right = "Not for sale", rightColor = c.grey }
+        end
+        if result.at then tail[#tail + 1] = { text = age(result.at, result.scanned and "Scanned" or "Checked"), color = c.grey } end
+        tail[#tail + 1] = { text = first and SEE_ITEMS or DETAILS_HINT, color = c.grey }
+    elseif checking[appearance.id] then
+        -- reading: no hint
+    elseif noAnswer[appearance.id] then
+        tail[#tail + 1] = { text = NO_ANSWER_TEXT, color = c.grey }
+        tail[#tail + 1] = { text = CHECK_AGAIN_HINT, color = c.grey }
+    else
+        tail[#tail + 1] = { text = CHECK_HINT, color = c.grey }
+    end
+    -- the rows the list has room for, its blank line and header aside
+    local room = MAX_LINES - #lines - #tail - 2
+    -- no room even for the notice: the head shows fewer drops
+    local maxDrops = MAX_DROPS
+    while #sources > 1 and room < 1 and head and maxDrops > 1 do
+        maxDrops = maxDrops - 1
+        lines = { lines[1] }
+        headLines(lines, sources[head], c, maxDrops)
+        room = MAX_LINES - #lines - #tail - 2
+    end
+    if #sources > 1 and room > 0 then
         lines[#lines + 1] = { text = " " }
         lines[#lines + 1] = { text = clientText("WARDROBE_OTHER_ITEMS", "Other items using this appearance:"), color = c.normal }
-        for i, source in ipairs(sources) do
+        local shown = #sources > room and room - 1 or #sources
+        for i = 1, shown do
+            local source = sources[i]
             local name, colour = sourceName(source, c)
             local text, textColour = sourceText(source, c)
             local mark = clientText(i == head and "WARDROBE_TOOLTIP_CYCLE_ARROW_ICON" or "WARDROBE_TOOLTIP_CYCLE_SPACER_ICON", "")
             lines[#lines + 1] = { text = mark .. name, color = colour, right = text, rightColor = textColour }
         end
+        if shown < #sources then lines[#lines + 1] = { text = ("and %d more items"):format(#sources - shown), color = c.grey } end
     end
-    local result = view.mode == "For sale" and forSaleResult(appearance.id) or tileResult(appearance.id)
-    if result then
-        lines[#lines + 1] = { text = " " }
-        local first = result.rows[1]
-        if first then
-            local parts = money(first.minPrice)
-            lines[#lines + 1] = { text = LOWEST_PRICE, color = c.normal, right = moneyText(parts), money = parts, rightColor = c.white }
-        else
-            lines[#lines + 1] = { text = LOWEST_PRICE, color = c.normal, right = "Not for sale", rightColor = c.grey }
-        end
-        if result.at then lines[#lines + 1] = { text = age(result.at, result.scanned and "Scanned" or "Checked"), color = c.grey } end
-        lines[#lines + 1] = { text = first and SEE_ITEMS or DETAILS_HINT, color = c.grey }
-    elseif checking[appearance.id] then
-        -- reading: no hint
-    elseif noAnswer[appearance.id] then
-        lines[#lines + 1] = { text = NO_ANSWER_TEXT, color = c.grey }
-        lines[#lines + 1] = { text = CHECK_AGAIN_HINT, color = c.grey }
-    else
-        lines[#lines + 1] = { text = CHECK_HINT, color = c.grey }
-    end
+    for _, line in ipairs(tail) do lines[#lines + 1] = line end
     return lines
 end
 
