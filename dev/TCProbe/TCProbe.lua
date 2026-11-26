@@ -2935,7 +2935,47 @@ local toggleArt
 local ART_MEDIA = "Interface\\AddOns\\TransmogChecker\\Media\\"
 local TUTORIAL_FRAME = "Interface\\TutorialFrame\\UI-TUTORIAL-FRAME"
 local MOUSE_RATIO = 76 / 101
+-- The two groups shown first are a second round, numbered from first (101,
+-- 201) so the numbers of the first round stay as they were. Icons marked
+-- "old" are classic spell icons this client's UI source does not name.
+local ICONS = "Interface\\Icons\\"
 local ART_GROUPS = {
+    { title = "A. Quick buy: more (101+)", first = 101, button = true, sizes = { 16, 24 }, items = {
+        { file = ICONS .. "Spell_Holy_SurgeOfLight" },
+        { file = ICONS .. "Ability_Rogue_Sprint", label = "Ability_Rogue_Sprint (old)" },
+        { file = ICONS .. "Spell_Nature_Bloodlust", label = "Spell_Nature_Bloodlust (old)" },
+        { file = ICONS .. "Ability_Rogue_QuickRecovery" },
+        { file = ICONS .. "Spell_Lightning_LightningBolt01", label = "LightningBolt01 (old)" },
+        { file = ICONS .. "Ability_Warrior_Charge", label = "Ability_Warrior_Charge (old)" },
+        { atlas = "clickcast-icon-mouse" },
+        { file = "Interface\\TutorialFrame\\UI-TutorialFrame-GloveCursor" },
+        { file = "Interface\\Cursor\\Point" },
+        { atlas = "plunderstorm-pickup-mouseclick-left", label = "plunderstorm-mouseclick-left" },
+        { atlas = "housing-hotkey-icon-leftclick" },
+        { atlas = "CreditsScreen-Assets-Buttons-FastForward", label = "Credits FastForward" },
+        { file = "Interface\\Buttons\\UI-SpellbookIcon-NextPage-Up" },
+        { file = "Interface\\OptionsFrame\\VoiceChat-Play" },
+        { atlas = "charactercreate-customize-playbutton", label = "customize-playbutton" },
+        { atlas = "shop-icon-purchasedcheckmark" },
+        { atlas = "common-icon-checkmark" },
+        { atlas = "groupfinder-icon-greencheckmark" },
+        { file = "Interface\\RaidFrame\\ReadyCheck-Ready" },
+        { file = "Interface\\Buttons\\UI-AutoCastableOverlay" },
+    } },
+    { title = "B. Funnel: more (201+)", first = 201, button = true, sizes = { 16 }, items = {
+        { atlas = "common-dropdown-a-button-settings-shadowless", label = "dropdown-a-button-settings" },
+        { atlas = "common-dropdown-a-button-pressed" },
+        { atlas = "Map-Filter-Button-down" },
+        { atlas = "ui-hud-minimap-tracking-button" },
+        { atlas = "GM-icon-settings" },
+        { atlas = "questlog-icon-setting" },
+        { file = "Interface\\WorldMap\\GEAR_64GREY" },
+        { file = "Interface\\Buttons\\UI-OptionsButton" },
+        { atlas = "OptionsIcon-Brown" },
+        { atlas = "gamepad-radial-icon-minimapsettings", label = "gamepad-minimapsettings" },
+        { atlas = "Garr_PlanIcon-List" },
+        { file = ICONS .. "INV_Misc_Gear_01", label = "INV_Misc_Gear_01 (old)" },
+    } },
     { title = "1. Catalogue toggle: all appearances of this slot", button = true, sizes = { 16 }, items = {
         { file = ART_MEDIA .. "catalogue", current = true, label = "catalogue" },
         { file = "Interface\\Icons\\UI_Transmog_ShowEquippedGear" },
@@ -3266,14 +3306,21 @@ function toggleArt()
         art.record = { recordedAt = date("%Y-%m-%d %H:%M:%S"), atlasCandidates = 0, atlasesFound = 0,
             atlases = {}, errors = {}, pagesShown = {} }
         db.art = art.record
-        local number = 0
+        local number, count = 0, 0
         for _, group in ipairs(ART_GROUPS) do
+            local own = group.first and group.first - 1
             for _, entry in ipairs(group.items) do
-                number = number + 1
-                entry.number = number
+                count = count + 1
+                if own then
+                    own = own + 1
+                    entry.number = own
+                else
+                    number = number + 1
+                    entry.number = number
+                end
             end
         end
-        art.record.candidates = number
+        art.record.candidates = count
         checkArtAtlases()
         art.frame = createArtFrame()
         if not art.frame then
