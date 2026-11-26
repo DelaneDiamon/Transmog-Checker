@@ -3,6 +3,8 @@
 -- whether the addon left them as it found them, and fires events at the
 -- frames that registered for them. Dev-only; never shipped.
 local Fake = {}
+-- The C_* tables already made to record calls (Fake.new makes new ones).
+local traceWrapped = setmetatable({}, { __mode = "k" })
 
 local PLAYER_CLASS = 9 -- Warlock, the character the probe ran on
 
@@ -133,6 +135,15 @@ function Fake.new(opts)
 
     local function misuse(cond, what)
         if not cond then c.misuse[#c.misuse + 1] = what end
+    end
+    -- The calls a click makes before its PlaceBid: from the start of a
+    -- c.click until PlaceBid, every frame method, every C_* function (on
+    -- C_AuctionHouse every field read but PlaceBid's), a ticker's Cancel and
+    -- GetMoney is recorded in c.trace by name; each bid keeps its list as
+    -- bid.before. xpcall and pcall are not seen.
+    c.trace = {}
+    local function traced(name)
+        if c.tracing then c.trace[#c.trace + 1] = name end
     end
     function c.snapshot()
         local s = {}
@@ -272,9 +283,16 @@ function Fake.new(opts)
         c.itemAppearances[#c.itemAppearances + 1] = { model = self, appearance = appearanceID }
     end
     local meta = { __index = function(w, key)
-        if methods[key] then return methods[key] end
+        local method = methods[key]
+        if method then
+            return function(self, ...)
+                traced(tostring(self.kind) .. ":" .. key)
+                return method(self, ...)
+            end
+        end
         if type(key) == "string" and key:match("^[A-Z]") then
             return function(self, ...)
+                traced(tostring(self.kind) .. ":" .. key)
                 self.calls[key] = { ... }
                 self.callCount[key] = (self.callCount[key] or 0) + 1
             end
@@ -633,6 +651,8 @@ function Fake.new(opts)
     -- C_Timer.After(0) runs on the next frame; c.frame() runs one frame.
     c.FRAME = 0.016
     function c.frame() c.advance(c.FRAME) end
+    -- every ticker made, in order, with its interval (ticker.seconds)
+    c.tickers = {}
     C_Timer = not opts.noTimer and {
         After = function(seconds, fn) after(seconds == 0 and c.FRAME or seconds, fn) end,
         NewTicker = function(seconds, fn, iterations)
@@ -646,7 +666,10 @@ function Fake.new(opts)
                 end
             end
             ticker.timer = after(seconds, tick)
+            ticker.seconds = seconds
+            c.tickers[#c.tickers + 1] = ticker
             function ticker:Cancel()
+                traced("ticker:Cancel")
                 self.cancelled = true
                 if self.timer then self.timer.cancelled = true end
             end
@@ -855,7 +878,13 @@ function Fake.new(opts)
         PlaceBid = function(auctionID, amount)
             misuse(type(auctionID) == "number" and type(amount) == "number", "PlaceBid arguments")
             ah.bids[#ah.bids + 1] = { auctionID = auctionID, amount = amount, inClick = c.clicking ~= nil,
-                button = c.clicking, at = c.now }
+                button = c.clicking, at = c.now, before = c.clicking and c.trace or nil }
+            c.tracing = false
+            -- bidRaises: this one call raises after it is recorded
+            if ah.bidRaises then
+                ah.bidRaises = nil
+                error("fake: PlaceBid failed")
+            end
             local outcome = ah.bidOutcome
             after(0.2, function()
                 if outcome == "completed" then
@@ -878,6 +907,7 @@ function Fake.new(opts)
     for _, name in ipairs(opts.noAuction or {}) do AH[name] = nil end
     C_AuctionHouse = not opts.noAuctionHouse and setmetatable({}, { __index = function(_, key)
         c.auctionTouches[#c.auctionTouches + 1] = key
+        if key ~= "PlaceBid" then traced("C_AuctionHouse." .. tostring(key)) end
         return AH[key]
     end }) or nil
 
@@ -890,9 +920,9 @@ function Fake.new(opts)
     -- can tell a call made inside the click from any other.
     function c.click(button, mouse)
         if not (button and visible(button) and button:IsEnabled() and button.scripts.OnClick) then return false end
-        c.clicking = button
+        c.clicking, c.trace, c.tracing = button, {}, true
         local ok, err = pcall(button.scripts.OnClick, button, mouse or "LeftButton", false)
-        c.clicking = nil
+        c.clicking, c.tracing = nil, false
         if not ok then error(err, 0) end
         return true
     end
@@ -1126,6 +1156,30 @@ function Fake.new(opts)
             end
         end
         return loaded
+    end
+
+    -- Every C_* function this client made, and GetMoney, record themselves
+    -- in c.trace while a click runs (C_AuctionHouse does in its __index).
+    for name, ns in pairs(_G) do
+        if type(name) == "string" and name:match("^C_") and type(ns) == "table" and name ~= "C_AuctionHouse"
+            and not traceWrapped[ns] then
+            traceWrapped[ns] = true
+            for key, fn in pairs(ns) do
+                if type(fn) == "function" then
+                    ns[key] = function(...)
+                        traced(name .. "." .. key)
+                        return fn(...)
+                    end
+                end
+            end
+        end
+    end
+    if GetMoney then
+        local getMoney = GetMoney
+        GetMoney = function()
+            traced("GetMoney")
+            return getMoney()
+        end
     end
 
     return c

@@ -4413,30 +4413,176 @@ test("buy safety 6: the dialog's Buy is on only when answered, chosen, affordabl
     check(find(c, function(w) return w.text and w.text:find("You do not have enough money.", 1, true) and under(w, d) end),
         "the money line")
     equal(d.buyButton:IsEnabled(), false, "Buy off without the money")
+    equal(c.click(d.buyButton), false, "a disabled Buy takes no click")
     d.buyButton.scripts.OnClick(d.buyButton)
     equal(#c.ah.bids, 0, "bids without the money")
-    -- the client not ready, then ready: the button follows within a poll
+    -- The conditions are kept current outside the click (2026-11-25): each
+    -- one off and on again, by its event and by the 0.2 s poll alone.
+    local function off(what)
+        equal(d.buyButton:IsEnabled(), false, "Buy off: " .. what)
+        equal(c.click(d.buyButton), false, "no click taken: " .. what)
+        d.buyButton.scripts.OnClick(d.buyButton)
+        equal(#c.ah.bids, 0, "bids: " .. what)
+    end
+    local function on(what) equal(d.buyButton:IsEnabled(), true, "Buy on: " .. what) end
     c = buyWhole()
     openDialog(c)
     d = dialogOf(c)
+    on("answered, affordable, idle, ready")
+    -- money, by PLAYER_MONEY at once
+    c.money = 499
+    c.fire("PLAYER_MONEY")
+    off("money short, by the event")
+    c.money = 500
+    c.fire("PLAYER_MONEY")
+    on("money back, by the event")
+    -- money, by the poll
+    c.money = 499
+    c.advance(0.21)
+    off("money short, by the poll")
+    c.money = 100 * 10000
+    c.advance(0.21)
+    on("money back, by the poll")
+    -- the client not ready, by the poll; ready again by its event at once
     c.ah.ready = false
-    c.advance(0.26)
-    equal(d.buyButton:IsEnabled(), false, "Buy off while the client is not ready")
-    d.buyButton.scripts.OnClick(d.buyButton)
-    equal(#c.ah.bids, 0, "bids while not ready")
+    c.advance(0.21)
+    off("client not ready, by the poll")
     c.ah.ready = true
-    c.advance(0.26)
-    equal(d.buyButton:IsEnabled(), true, "Buy on once ready")
-    -- the queue busy
+    c.fire("AUCTION_HOUSE_THROTTLED_SYSTEM_READY")
+    on("client ready, by the event")
+    c.ah.ready = false
+    c.advance(0.21)
+    off("client not ready again")
+    c.ah.ready = true
+    c.advance(0.21)
+    on("client ready, by the poll")
+    -- the queue busy and idle again, by the poll
     TC.AuctionQueue.Browse({ searchString = "x", sorts = {}, filters = {} }, 1, { done = function() end, failed = function() end })
-    c.advance(0.26)
-    equal(d.buyButton:IsEnabled(), false, "Buy off while the queue is busy")
-    d.buyButton.scripts.OnClick(d.buyButton)
-    equal(#c.ah.bids, 0, "bids while the queue is busy")
+    c.advance(0.21)
+    off("queue busy")
     c.advance(2)
-    equal(d.buyButton:IsEnabled(), true, "Buy on once the queue is idle")
-    c.click(d.buyButton)
+    on("queue idle again")
+    check(c.click(d.buyButton), "the click taken once every condition holds")
     equal(#c.ah.bids, 1, "bids once every condition holds")
+end)
+
+-- The dialog's poll: the 0.2 s ticker made when the dialog offers the auction.
+local function dialogPoll(c)
+    local poll
+    for _, t in ipairs(c.tickers) do if t.seconds == 0.2 then poll = t end end
+    return poll
+end
+test("buy safety 6: the 0.2 s poll runs only while the dialog offers the auction", function()
+    local ways = {
+        buy = function(c) c.click(dialogOf(c).buyButton) end,
+        cancel = function(c) c.click(dialogOf(c).closeButton) end,
+        escape = function(c) c.key("ESCAPE") end,
+        leave = function(c) selectBuy(); c.tabs[1].frameRef:Hide() end,
+        close = function(c) c.closeAuction() end,
+    }
+    for name, way in pairs(ways) do
+        local c = buyWhole()
+        c.ah.bidOutcome = "silent"
+        c.click(rowBuy(c))
+        equal(dialogPoll(c), nil, name .. ": no poll while finding")
+        c.advance(0.6)
+        local poll = dialogPoll(c)
+        check(poll and not poll.cancelled, name .. ": the poll runs while the auction is offered")
+        way(c)
+        check(poll.cancelled, name .. ": the poll stopped")
+        local runs = poll.runs
+        c.advance(10)
+        equal(poll.runs, runs, name .. ": no run after")
+    end
+    -- nothing to buy: no poll at all
+    local c = buyWhole({ results = {} })
+    openDialog(c)
+    equal(dialogPoll(c), nil, "gone: no poll")
+end)
+
+test("buy order: the confirm click calls PlaceBid before any other call (blocked otherwise, 2026-11-25)", function()
+    for _, outcome in ipairs({ "completed", "error", "silent" }) do
+        local c = buyWhole()
+        c.ah.bidOutcome = outcome
+        openDialog(c)
+        c.money = 400 * 10000
+        c.fire("PLAYER_MONEY")
+        c.advance(1)
+        check(c.click(dialogOf(c).buyButton), outcome .. ": the click taken")
+        equal(#c.ah.bids, 1, outcome .. ": bids")
+        local before = c.ah.bids[1].before or { "(no trace)" }
+        equal(#before, 0, outcome .. ": calls before PlaceBid in the click: " .. table.concat(before, ", "))
+        check(inDialog(c, "Buying"), outcome .. ": Buying drawn after the call")
+        equal(dialogOf(c).buyButton:IsEnabled(), false, outcome .. ": Buy off after the call")
+    end
+end)
+
+test("buy order: money falling below the price after Buy came on: off within a poll; a click in between bids once and fails", function()
+    -- off within one poll tick
+    local c = buyWhole()
+    openDialog(c)
+    local d = dialogOf(c)
+    equal(d.buyButton:IsEnabled(), true, "Buy on")
+    c.money = 100
+    c.advance(0.21)
+    equal(d.buyButton:IsEnabled(), false, "Buy off within a poll")
+    equal(c.click(d.buyButton), false, "no click taken")
+    equal(#c.ah.bids, 0, "bids")
+    -- a click before the tick: the bid goes out; the server refuses it, or
+    -- nothing comes and the limit ends it
+    for _, outcome in ipairs({ "error", "silent" }) do
+        c = buyWhole()
+        c.ah.bidOutcome = outcome
+        local browses = #c.ah.sends
+        openDialog(c)
+        d = dialogOf(c)
+        c.money = 100
+        check(c.click(d.buyButton), outcome .. ": the click between the drop and the tick taken")
+        equal(#c.ah.bids, 1, outcome .. ": one bid")
+        c.click(d.buyButton)
+        d.buyButton.scripts.OnClick(d.buyButton)
+        c.advance(outcome == "error" and 0.25 or 5.1)
+        check(inDialog(c, "The purchase did not go through."), outcome .. ": did not go through")
+        c.advance(5)
+        equal(#c.ah.sends, browses + 1, outcome .. ": one check")
+        c.click(d.buyButton)
+        c.advance(5)
+        equal(#c.ah.bids, 1, outcome .. ": no second bid")
+        equal(#c.ah.sends, browses + 1, outcome .. ": still one check")
+    end
+end)
+
+test("buy order: a PlaceBid that raises in the click still ends the flow by the limit; a later Start works", function()
+    for _, way in ipairs({ "wait", "cancel" }) do
+        local c = buyWhole()
+        c.ah.bidOutcome = "silent"
+        openDialog(c)
+        local d = dialogOf(c)
+        c.ah.bidRaises = true
+        pcall(c.click, d.buyButton)
+        equal(#c.ah.bids, 1, way .. ": bids")
+        if way == "cancel" then
+            c.click(d.closeButton)
+            check(not dialogShown(c), "cancel: the dialog closed")
+        else
+            c.advance(0.21)
+            check(inDialog(c, "Buying"), "wait: settled as Buying by the poll")
+            check(dialogPoll(c).cancelled, "wait: the poll stopped")
+        end
+        c.click(d.buyButton)
+        equal(#c.ah.bids, 1, way .. ": no second bid")
+        c.advance(5.5)
+        if way == "wait" then
+            check(inDialog(c, "The purchase did not go through."), "wait: the limit ended it")
+            c.click(d.closeButton)
+        end
+        c.advance(5)
+        check(c.click(rowBuy(c)), way .. ": the row's Buy took the click")
+        check(dialogShown(c), way .. ": a later Start opens the dialog")
+        c.advance(2)
+        check(inDialog(c, "5s"), way .. ": and offers the auction")
+        equal(#c.ah.bids, 1, way .. ": bids")
+    end
 end)
 
 test("buy safety 7: the tab, lists, scans and checks make no search and no PlaceBid; one row click makes one search", function()

@@ -16,9 +16,10 @@ local Buy = TC.Buy
 
 -- Spec Assumption A5: the client confirms within 5 seconds.
 local LIMIT = 5
--- The client's ready state changes without telling (spec 4.5): while the
--- dialog offers a purchase, its Buy button is drawn again this often.
-local POLL = 0.25
+-- The client's ready state changes without telling (spec 4.5), and the
+-- query queue tells nobody when it goes idle: while the dialog offers a
+-- purchase, its Buy button is drawn again this often.
+local POLL = 0.2
 -- Enum.ItemBind.OnEquip (ItemConstantsDocumentation.lua:249-261).
 local BIND_ON_EQUIP = Enum and Enum.ItemBind and Enum.ItemBind.OnEquip or 2
 local TEXT_FINDING = "Finding the cheapest auction"
@@ -35,8 +36,10 @@ local BOX_WIDTH, BOX_HEIGHT = 320, 170
 
 -- parent: the browser's panel (Attach). dialog: the frame, made on the
 -- first Start. flow: the purchase the dialog is open for, from Start until
--- the dialog closes: { variant, state, auctionID, amount, ended }; state is
--- "finding", "ready", "buying", "gone" or "failed". buying: the flow whose
+-- the dialog closes: { variant, state, auctionID, amount, allowed, limited,
+-- ended }; state is "finding", "ready", "buying", "gone" or "failed";
+-- allowed: canBuy as of the last draw, the one thing the Buy click reads;
+-- limited: the 5-second limit of its buyout is armed. buying: the flow whose
 -- buyout was placed and whose outcome has not come; it outlives the dialog,
 -- so the outcome or the 5-second limit still ends it and the check runs.
 local parent, dialog, flow, ticker, buying
@@ -100,6 +103,8 @@ end
 local function draw()
     local f = flow
     if not (f and dialog) then return end
+    -- first, so a raise further down cannot leave it stale
+    f.allowed = canBuy(f)
     local variant = f.variant
     dialog.nameText:SetText(variant.name or "-")
     local r, g, b = 1, 1, 1
@@ -128,7 +133,7 @@ local function draw()
     dialog.priceText:SetText(price)
     dialog.linesText:SetText(table.concat(lines, "\n"))
     dialog.buyButton:SetShown(offer)
-    dialog.buyButton:SetEnabled(canBuy(f))
+    dialog.buyButton:SetEnabled(f.allowed)
     -- after the Buy click both buttons are off until the outcome
     dialog.closeButton:SetText((f.state == "gone" or f.state == "failed") and "Close" or "Cancel")
     dialog.closeButton:SetEnabled(f.state ~= "buying")
@@ -155,8 +160,10 @@ end
 -- the tab and closing the auction window all end here. A search still in
 -- flight is dropped with the queue; nothing else of the addon reads while
 -- the dialog is open (TC.BrowserState refuses it). A buyout already placed
--- cannot be called back: its outcome or the 5-second limit still ends it,
--- and the state runs the check when the player is still on the tab.
+-- cannot be called back: its outcome or the 5-second limit still ends it
+-- (settled here when a raise in PlaceBid kept the click from it), and the
+-- state runs the check when the player is still on the tab.
+local settle
 function Buy.Close()
     local f = flow
     if not f then return end
@@ -164,29 +171,61 @@ function Buy.Close()
     stopTicker()
     if f.state == "finding" then TC.AuctionQueue.CancelAll() end
     if dialog then dialog:Hide() end
-    if f.state ~= "buying" then finish(f, "cancelled") end
+    if f.state == "buying" then settle(f) else finish(f, "cancelled") end
+end
+
+-- What follows a placed buyout, once: the 5-second limit, the poll stopped
+-- and the dialog drawn as "Buying", each protected so a raise in one skips
+-- neither the others nor the end of the flow. A limit that cannot be armed
+-- ends the purchase as failed at once, so the pending bid never stays set.
+function settle(f)
+    if f.limited then return end
+    f.limited = true
+    local armed = xpcall(function()
+        -- no outcome within 5 seconds: the purchase did not go through
+        C_Timer.After(LIMIT, function()
+            if buying == f then fail(f) end
+        end)
+    end, report)
+    if flow == f then xpcall(stopTicker, report) end
+    if armed then
+        xpcall(draw, report)
+    else
+        xpcall(function() fail(f) end, report)
+    end
+end
+
+-- The poll while the dialog offers the auction. A flow found "buying" here
+-- had its click stopped by a raise in PlaceBid before settle ran: it is
+-- settled now, which also stops the poll.
+local function tick()
+    local f = flow
+    if f and f.state == "buying" then return settle(f) end
+    draw()
 end
 
 -- The OnClick handler of the dialog's Buy button: the one place the addon
--- places a buyout. PlaceBid is restricted and on retail needs a real click
--- (spec 4.5, inferred for Forever), so it is called here, inside the click,
--- with no timer, queue or event in between. The flow leaves "ready" before
--- the call, so a second click, a double click or a held key places nothing
--- more. The amount and the auction id are those of the chosen search
--- result, the price the dialog shows. The 5-second limit is armed before
--- anything that can raise and the draw runs protected, so an error in it
--- neither stops the call nor leaves the outcome pending forever.
+-- places a buyout. PlaceBid is the first call the handler makes: before it,
+-- only Lua values are read and written (no API call, frame method, timer,
+-- pcall or other module). On 2026-11-25 the client blocked it as a
+-- protected call (ADDON_ACTION_BLOCKED, "UNKNOWN()") when this handler made
+-- other calls first (the money and ready checks, the timer, the draw);
+-- Auctionator's buy button and Blizzard's BUYOUT_AUCTION accept call it
+-- first and are not blocked (Auctionator's bought in the same session).
+-- That the order is the cause is inferred; it is confirmed in game only
+-- once the owner's retest buys. The conditions the click used to check
+-- (money, the queue idle, the client ready) are f.allowed, kept current by
+-- every draw: the poll, PLAYER_MONEY and the client's ready event; a
+-- disabled button takes no click. The flow leaves "ready" before the call,
+-- so a second click, a double click or a held key places nothing more. The
+-- amount and the auction id are those of the chosen search result, the
+-- price the dialog shows.
 local function onBuyClick()
     local f = flow
-    if not canBuy(f) then return end
-    f.state, buying = "buying", f
-    stopTicker()
-    -- no outcome within 5 seconds: the purchase did not go through
-    C_Timer.After(LIMIT, function()
-        if buying == f then fail(f) end
-    end)
-    xpcall(draw, report)
+    if not (f and f.allowed and f.state == "ready" and f.auctionID and f.amount) then return end
+    f.state, f.allowed, buying = "buying", false, f
     C_AuctionHouse.PlaceBid(f.auctionID, f.amount)
+    settle(f)
 end
 
 -- A button in Blizzard's panel style; the bare button still works without
@@ -317,7 +356,7 @@ function Buy.Start(variant)
                 return finish(f, "gone")
             end
             f.state, f.auctionID, f.amount = "ready", best.auctionID, best.buyoutAmount
-            ticker = C_Timer.NewTicker(POLL, draw)
+            ticker = C_Timer.NewTicker(POLL, tick)
             draw()
         end,
         failed = function()
@@ -342,8 +381,16 @@ events:RegisterEvent("AUCTION_HOUSE_SHOW_ERROR")
 events:RegisterEvent("AUCTION_HOUSE_CLOSED")
 -- Combat starting: the dialog gives the keyboard up (see takeKeyboard).
 events:RegisterEvent("PLAYER_REGEN_DISABLED")
+-- The money and the client's ready state: the Buy button follows them at
+-- once while the dialog offers the auction (the poll catches the rest).
+events:RegisterEvent("PLAYER_MONEY")
+events:RegisterEvent("AUCTION_HOUSE_THROTTLED_SYSTEM_READY")
 events:SetScript("OnEvent", function(_, event, payload)
     if event == "AUCTION_HOUSE_CLOSED" then return Buy.Close() end
+    if event == "PLAYER_MONEY" or event == "AUCTION_HOUSE_THROTTLED_SYSTEM_READY" then
+        if flow and flow.state == "ready" then xpcall(draw, report) end
+        return
+    end
     if event == "PLAYER_REGEN_DISABLED" then
         if dialog then setKeyboard(dialog, false) end
         return
