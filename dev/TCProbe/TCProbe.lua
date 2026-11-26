@@ -2922,6 +2922,681 @@ local function startNames(arguments)
     end)
 end
 
+-- Art check: Blizzard art that could replace the browser's own glyphs, drawn
+-- so the owner can pick by eye. Entries are { atlas = name } or { file =
+-- path, coords = { left, right, top, bottom }, ratio = width / height,
+-- label = text }; current = the addon's own file. Each group lists the sizes
+-- the glyph is used at; button = it sits in a 30 x 30 header button. The
+-- three tutorial-frame cuts are TutorialFrame.xml's TexCoords (76 x 101).
+-- The block is a function of its own: the file's main chunk is at Lua's
+-- limit of 200 locals.
+local toggleArt
+;(function()
+local ART_MEDIA = "Interface\\AddOns\\TransmogChecker\\Media\\"
+local TUTORIAL_FRAME = "Interface\\TutorialFrame\\UI-TUTORIAL-FRAME"
+local MOUSE_RATIO = 76 / 101
+local ART_GROUPS = {
+    { title = "1. Catalogue toggle: all appearances of this slot", button = true, sizes = { 16 }, items = {
+        { file = ART_MEDIA .. "catalogue", current = true, label = "catalogue" },
+        { file = "Interface\\Icons\\UI_Transmog_ShowEquippedGear" },
+        { file = "Interface\\Icons\\INV_Chest_Cloth_17" },
+        { atlas = "UI-HUD-MicroMenu-Collections-Up" },
+        { atlas = "lootroll-icon-transmog" },
+        { atlas = "dressingroom-button-appearancelist-up" },
+        { atlas = "lootroll-toast-icon-transmog-up" },
+        { file = "Interface\\Icons\\INV_Misc_ScrollUnrolled01" },
+        { file = "Interface\\Icons\\INV_Misc_Note_02" },
+    } },
+    { title = "2. Sweep toggle: what is for sale, cheapest first", button = true, sizes = { 16 }, items = {
+        { file = ART_MEDIA .. "sweep", current = true, label = "sweep" },
+        { atlas = "coin-gold" },
+        { atlas = "auctionhouse-ui-sortarrow" },
+        { file = "Interface\\Icons\\INV_Misc_Coin_01" },
+        { file = "Interface\\Icons\\INV_Misc_Coin_02" },
+        { file = "Interface\\Buttons\\UI-GroupLoot-Coin-Up" },
+        { atlas = "bags-junkcoin" },
+        { file = "Interface\\Icons\\INV_Misc_Coin_17" },
+        { file = "Interface\\Icons\\UI_Shop" },
+    } },
+    { title = "3. Mouse-wheel hint: the wheel turns pages", sizes = { 16 }, items = {
+        { file = ART_MEDIA .. "wheel", current = true, label = "wheel" },
+        { file = TUTORIAL_FRAME, coords = { 0.0019531, 0.1484375, 0.2246094, 0.4199219 }, ratio = MOUSE_RATIO,
+            label = "UI-TUTORIAL-FRAME wheel" },
+        { file = TUTORIAL_FRAME, coords = { 0.0019531, 0.1484375, 0.4257813, 0.6210938 }, ratio = MOUSE_RATIO,
+            label = "UI-TUTORIAL-FRAME left click" },
+        { file = TUTORIAL_FRAME, coords = { 0.0019531, 0.1484375, 0.6269531, 0.8222656 }, ratio = MOUSE_RATIO,
+            label = "UI-TUTORIAL-FRAME right click" },
+        { atlas = "newplayertutorial-icon-mouse-turn" },
+        { atlas = "newplayertutorial-icon-mouse-leftbutton" },
+        { atlas = "newplayertutorial-icon-mouse-down" },
+        { atlas = "ui-hud-actionbar-pagedownarrow-up" },
+        { file = "Interface\\Buttons\\UI-ScrollBar-ScrollDownButton-Up" },
+    } },
+    { title = "4. Quick buy: buy without the dialog", sizes = { 16 }, items = {
+        { file = "Interface\\Icons\\Spell_Nature_Lightning" },
+        { atlas = "BossBanner-RedLightning" },
+        { file = "Interface\\Cursor\\Buy" },
+        { file = "Interface\\MerchantFrame\\UI-BuyBack-Icon" },
+        { atlas = "auctionhouse-icon-checkmark" },
+        { atlas = "common-icon-forwardarrow" },
+    } },
+    { title = "5. Bought, not collected yet: tile mark and list button", sizes = { 16, 24 }, items = {
+        { file = "Interface\\PaperDollInfoFrame\\UI-GearManager-ItemIntoBag" },
+        { atlas = "bags-greenarrow" },
+        { atlas = "auctionhouse-icon-clock" },
+        { file = "Interface\\RaidFrame\\ReadyCheck-Waiting" },
+        { file = "Interface\\Icons\\INV_Misc_Bag_08" },
+        { file = "Interface\\GossipFrame\\AvailableQuestIcon" },
+        { atlas = "icon-clock" },
+        { atlas = "bags-newitem" },
+    } },
+    { title = "6. Funnel: filter menu button", button = true, sizes = { 16 }, items = {
+        { atlas = "Map-Filter-Button", label = "Map-Filter-Button (today)" },
+        { atlas = "ui-questtrackerbutton-filter" },
+        { atlas = "ui-questtrackerbutton-filter-pressed" },
+        { atlas = "common-dropdown-a-button" },
+        { atlas = "common-search-magnifyingglass" },
+        { atlas = "ui-hud-minimap-tracking-up" },
+        { atlas = "auctionhouse-ui-dropdown-arrow-down" },
+        { atlas = "common-icon-search" },
+    } },
+    { title = "7. Filter active / reset mark", sizes = { 14 }, items = {
+        { atlas = "auctionhouse-ui-filter-redx", label = "auctionhouse-ui-filter-redx (today)" },
+        { atlas = "common-search-clearbutton" },
+        { atlas = "communities-icon-redx" },
+        { atlas = "groupfinder-icon-redx" },
+        { atlas = "adventureguide-redx" },
+        { atlas = "common-icon-undo" },
+        { file = "Interface\\Buttons\\UI-GroupLoot-Pass-Up" },
+        { file = "Interface\\FriendsFrame\\ClearBroadcastIcon" },
+    } },
+    { title = "8. Price this slot / scan", sizes = { 16 }, items = {
+        { file = "Interface\\Buttons\\UI-RefreshButton" },
+        { atlas = "communities-icon-searchmagnifyingglass" },
+        { atlas = "glues-characterSelect-icon-search" },
+        { file = "Interface\\Icons\\INV_Misc_Spyglass_03" },
+        { atlas = "auctionhouse-ui-loadingspinner" },
+        { file = "Interface\\TimeManager\\ResetButton" },
+        { atlas = "UI-RefreshButton" },
+    } },
+    { title = "9. Every-slot sweep: all slots at once", sizes = { 16 }, items = {
+        { file = "Interface\\Icons\\Ability_Racial_JackofAllTrades" },
+        { file = "Interface\\Icons\\INV_SideTab_Stats_c60" },
+        { file = "Interface\\Icons\\INV_Misc_Bag_EnchantedRunecloth" },
+        { file = "Interface\\Icons\\UI_Warbands" },
+        { file = "Interface\\Icons\\Achievement_Quests_Completed_TwilightHighlands" },
+        { atlas = "common-button-list-plus" },
+        { atlas = "UI-HUD-MicroMenu-Shop-Up" },
+    } },
+}
+-- Layout: cells per row, cell and heading sizes, the height pages fill.
+local ART_COLUMNS, ART_CELL_WIDTH, ART_CELL_HEIGHT, ART_HEADING = 4, 160, 74, 20
+local ART_MARGIN, ART_TOP, ART_CONTENT_HEIGHT = 16, 84, 430
+local ART_ERRORS = 20
+
+local art = {}
+
+-- Calls obj:method(...) through call, or the global function when obj is
+-- _G, keeping the first errors for the recording.
+local function artCall(obj, method, ...)
+    local result
+    if obj == _G then
+        result = call(_G, method, ...)
+    else
+        result = call(obj, method, obj, ...)
+    end
+    if (result.error or result.missing) and art.record and #art.record.errors < ART_ERRORS then
+        art.record.errors[#art.record.errors + 1] = method .. ": " .. (result.error or "missing")
+    end
+    return result
+end
+
+local function artTexture(parent, layer, size, x, y)
+    local texture = artCall(parent, "CreateTexture", nil, layer)[1]
+    if type(texture) ~= "table" then
+        return nil
+    end
+    artCall(texture, "SetSize", size, size)
+    artCall(texture, "SetPoint", "TOPLEFT", x, y)
+    return texture
+end
+
+local function artText(parent, font, x, y, width, text)
+    local label = artCall(parent, "CreateFontString", nil, "OVERLAY", font)[1]
+    if type(label) ~= "table" then
+        return nil
+    end
+    artCall(label, "SetPoint", "TOPLEFT", x, y)
+    if width then
+        artCall(label, "SetWidth", width)
+    end
+    artCall(label, "SetJustifyH", "LEFT")
+    artCall(label, "SetText", text)
+    return label
+end
+
+-- One candidate: its number, a 30 x 30 dark square holding it at 16 for
+-- button glyphs, the group's sizes, 32 x 32, and the name below.
+local function drawCandidate(parent, group, entry, x, y)
+    local name = entry.atlas or entry.file
+    local label = entry.label or (entry.atlas or entry.file:match("([^\\]+)$"))
+    if entry.current then
+        label = "current: " .. label
+    end
+    artText(parent, "GameFontNormal", x, y - 8, nil, tostring(entry.number))
+    if entry.atlas and not entry.exists then
+        artText(parent, "GameFontNormalSmall", x, y - 36, ART_CELL_WIDTH - 6, "|cffff2020missing|r " .. label)
+        return
+    end
+    local row = {}
+    local left = x + 24
+    if group.button then
+        local square = artTexture(parent, "BACKGROUND", 30, left, y)
+        if square then
+            artCall(square, "SetColorTexture", 0, 0, 0, 1)
+        end
+        row[#row + 1] = { 16, left + 7, y - 7 }
+        left = left + 36
+    end
+    for _, size in ipairs(group.sizes) do
+        row[#row + 1] = { size, left, y - (32 - size) / 2 }
+        left = left + size + 6
+    end
+    row[#row + 1] = { 32, left, y }
+    for _, spot in ipairs(row) do
+        local size = spot[1]
+        local texture = artTexture(parent, "ARTWORK", size, spot[2], spot[3])
+        if texture then
+            if entry.ratio then
+                artCall(texture, "SetWidth", size * entry.ratio)
+            end
+            if entry.atlas then
+                artCall(texture, "SetAtlas", name)
+            else
+                artCall(texture, "SetTexture", name)
+                if entry.coords then
+                    artCall(texture, "SetTexCoord", unpack(entry.coords))
+                end
+            end
+        end
+    end
+    artText(parent, "GameFontHighlightSmall", x, y - 36, ART_CELL_WIDTH - 6, label)
+end
+
+-- Asks the client about every atlas candidate and records the answers.
+local function checkArtAtlases()
+    local record = art.record
+    for _, group in ipairs(ART_GROUPS) do
+        for _, entry in ipairs(group.items) do
+            if entry.atlas then
+                local result = call(C_Texture, "GetAtlasInfo", entry.atlas)
+                local info = result[1]
+                entry.exists = type(info) == "table"
+                record.atlasCandidates = record.atlasCandidates + 1
+                record.atlasesFound = record.atlasesFound + (entry.exists and 1 or 0)
+                record.atlases[#record.atlases + 1] = {
+                    number = entry.number, name = entry.atlas, answered = entry.exists,
+                    width = entry.exists and info.width or nil, height = entry.exists and info.height or nil,
+                    failure = result.missing and "GetAtlasInfo missing" or result.error,
+                }
+            end
+        end
+    end
+end
+
+-- Lays the groups out on pages: a group starts a new page when it does not
+-- fit below the one before.
+local function layOutArt(frame)
+    art.pages = {}
+    local page, y
+    for _, group in ipairs(ART_GROUPS) do
+        local rows = math.ceil(#group.items / ART_COLUMNS)
+        local height = ART_HEADING + rows * ART_CELL_HEIGHT
+        if not page or y + height > ART_CONTENT_HEIGHT then
+            page = artCall(_G, "CreateFrame", "Frame", nil, frame)
+            page = page[1]
+            if type(page) ~= "table" then
+                return false
+            end
+            artCall(page, "SetAllPoints")
+            artCall(page, "Hide")
+            art.pages[#art.pages + 1] = page
+            y = 0
+        end
+        artText(page, "GameFontNormal", ART_MARGIN, -ART_TOP - y, nil, group.title)
+        for i, entry in ipairs(group.items) do
+            local column, row = (i - 1) % ART_COLUMNS, math.floor((i - 1) / ART_COLUMNS)
+            drawCandidate(page, group, entry, ART_MARGIN + column * ART_CELL_WIDTH,
+                -ART_TOP - y - ART_HEADING - row * ART_CELL_HEIGHT)
+        end
+        y = y + height
+    end
+    return true
+end
+
+local function showArtPage(page)
+    page = math.min(math.max(page, 1), #art.pages)
+    art.page = page
+    for i, frame in ipairs(art.pages) do
+        artCall(frame, i == page and "Show" or "Hide")
+    end
+    artCall(art.title, "SetText", ("TCProbe art  |  page %d of %d"):format(page, #art.pages))
+    art.record.pagesShown[#art.record.pagesShown + 1] = page
+end
+
+local function artButton(parent, text, width, onClick)
+    local button = artCall(_G, "CreateFrame", "Button", nil, parent, "UIPanelButtonTemplate")[1]
+    if type(button) ~= "table" then
+        button = artCall(_G, "CreateFrame", "Button", nil, parent)[1]
+        if type(button) ~= "table" then
+            return nil
+        end
+        artCall(button, "SetNormalFontObject", "GameFontNormalLarge")
+    end
+    artCall(button, "SetSize", width, 24)
+    artCall(button, "SetText", text)
+    artCall(button, "SetScript", "OnClick", onClick)
+    return button
+end
+
+local function createArtFrame()
+    local frame = artCall(_G, "CreateFrame", "Frame", nil, UIParent)[1]
+    if type(frame) ~= "table" then
+        return nil
+    end
+    artCall(frame, "SetSize", 2 * ART_MARGIN + ART_COLUMNS * ART_CELL_WIDTH, ART_TOP + ART_CONTENT_HEIGHT + ART_MARGIN)
+    artCall(frame, "SetPoint", "CENTER")
+    artCall(frame, "SetFrameStrata", "HIGH")
+    artCall(frame, "SetMovable", true)
+    artCall(frame, "SetClampedToScreen", true)
+    artCall(frame, "EnableMouse", true)
+    artCall(frame, "EnableMouseWheel", true)
+    artCall(frame, "RegisterForDrag", "LeftButton")
+    artCall(frame, "SetScript", "OnDragStart", function()
+        artCall(frame, "StartMoving")
+    end)
+    artCall(frame, "SetScript", "OnDragStop", function()
+        artCall(frame, "StopMovingOrSizing")
+    end)
+    artCall(frame, "SetScript", "OnMouseWheel", function(_, delta)
+        showArtPage(art.page - (delta or 0))
+    end)
+    local background = artTexture(frame, "BACKGROUND", 1, 0, 0)
+    if background then
+        artCall(background, "SetAllPoints")
+        artCall(background, "SetColorTexture", 0.05, 0.05, 0.05, 0.95)
+    end
+    art.title = artText(frame, "GameFontNormalLarge", ART_MARGIN, -12, nil, "TCProbe art")
+    artText(frame, "GameFontHighlightSmall", ART_MARGIN, -40, ART_COLUMNS * ART_CELL_WIDTH,
+        "Answer with numbers, e.g. \"catalogue: 3, sweep: 12\". Each candidate is shown at the size it would be used and at 32 x 32. "
+        .. "A red \"missing\" is an atlas this client does not know. A texture file that does not exist shows as a solid green or empty square. "
+        .. "Mouse wheel or < > turns pages.")
+    local close = artButton(frame, "X", 28, function()
+        artCall(frame, "Hide")
+    end)
+    if close then
+        artCall(close, "SetPoint", "TOPRIGHT", -ART_MARGIN, -10)
+    end
+    local forward = artButton(frame, ">", 36, function()
+        showArtPage(art.page + 1)
+    end)
+    if forward and close then
+        artCall(forward, "SetPoint", "RIGHT", close, "LEFT", -10, 0)
+    end
+    local back = artButton(frame, "<", 36, function()
+        showArtPage(art.page - 1)
+    end)
+    if back and forward then
+        artCall(back, "SetPoint", "RIGHT", forward, "LEFT", -4, 0)
+    end
+    if not layOutArt(frame) then
+        return nil
+    end
+    return frame
+end
+
+-- "/tcprobe art": opens the candidates, or closes them when open. Calls no
+-- auction house function.
+function toggleArt()
+    if art.frame and call(art.frame, "IsShown", art.frame)[1] then
+        artCall(art.frame, "Hide")
+        return
+    end
+    if not art.frame then
+        art.record = { recordedAt = date("%Y-%m-%d %H:%M:%S"), atlasCandidates = 0, atlasesFound = 0,
+            atlases = {}, errors = {}, pagesShown = {} }
+        db.art = art.record
+        local number = 0
+        for _, group in ipairs(ART_GROUPS) do
+            for _, entry in ipairs(group.items) do
+                number = number + 1
+                entry.number = number
+            end
+        end
+        art.record.candidates = number
+        checkArtAtlases()
+        art.frame = createArtFrame()
+        if not art.frame then
+            print("TCProbe: art: the frame could not be made; /reload to save what was recorded.")
+            return
+        end
+    end
+    artCall(art.frame, "Show")
+    showArtPage(art.page or 1)
+    print(("TCProbe: art: %d of %d atlas candidates exist on this client. Pick by number, then /reload when done."):format(
+        art.record.atlasesFound, art.record.atlasCandidates))
+end
+end)()
+
+-- Purchase watch: "/tcprobe buywatch" records, in order and in milliseconds
+-- since its start, every call anyone makes to the auction house's sending
+-- and buying functions and every auction, money, error and blocked-action
+-- event, so it can be seen what a purchase attempt makes the client do. It
+-- only observes: it sends nothing to the auction house, and its reads
+-- (GetAuctionInfoByID, the search results already held) are local. Hooks
+-- are installed on the first start and do nothing while no recording runs;
+-- every hook and handler body runs under pcall. Its own function, like the
+-- art check, for the 200-local limit of the main chunk.
+local buyWatch
+;(function()
+local WATCH_MAX = 2000
+local WATCH_SECONDS = 600
+local THROTTLE_WATCH_MS = 3000
+local STACK_LINES = 12
+local ROWS_KEPT = 5
+-- Hooked calls (GetItemKeyInfo is left out: it is called for every row).
+local HOOKED = { "PlaceBid", "SendSearchQuery", "SendSellSearchQuery", "SendBrowseQuery", "RequestMoreBrowseResults",
+    "RequestMoreItemSearchResults", "RefreshItemSearchResults", "StartCommoditiesPurchase",
+    "ConfirmCommoditiesPurchase", "CancelCommoditiesPurchase" }
+-- Every AUCTION_HOUSE_ event AuctionHouseDocumentation.lua lists on 1.60.1,
+-- then the others recorded; ITEM_PURCHASED, BID_ADDED and the COMMODITY_
+-- purchase events are outcomes a purchase may fire.
+local EVENTS = { "AUCTION_HOUSE_AUCTION_CREATED", "AUCTION_HOUSE_AUCTIONS_EXPIRED", "AUCTION_HOUSE_BROWSE_FAILURE",
+    "AUCTION_HOUSE_BROWSE_RESULTS_ADDED", "AUCTION_HOUSE_BROWSE_RESULTS_UPDATED", "AUCTION_HOUSE_CLOSED",
+    "AUCTION_HOUSE_DISABLED", "AUCTION_HOUSE_FAVORITES_UPDATED", "AUCTION_HOUSE_ITEM_DELIVERY_DELAY_UPDATE",
+    "AUCTION_HOUSE_NEW_BID_RECEIVED", "AUCTION_HOUSE_NEW_RESULTS_RECEIVED", "AUCTION_HOUSE_POST_ERROR",
+    "AUCTION_HOUSE_POST_WARNING", "AUCTION_HOUSE_PURCHASE_COMPLETED", "AUCTION_HOUSE_SCRIPT_DEPRECATED",
+    "AUCTION_HOUSE_SHOW", "AUCTION_HOUSE_SHOW_COMMODITY_WON_NOTIFICATION", "AUCTION_HOUSE_SHOW_ERROR",
+    "AUCTION_HOUSE_SHOW_FORMATTED_NOTIFICATION", "AUCTION_HOUSE_SHOW_NOTIFICATION",
+    "AUCTION_HOUSE_THROTTLED_MESSAGE_DROPPED", "AUCTION_HOUSE_THROTTLED_MESSAGE_QUEUED",
+    "AUCTION_HOUSE_THROTTLED_MESSAGE_RESPONSE_RECEIVED", "AUCTION_HOUSE_THROTTLED_MESSAGE_SENT",
+    "AUCTION_HOUSE_THROTTLED_SYSTEM_READY",
+    "ITEM_SEARCH_RESULTS_UPDATED", "ITEM_SEARCH_RESULTS_ADDED", "COMMODITY_SEARCH_RESULTS_UPDATED",
+    "ITEM_KEY_ITEM_INFO_RECEIVED", "BIDS_UPDATED", "OWNED_AUCTIONS_UPDATED", "PLAYER_MONEY", "UI_ERROR_MESSAGE",
+    "UI_INFO_MESSAGE", "CHAT_MSG_SYSTEM", "ADDON_ACTION_BLOCKED", "ADDON_ACTION_FORBIDDEN", "MACRO_ACTION_BLOCKED",
+    "MACRO_ACTION_FORBIDDEN", "LUA_WARNING", "PLAYER_REGEN_DISABLED", "PLAYER_REGEN_ENABLED",
+    "ITEM_PURCHASED", "BID_ADDED", "COMMODITY_PURCHASE_SUCCEEDED", "COMMODITY_PURCHASE_FAILED", "COMMODITY_PURCHASED" }
+local KEY_FIELDS = { "itemID", "itemLevel", "itemSuffix", "battlePetSpeciesID", "auctionID", "searchString",
+    "sortOrder", "reverseSort", "quantity", "buyoutAmount" }
+
+-- watch: the recording running, or nil. hooked: the hooks are installed.
+-- listener and ticker: the event frame and the per-frame throttle watch.
+-- keys: the item keys searched during the recording, newest last.
+local watch, hooked, listener, ticker
+local keys = {}
+
+local function now()
+    return math.floor((milliseconds() - watch.startMs) * 10 + 0.5) / 10
+end
+
+local function short(value, depth)
+    local kind = type(value)
+    if kind == "string" then
+        return #value > 160 and value:sub(1, 160) .. "..." or value
+    elseif kind ~= "table" then
+        return tostring(value)
+    end
+    if (depth or 0) >= 2 then return "{...}" end
+    local parts = {}
+    for _, field in ipairs(KEY_FIELDS) do
+        if value[field] ~= nil then parts[#parts + 1] = field .. "=" .. short(value[field], (depth or 0) + 1) end
+    end
+    if #parts == 0 then
+        local n = 0
+        for k, v in pairs(value) do
+            n = n + 1
+            if n > 6 then parts[#parts + 1] = "..." break end
+            parts[#parts + 1] = tostring(k) .. "=" .. short(v, (depth or 0) + 1)
+        end
+    end
+    return "{" .. table.concat(parts, ",") .. "}"
+end
+
+local function argsText(...)
+    local parts = {}
+    for i = 1, select("#", ...) do
+        local v = select(i, ...)
+        parts[i] = short(v) .. ":" .. type(v)
+    end
+    return table.concat(parts, " | ")
+end
+
+local function add(entry)
+    local list = watch.record.entries
+    if #list >= WATCH_MAX then
+        watch.record.dropped = (watch.record.dropped or 0) + 1
+        return
+    end
+    entry.t = now()
+    list[#list + 1] = entry
+end
+
+local function ready()
+    return answer(call(C_AuctionHouse, "IsThrottledMessageSystemReady"))
+end
+
+local function moneyText(copper)
+    if type(copper) ~= "number" then return tostring(copper) end
+    return ("%dg %ds %dc"):format(math.floor(copper / 10000), math.floor(copper / 100) % 100, copper % 100)
+end
+
+local function secureText(...)
+    if type(issecurevariable) ~= "function" then return "missing" end
+    local ok, secure, taintedBy = pcall(issecurevariable, ...)
+    if not ok then return "(" .. tostring(secure) .. ")" end
+    return tostring(secure) .. (taintedBy and (" by " .. tostring(taintedBy)) or "")
+end
+
+local function state(label)
+    local frameShown = AuctionHouseFrame and answer(call(AuctionHouseFrame, "IsShown", AuctionHouseFrame))
+    add({ kind = "state", name = label, money = answer(call(_G, "GetMoney")), auctionHouseFrameShown = tostring(frameShown),
+        throttleReady = tostring(ready()), inCombat = tostring(answer(call(_G, "InCombatLockdown"))),
+        secureTable = secureText("C_AuctionHouse"),
+        securePlaceBid = C_AuctionHouse and C_AuctionHouse.PlaceBid and secureText(C_AuctionHouse, "PlaceBid") or "missing" })
+end
+
+-- The rows the client holds for a key now, the first few, read locally.
+local function heldRows(key)
+    local count = answer(call(C_AuctionHouse, "GetNumItemSearchResults", key))
+    local rows = {}
+    for i = 1, math.min(type(count) == "number" and count or 0, ROWS_KEPT) do
+        local row = call(C_AuctionHouse, "GetItemSearchResultInfo", key, i)[1]
+        rows[#rows + 1] = short(row)
+    end
+    return count, rows
+end
+
+-- Where a bid's auction id is among the results the client holds for the
+-- keys searched during the recording: "key index", or "not held".
+local function findHeld(auctionID)
+    for k = #keys, 1, -1 do
+        local count = answer(call(C_AuctionHouse, "GetNumItemSearchResults", keys[k]))
+        for i = 1, type(count) == "number" and count or 0 do
+            local row = call(C_AuctionHouse, "GetItemSearchResultInfo", keys[k], i)[1]
+            if type(row) == "table" and row.auctionID == auctionID then
+                return short(keys[k]) .. " #" .. i .. " of " .. count .. " buyout " .. tostring(row.buyoutAmount)
+            end
+        end
+    end
+    return "not held (" .. #keys .. " keys looked at)"
+end
+
+local function stack()
+    if type(debugstack) ~= "function" then return "missing" end
+    local ok, text = pcall(debugstack, 2, STACK_LINES, 0)
+    if not ok or type(text) ~= "string" then return "(" .. tostring(text) .. ")" end
+    text = text:gsub("\n", " <- ")
+    return #text > 1200 and text:sub(1, 1200) .. "..." or text
+end
+
+local function onTick()
+    if not watch or not watch.throttleUntil then return end
+    local r = tostring(ready())
+    if r ~= watch.lastReady then
+        watch.lastReady = r
+        add({ kind = "throttle", ready = r })
+    end
+    if milliseconds() > watch.throttleUntil then
+        watch.throttleUntil = nil
+        pcall(ticker.SetScript, ticker, "OnUpdate", nil)
+    end
+end
+
+local CALL_BODIES = {
+    PlaceBid = function(auctionID, amount)
+        local r = ready()
+        local money = answer(call(_G, "GetMoney"))
+        local info = call(C_AuctionHouse, "GetAuctionInfoByID", auctionID)
+        add({ kind = "call", name = "PlaceBid", args = argsText(auctionID, amount), throttleReadyAfter = tostring(r),
+            money = money, auctionInfo = info.missing and "missing" or info.error and ("(" .. info.error .. ")") or short(info[1]),
+            held = findHeld(auctionID), stack = stack(),
+            issecret = type(issecretvalue) == "function" and tostring(answer(call(_G, "issecretvalue", amount))) or "missing" })
+        state("atPlaceBid")
+        watch.record.placeBids = watch.record.placeBids + 1
+        watch.lastReady = tostring(r)
+        watch.throttleUntil = milliseconds() + THROTTLE_WATCH_MS
+        if ticker then pcall(ticker.SetScript, ticker, "OnUpdate", function() pcall(onTick) end) end
+        print(("TCProbe: PlaceBid auction %s for %s, throttle ready right after: %s."):format(tostring(auctionID),
+            moneyText(amount), r == true and "yes" or r == false and "no" or tostring(r)))
+    end,
+    SendSearchQuery = function(itemKey, sorts, separateOwnerItems, ...)
+        if type(itemKey) == "table" then
+            keys[#keys + 1] = itemKey
+            if #keys > 10 then table.remove(keys, 1) end
+        end
+        local sortText = {}
+        for i, s in ipairs(type(sorts) == "table" and sorts or {}) do sortText[i] = short(s) end
+        add({ kind = "call", name = "SendSearchQuery", itemKey = short(itemKey), sorts = table.concat(sortText, " "),
+            separateOwnerItems = tostring(separateOwnerItems), more = argsText(...), throttleReadyAfter = tostring(ready()),
+            stack = stack() })
+    end,
+    SendBrowseQuery = function(query)
+        add({ kind = "call", name = "SendBrowseQuery",
+            searchString = type(query) == "table" and short(query.searchString) or short(query),
+            itemClassFilters = tostring(type(query) == "table" and type(query.itemClassFilters) == "table"
+                and #query.itemClassFilters > 0), throttleReadyAfter = tostring(ready()), stack = stack() })
+    end,
+}
+
+local function hookBody(name)
+    local body = CALL_BODIES[name] or function(...)
+        add({ kind = "call", name = name, args = argsText(...), throttleReadyAfter = tostring(ready()), stack = stack() })
+    end
+    return function(...)
+        if not watch then return end
+        local ok, err = pcall(body, ...)
+        if not ok and watch then
+            watch.record.hookErrors = watch.record.hookErrors + 1
+            pcall(add, { kind = "hookError", name = name, error = tostring(err) })
+        end
+    end
+end
+
+local function installHooks()
+    hooked = { installed = {}, missing = {} }
+    if type(hooksecurefunc) ~= "function" or type(C_AuctionHouse) ~= "table" then
+        hooked.missing[1] = "hooksecurefunc or C_AuctionHouse"
+        return
+    end
+    for _, name in ipairs(HOOKED) do
+        if type(C_AuctionHouse[name]) == "function" and pcall(hooksecurefunc, C_AuctionHouse, name, hookBody(name)) then
+            hooked.installed[#hooked.installed + 1] = name
+        else
+            hooked.missing[#hooked.missing + 1] = name
+        end
+    end
+end
+
+local function errorName(code)
+    local enum = Enum and Enum.AuctionHouseError
+    if type(enum) ~= "table" then return "no enum" end
+    for name, value in pairs(enum) do
+        if value == code then return name end
+    end
+    return "unknown"
+end
+
+local function onEvent(_, event, ...)
+    if not watch or event == "PLAYER_LOGOUT" then return end
+    local entry = { kind = "event", name = event, args = argsText(...) }
+    local first = ...
+    if event == "PLAYER_MONEY" then
+        entry.money = answer(call(_G, "GetMoney"))
+    elseif event == "AUCTION_HOUSE_SHOW_ERROR" then
+        entry.errorName = errorName(first)
+        print(("TCProbe: AUCTION_HOUSE_SHOW_ERROR %s (%s)."):format(tostring(first), entry.errorName))
+    elseif event == "AUCTION_HOUSE_PURCHASE_COMPLETED" then
+        print(("TCProbe: AUCTION_HOUSE_PURCHASE_COMPLETED auction %s."):format(tostring(first)))
+    elseif (event == "ITEM_SEARCH_RESULTS_UPDATED" or event == "ITEM_SEARCH_RESULTS_ADDED") and type(first) == "table" then
+        entry.held, entry.rows = heldRows(first)
+    end
+    add(entry)
+end
+
+local function stop(reason)
+    if not watch then return end
+    state("stop")
+    local record = watch.record
+    record.stoppedBy = reason
+    if listener then stopListening(listener) end
+    if ticker then pcall(ticker.SetScript, ticker, "OnUpdate", nil) end
+    watch = nil
+    print(("TCProbe: buywatch stopped (%s): %d entries, %d PlaceBid calls. /reload now."):format(reason,
+        #record.entries, record.placeBids))
+end
+
+local function start()
+    if watch then stop("restarted") end
+    local record = { recordedAt = date("%Y-%m-%d %H:%M:%S"), entries = {}, placeBids = 0, hookErrors = 0 }
+    db.buywatch = record
+    watch = { record = record, startMs = milliseconds(), id = {} }
+    keys = {}
+    state("start")
+    if not hooked then installHooks() end
+    record.hooked, record.notHooked = hooked.installed, hooked.missing
+    state("hooksInstalled")
+    local registered, refused
+    listener, registered, refused = listen(EVENTS, function(...) pcall(onEvent, ...) end)
+    record.events, record.refusedEvents = #registered, refused
+    if not ticker then ticker = CreateFrame("Frame") end
+    local id = watch.id
+    if C_Timer and C_Timer.After then
+        pcall(C_Timer.After, WATCH_SECONDS, function()
+            if watch and watch.id == id then pcall(stop, "10 minutes") end
+        end)
+    end
+    print("TCProbe: watching purchases. Try a purchase, then /tcprobe buywatch stop.")
+end
+
+-- "/tcprobe buywatch [stop | mark <text>]"; text: the slash text as typed.
+function buyWatch(rest, text)
+    local word = rest:match("^(%S*)")
+    if word == "stop" then
+        if watch then stop("stop command") else print("TCProbe: buywatch is not running.") end
+    elseif word == "mark" then
+        local note = text:match("^%s*%S+%s+%S+%s*(.-)%s*$") or ""
+        if not watch then
+            print("TCProbe: buywatch is not running; /tcprobe buywatch starts it.")
+            return
+        end
+        add({ kind = "mark", text = note })
+        print("TCProbe: mark: " .. note)
+    else
+        start()
+    end
+end
+end)()
+
 local function probeStatic()
     probeClient()
     probeNamespaces()
@@ -3031,6 +3706,10 @@ SlashCmdList["TCPROBE"] = function(msg)
         startNames(rest)
     elseif word == "find" then
         startFind()
+    elseif word == "art" then
+        toggleArt()
+    elseif word == "buywatch" then
+        buyWatch(rest, msg)
     else
         probeStatic()
     end
