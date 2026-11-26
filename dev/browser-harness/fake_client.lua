@@ -5,6 +5,13 @@
 local Fake = {}
 -- The C_* tables already made to record calls (Fake.new makes new ones).
 local traceWrapped = setmetatable({}, { __mode = "k" })
+-- Lua's own global functions as the harness found them: a click's recorder
+-- (c.click) wraps every other global function, and pcall and xpcall.
+local STANDARD = {}
+for name, v in pairs(_G) do
+    if type(v) == "function" then STANDARD[name] = v end
+end
+local rawPcall = pcall
 
 local PLAYER_CLASS = 9 -- Warlock, the character the probe ran on
 
@@ -67,6 +74,7 @@ end
 --                   a number: on that many first reads)
 --   listRaisesFor   GetCategoryAppearances raises for that category
 --   noEnumMembers   a list of { enum name, member } the client lacks
+--   noAuctionErrors Enum.AuctionHouseError is nil
 --   listNil         GetCategoryAppearances returns nil
 --   listEmpty       the first that many reads of GetCategoryAppearances
 --                   return an empty table
@@ -139,8 +147,9 @@ function Fake.new(opts)
     -- The calls a click makes before its PlaceBid: from the start of a
     -- c.click until PlaceBid, every frame method, every C_* function (on
     -- C_AuctionHouse every field read but PlaceBid's), a ticker's Cancel and
-    -- GetMoney is recorded in c.trace by name; each bid keeps its list as
-    -- bid.before. xpcall and pcall are not seen.
+    -- GetMoney is recorded in c.trace by name, and so are, while the click
+    -- runs, every other global function, pcall, xpcall and every function
+    -- of a TC module (wrapForClick); each bid keeps its list as bid.before.
     c.trace = {}
     local function traced(name)
         if c.tracing then c.trace[#c.trace + 1] = name end
@@ -346,8 +355,16 @@ function Fake.new(opts)
             IndexWaistType = 6, IndexLegsType = 7, IndexFeetType = 8, IndexWristType = 9, IndexHandType = 10,
             IndexWeaponType = 13, IndexShieldType = 14, IndexCloakType = 16, IndexTabardType = 19,
             IndexRobeType = 20, IndexHoldableType = 23 },
+        -- AuctionHouseEnumsDocumentation.lua:25-51
+        AuctionHouseError = { NotEnoughMoney = 0, HigherBid = 1, BidIncrement = 2, BidOwn = 3, ItemNotFound = 4,
+            RestrictedAccountTrial = 5, HasRestriction = 6, IsBusy = 7, Unavailable = 8, ItemHasQuote = 9,
+            DatabaseError = 10, MinBid = 11, NotEnoughItems = 12, RepairItem = 13, UsedCharges = 14, QuestItem = 15,
+            BoundItem = 16, ConjuredItem = 17, LimitedDurationItem = 18, IsBag = 19, EquippedBag = 20,
+            WrappedItem = 21, LootItem = 22, DoubleBid = 23, FavoritesMaxed = 24, ItemNotAvailable = 25,
+            ItemBoundToAccountUntilEquip = 26 },
     }
     if opts.noScanEnums then Enum.ItemClass = nil end
+    if opts.noAuctionErrors then Enum.AuctionHouseError = nil end
     -- a list of { enum, member } the client lacks
     for _, missing in ipairs(opts.noEnumMembers or {}) do Enum[missing[1]][missing[2]] = nil end
     GameTooltip = c.newWidget("GameTooltip", "GameTooltip")
@@ -355,11 +372,17 @@ function Fake.new(opts)
     UIParent = c.newWidget("Frame", "UIParent")
     GameFontNormal = not opts.noFontObjects and c.newWidget("Font", "GameFontNormal") or nil
     GameFontHighlightSmall = not opts.noFontObjects and c.newWidget("Font", "GameFontHighlightSmall") or nil
+    -- the money display's fonts (GameFontStyles.xml:58-78)
+    PriceFontWhite = not opts.noFontObjects and c.newWidget("Font", "PriceFontWhite") or nil
+    PriceFontRed = not opts.noFontObjects and c.newWidget("Font", "PriceFontRed") or nil
     print = function(...)
         local parts = {}
         for i = 1, select("#", ...) do parts[#parts + 1] = tostring((select(i, ...))) end
         c.printed[#c.printed + 1] = table.concat(parts, " ")
     end
+    -- PlaySound (SoundDocumentation): recorded in c.sounds.
+    c.sounds = {}
+    function PlaySound(kit) c.sounds[#c.sounds + 1] = kit end
     -- The client's error handler records what it is given.
     c.errors = {}
     function geterrorhandler()
@@ -580,6 +603,26 @@ function Fake.new(opts)
         local w = c.newWidget(kind, name, parent, template)
         -- IconButtonTemplate's Icon (IconButtonTemplate.xml:23-29)
         if template == "SquareIconButtonTemplate" then w.Icon = w:CreateTexture() end
+        -- MoneyDisplayFrameMixin:SetAmount (MoneyFrame.lua:557-572): the
+        -- fake shows the amount as text in the item list's form ("1g 5c"),
+        -- so a test reads the price the same way with or without it
+        if template == "MoneyDisplayFrameTemplate" then
+            w.SetAmount = function(self, copper)
+                traced("MoneyDisplayFrame:SetAmount")
+                misuse(type(copper) == "number", "SetAmount with " .. type(copper))
+                self.amount = copper
+                local words = {}
+                local parts = { math.floor(copper / 10000), math.floor(copper / 100) % 100, copper % 100 }
+                for i, letter in ipairs({ "g", "s", "c" }) do
+                    if parts[i] > 0 then words[#words + 1] = parts[i] .. letter end
+                end
+                self.text = table.concat(words, " ")
+            end
+            w.SetFontObject = function(self, font)
+                traced("MoneyDisplayFrame:SetFontObject")
+                self.font = font
+            end
+        end
         return w
     end
     function UnitClass(unit)
@@ -707,6 +750,9 @@ function Fake.new(opts)
                 c.qualityColorRaises = c.qualityColorRaises - 1
                 error("fake: GetItemQualityColor failed")
             end
+            -- c.qualityColors: { [quality] = { r, g, b } } in place of white
+            local color = c.qualityColors and c.qualityColors[quality]
+            if color then return color[1], color[2], color[3], "ff000000" end
             return 1, 1, 1, "ffffffff"
         end,
         -- ItemDocumentation.lua: 1 name, 3 quality, 7 subtype, 14 bind type;
@@ -751,7 +797,7 @@ function Fake.new(opts)
     local ah = { ready = true, sends = {}, more = {}, listings = {}, keyNames = {}, pageSize = 500,
         answerDelay = 0.25, readyDelay = 0.3, readyEvent = true, keyInfoCalls = 0, keyAsked = {}, keyKnown = {}, keyCount = {},
         keyEvent = true, keyNever = {}, searches = {}, searchListings = {}, searchResults = {}, dropSearches = 0,
-        searchRepeat = true, repeatDelay = 0.3, bids = {}, bidOutcome = "completed" }
+        searchRepeat = true, repeatDelay = 0.3, bids = {}, bidOutcome = "completed", bidError = 4 }
     c.ah = ah
     local function closeThrottle()
         ah.ready = false
@@ -774,7 +820,11 @@ function Fake.new(opts)
         end)
     end
     local AH = {
-        IsThrottledMessageSystemReady = function() return ah.ready end,
+        -- readyRaises: every call raises
+        IsThrottledMessageSystemReady = function()
+            if ah.readyRaises then error("fake: IsThrottledMessageSystemReady failed") end
+            return ah.ready
+        end,
         SendBrowseQuery = function(query)
             misuse(ah.ready or ah.sendingForeign, "SendBrowseQuery while the throttle is closed")
             ah.sends[#ah.sends + 1] = { query = query, at = c.now, foreign = ah.sendingForeign }
@@ -873,8 +923,9 @@ function Fake.new(opts)
         -- recorded with whether it was made inside a click the fake started
         -- (c.click) and on which button. bidOutcome: "completed" (default)
         -- fires AUCTION_HOUSE_PURCHASE_COMPLETED(auctionID) 0.2 s later,
-        -- "error" AUCTION_HOUSE_SHOW_ERROR, "other" a completion for another
-        -- auction id, "silent" nothing.
+        -- "error" AUCTION_HOUSE_SHOW_ERROR with the code bidError (default 4,
+        -- ItemNotFound: the auction was sold), "other" a completion for
+        -- another auction id, "silent" nothing.
         PlaceBid = function(auctionID, amount)
             misuse(type(auctionID) == "number" and type(amount) == "number", "PlaceBid arguments")
             ah.bids[#ah.bids + 1] = { auctionID = auctionID, amount = amount, inClick = c.clicking ~= nil,
@@ -885,12 +936,12 @@ function Fake.new(opts)
                 ah.bidRaises = nil
                 error("fake: PlaceBid failed")
             end
-            local outcome = ah.bidOutcome
+            local outcome, code = ah.bidOutcome, ah.bidError
             after(0.2, function()
                 if outcome == "completed" then
                     c.fire("AUCTION_HOUSE_PURCHASE_COMPLETED", auctionID)
                 elseif outcome == "error" then
-                    c.fire("AUCTION_HOUSE_SHOW_ERROR", 1)
+                    c.fire("AUCTION_HOUSE_SHOW_ERROR", code)
                 elseif outcome == "other" then
                     c.fire("AUCTION_HOUSE_PURCHASE_COMPLETED", auctionID + 1)
                 end
@@ -918,10 +969,49 @@ function Fake.new(opts)
     -- A real click by the player: OnClick runs only on a shown, enabled
     -- button, and c.clicking names the button while it runs, so PlaceBid
     -- can tell a call made inside the click from any other.
+    -- While the click runs, every global function the fake (or the addon)
+    -- defined, pcall and xpcall, and every function of the TC modules are
+    -- wrapped to record themselves in c.trace; the click restores them.
+    local function wrapForClick()
+        local wrapped = {}
+        local function wrap(tbl, key, label)
+            local fn = tbl[key]
+            wrapped[#wrapped + 1] = { tbl, key, fn }
+            tbl[key] = function(...)
+                traced(label)
+                return fn(...)
+            end
+        end
+        local globals = {}
+        for name, v in pairs(_G) do
+            if type(name) == "string" and type(v) == "function"
+                and (STANDARD[name] ~= v or name == "pcall" or name == "xpcall") then
+                globals[#globals + 1] = name
+            end
+        end
+        for _, name in ipairs(globals) do wrap(_G, name, name) end
+        local modules = {}
+        for moduleName, module in pairs(type(TC) == "table" and TC or {}) do
+            if type(module) == "table" then
+                for key, v in pairs(module) do
+                    if type(v) == "function" then modules[#modules + 1] = { module, key, "TC." .. moduleName .. "." .. key } end
+                end
+            end
+        end
+        for _, m in ipairs(modules) do wrap(m[1], m[2], m[3]) end
+        return function()
+            for i = #wrapped, 1, -1 do
+                local w = wrapped[i]
+                w[1][w[2]] = w[3]
+            end
+        end
+    end
     function c.click(button, mouse)
         if not (button and visible(button) and button:IsEnabled() and button.scripts.OnClick) then return false end
         c.clicking, c.trace, c.tracing = button, {}, true
-        local ok, err = pcall(button.scripts.OnClick, button, mouse or "LeftButton", false)
+        local unwrap = wrapForClick()
+        local ok, err = rawPcall(button.scripts.OnClick, button, mouse or "LeftButton", false)
+        unwrap()
         c.clicking, c.tracing = nil, false
         if not ok then error(err, 0) end
         return true

@@ -4192,6 +4192,11 @@ local function dialogShown(c)
     local d = dialogOf(c)
     return d ~= nil and visible(d)
 end
+-- "Buying": the dark overlay over the dialog, with its spinner or the word.
+local function buyingShown(c)
+    local d = dialogOf(c)
+    return d ~= nil and visible(d.overlay) and (d.spinner ~= nil or inDialog(c, "Buying"))
+end
 -- Row Buy, then the search's answer and the client ready again (the key
 -- info at 12 ms, the answer 0.25 s and the throttle 0.3 s after the send).
 local function openDialog(c)
@@ -4208,7 +4213,7 @@ test("buy whole: one row Buy opens the dialog with the name and Finding, makes o
     check(dialogShown(c), "the dialog is open")
     check(inDialog(c, "Willow Boots"), "the variant's name")
     check(inDialog(c, "Finding the cheapest auction"), "Finding")
-    equal(dialogOf(c).buyButton.shown, false, "no Buy before the answer")
+    check(not (dialogOf(c).buyButton.shown and dialogOf(c).buyButton:IsEnabled()), "no live Buy before the answer")
     c.advance(0.6)
     equal(#c.ah.searches, 1, "searches")
     check(inDialog(c, "5s"), "the price of the auction")
@@ -4228,7 +4233,7 @@ test("buy whole: the happy path makes exactly one search, one PlaceBid and then 
     equal(#c.ah.bids, 1, "bids")
     equal(c.ah.bids[1].auctionID, 7, "the auction id")
     equal(c.ah.bids[1].amount, 500, "the amount")
-    check(inDialog(c, "Buying"), "Buying")
+    check(buyingShown(c), "Buying")
     equal(d.buyButton:IsEnabled(), false, "Buy off while buying")
     equal(d.closeButton:IsEnabled(), false, "Cancel off while buying")
     equal(#c.ah.sends, browses, "no check before the outcome")
@@ -4315,7 +4320,7 @@ test("buy safety 3: the amount and id are the chosen result's, the price shown i
         openDialog(c)
         local d = dialogOf(c)
         check(not (d.buyButton.shown and d.buyButton:IsEnabled()), "Buy off")
-        check(inDialog(c, "That auction is gone."), "nothing to buy")
+        check(inDialog(c, "This item is no longer for sale."), "nothing to buy")
         d.buyButton.scripts.OnClick(d.buyButton)
         c.click(d.buyButton)
         equal(#c.ah.bids, 0, "bids")
@@ -4339,7 +4344,7 @@ test("buy safety 4: never the player's own auction", function()
     equal(c.ah.bids[1].auctionID, 7, "not the own auction")
     c = buyWhole({ results = { auction(5, 100, { containsOwnerItem = true }) } })
     openDialog(c)
-    check(inDialog(c, "That auction is gone."), "only the own auction: nothing to buy")
+    check(inDialog(c, "This item is no longer for sale."), "only the own auction: nothing to buy")
     c.click(dialogOf(c).buyButton)
     equal(#c.ah.bids, 0, "bids")
 end)
@@ -4387,7 +4392,7 @@ test("buy safety 5: Cancel, Escape, leaving the tab, closing the window, a faile
     c = buyWhole({ results = {} })
     local browses = #c.ah.sends
     openDialog(c)
-    check(inDialog(c, "That auction is gone."), "gone")
+    check(inDialog(c, "This item is no longer for sale."), "gone")
     check(inDialog(c, "Close"), "Close")
     c.advance(5)
     equal(#c.ah.sends, browses + 1, "the check ran again")
@@ -4401,7 +4406,7 @@ test("buy safety 6: the dialog's Buy is on only when answered, chosen, affordabl
     local c = buyWhole()
     c.click(rowBuy(c))
     local d = dialogOf(c)
-    equal(d.buyButton.shown, false, "no Buy before the answer")
+    check(not (d.buyButton.shown and d.buyButton:IsEnabled()), "no live Buy before the answer")
     d.buyButton.scripts.OnClick(d.buyButton)
     equal(#c.ah.bids, 0, "bids before the answer")
     -- not enough money
@@ -4512,7 +4517,7 @@ test("buy order: the confirm click calls PlaceBid before any other call (blocked
         equal(#c.ah.bids, 1, outcome .. ": bids")
         local before = c.ah.bids[1].before or { "(no trace)" }
         equal(#before, 0, outcome .. ": calls before PlaceBid in the click: " .. table.concat(before, ", "))
-        check(inDialog(c, "Buying"), outcome .. ": Buying drawn after the call")
+        check(buyingShown(c), outcome .. ": Buying drawn after the call")
         equal(dialogOf(c).buyButton:IsEnabled(), false, outcome .. ": Buy off after the call")
     end
 end)
@@ -4528,8 +4533,9 @@ test("buy order: money falling below the price after Buy came on: off within a p
     equal(d.buyButton:IsEnabled(), false, "Buy off within a poll")
     equal(c.click(d.buyButton), false, "no click taken")
     equal(#c.ah.bids, 0, "bids")
-    -- a click before the tick: the bid goes out; the server refuses it, or
-    -- nothing comes and the limit ends it
+    -- a click before the tick: the bid goes out; the server refuses it (the
+    -- dialog looks again and offers the auction it finds, which the player
+    -- cannot afford), or nothing comes and the limit ends it
     for _, outcome in ipairs({ "error", "silent" }) do
         c = buyWhole()
         c.ah.bidOutcome = outcome
@@ -4541,8 +4547,16 @@ test("buy order: money falling below the price after Buy came on: off within a p
         equal(#c.ah.bids, 1, outcome .. ": one bid")
         c.click(d.buyButton)
         d.buyButton.scripts.OnClick(d.buyButton)
-        c.advance(outcome == "error" and 0.25 or 5.1)
-        check(inDialog(c, "The purchase did not go through."), outcome .. ": did not go through")
+        if outcome == "error" then
+            c.advance(2)
+            check(inDialog(c, "That auction was sold. Another is for sale at the same price:"), "error: offered again")
+            equal(d.buyButton:IsEnabled(), false, "error: Buy off without the money")
+            equal(c.click(d.buyButton), false, "error: no click taken")
+            c.click(d.closeButton)
+        else
+            c.advance(5.1)
+            check(inDialog(c, "The purchase did not go through."), outcome .. ": did not go through")
+        end
         c.advance(5)
         equal(#c.ah.sends, browses + 1, outcome .. ": one check")
         c.click(d.buyButton)
@@ -4566,7 +4580,7 @@ test("buy order: a PlaceBid that raises in the click still ends the flow by the 
             check(not dialogShown(c), "cancel: the dialog closed")
         else
             c.advance(0.21)
-            check(inDialog(c, "Buying"), "wait: settled as Buying by the poll")
+            check(buyingShown(c), "wait: settled as Buying by the poll")
             check(dialogPoll(c).cancelled, "wait: the poll stopped")
         end
         c.click(d.buyButton)
@@ -4632,8 +4646,11 @@ end)
 test("buy: the price changed line, and the bind-on-equip hint only for such an item", function()
     local hint = "This item binds when equipped. Its appearance is collected when you equip it or sell it to a vendor."
     local function lines(c)
-        local d = dialogOf(c)
-        return d.linesText.text or ""
+        local d, out = dialogOf(c), {}
+        for _, t in ipairs({ d.changedText, d.hintText, d.moneyText }) do
+            if visible(t) then out[#out + 1] = t.text end
+        end
+        return table.concat(out, "\n")
     end
     local c = buyWhole({ results = { auction(7, 650) } })
     openDialog(c)
@@ -4645,8 +4662,9 @@ test("buy: the price changed line, and the bind-on-equip hint only for such an i
     equal(lines(c), "", "no line for an unchanged price and an item that does not bind")
 end)
 
-test("buy: the client's error and no outcome in 5 s read The purchase did not go through. and the check runs again", function()
-    for _, outcome in ipairs({ "error", "silent" }) do
+-- (The client's error now looks again: the "buy re-offer" tests.)
+test("buy: no outcome in 5 s reads The purchase did not go through. and the check runs again", function()
+    for _, outcome in ipairs({ "silent" }) do
         local c = buyWhole()
         c.ah.bidOutcome = outcome
         local browses = #c.ah.sends
@@ -4654,7 +4672,7 @@ test("buy: the client's error and no outcome in 5 s read The purchase did not go
         c.click(dialogOf(c).buyButton)
         c.advance(outcome == "error" and 0.25 or 4.9)
         if outcome == "silent" then
-            check(inDialog(c, "Buying"), "still Buying before 5 s")
+            check(buyingShown(c), "still Buying before 5 s")
             c.advance(0.2)
         end
         check(inDialog(c, "The purchase did not go through."), outcome .. ": failed")
@@ -4674,7 +4692,7 @@ test("buy: a completion for another auction id does not finish ours", function()
     openDialog(c)
     c.click(dialogOf(c).buyButton)
     c.advance(1)
-    check(inDialog(c, "Buying"), "still Buying")
+    check(buyingShown(c), "still Buying")
     equal(#c.ah.sends, browses, "no check yet")
     c.fire("AUCTION_HOUSE_PURCHASE_COMPLETED", 7)
     check(not dialogShown(c), "ours finishes it")
@@ -4753,7 +4771,7 @@ test("buy fix F2: an auction of the player's account is never chosen", function(
     c = buyWhole({ results = { auction(5, 100, { containsAccountItem = true }),
         auction(6, 200, { containsAccountItem = true, containsOwnerItem = true }) } })
     openDialog(c)
-    check(inDialog(c, "That auction is gone."), "only the account's auctions: gone")
+    check(inDialog(c, "This item is no longer for sale."), "only the account's auctions: gone")
     c.click(dialogOf(c).buyButton)
     c.advance(10)
     equal(#c.ah.bids, 0, "bids")
@@ -4802,7 +4820,7 @@ test("buy fix F4: Escape while buying changes nothing; the outcome then closes t
     local k = c.key("ESCAPE")
     equal(k.passed, false, "Escape swallowed while buying")
     check(dialogShown(c), "the dialog stays")
-    check(inDialog(c, "Buying"), "still Buying")
+    check(buyingShown(c), "still Buying")
     check(AuctionHouseFrame:IsShown(), "the auction window stays open")
     c.fire("AUCTION_HOUSE_PURCHASE_COMPLETED", 7)
     check(not dialogShown(c), "the outcome closed the dialog")
@@ -5042,6 +5060,558 @@ test("queue fix2 F4: a new search of an item key waits 1 s after the last result
 end)
 
 ---------------------------------------------------------------- Visual pass: control styles (TC-36)
+
+---------------------------------------------------------------- Buy follow-ups (TC-33): re-offer, review points, style
+
+local SOLD_CHEAPEST = "That auction was sold. The cheapest is now:"
+local SOLD_SAME = "That auction was sold. Another is for sale at the same price:"
+local LOOKING = "That auction was sold. Looking for another"
+-- A dialog whose first Buy the client refuses: the bid at 0.6 s, the error
+-- 0.2 s later; the new results are what the next search answers.
+local function refused(opts, results)
+    local c = buyWhole(opts)
+    c.ah.bidOutcome = "error"
+    c.browses = #c.ah.sends
+    openDialog(c)
+    check(c.click(dialogOf(c).buyButton), "the first Buy took the click")
+    c.ah.searchListings["501:0"] = results
+    c.advance(0.25)
+    return c
+end
+-- The new search waits 1 s after the key's last result event, then answers.
+local function reoffered(c)
+    c.advance(2)
+end
+local function noCallBefore(c, n, what)
+    local before = c.ah.bids[n].before or { "(no trace)" }
+    equal(#before, 0, what .. ": calls before PlaceBid in the click: " .. table.concat(before, ", "))
+end
+
+test("buy re-offer: a refused bid looks again with one search and offers the cheapest; only a new click buys it", function()
+    local c = refused(nil, { auction(9, 700), auction(8, 650) })
+    local d = dialogOf(c)
+    check(dialogShown(c), "the dialog stays open")
+    check(inDialog(c, LOOKING), "looking again")
+    check(not (visible(d.buyButton) and d.buyButton:IsEnabled()), "no live Buy while looking")
+    check(inDialog(c, "Cancel"), "Cancel while looking")
+    reoffered(c)
+    equal(#c.ah.searches, 2, "one new search")
+    check(inDialog(c, SOLD_CHEAPEST), "the line above the price")
+    check(inDialog(c, "6s 50c"), "the new cheapest price")
+    check(not inDialog(c, "The price changed since the check."), "no price-changed line on a re-offer")
+    check(visible(d.buyButton) and d.buyButton:IsEnabled(), "Buy live again")
+    equal(#c.ah.sends, c.browses, "no check while the dialog offers")
+    -- not bought without a click
+    c.advance(30)
+    equal(#c.ah.bids, 1, "no bid without a click")
+    equal(#c.ah.searches, 2, "nothing searched without a click")
+    c.ah.bidOutcome = "completed"
+    check(c.click(d.buyButton), "the new click taken")
+    equal(#c.ah.bids, 2, "bids")
+    equal(c.ah.bids[2].auctionID, 8, "the offer's auction id")
+    equal(c.ah.bids[2].amount, 650, "the offer's amount")
+    equal(c.ah.bids[2].inClick, true, "inside the click")
+    equal(c.ah.bids[2].button, d.buyButton, "the dialog's Buy")
+    noCallBefore(c, 2, "re-offer")
+    c.advance(0.25)
+    check(not dialogShown(c), "completed: closed")
+    c.advance(5)
+    equal(#c.ah.sends, c.browses + 1, "one check")
+    equal(#c.ah.searches, 2, "searches")
+    equal(#c.misuse, 0, "misuse of the fake: " .. table.concat(c.misuse, "; "))
+end)
+
+test("buy re-offer: the same price reads Another is for sale at the same price:", function()
+    local c = refused(nil, { auction(8, 500) })
+    reoffered(c)
+    check(inDialog(c, SOLD_SAME), "the same-price line")
+    check(not inDialog(c, SOLD_CHEAPEST), "not the cheapest line")
+    check(inDialog(c, "5s"), "the price")
+    c.ah.bidOutcome = "completed"
+    c.click(dialogOf(c).buyButton)
+    equal(c.ah.bids[2].auctionID, 8, "the new auction")
+end)
+
+test("buy re-offer: a second refusal offers again; each buyout has its own 5-second limit; one check", function()
+    local c = refused(nil, { auction(8, 650) })
+    reoffered(c)
+    local d = dialogOf(c)
+    c.ah.searchListings["501:0"] = { auction(9, 800) }
+    c.click(d.buyButton)
+    equal(#c.ah.bids, 2, "the second bid")
+    c.click(d.buyButton)
+    d.buyButton.scripts.OnClick(d.buyButton)
+    equal(#c.ah.bids, 2, "one click, one bid")
+    c.advance(0.25)
+    check(inDialog(c, LOOKING), "looking again after the second refusal")
+    reoffered(c)
+    equal(#c.ah.searches, 3, "one more search")
+    check(inDialog(c, SOLD_CHEAPEST) and inDialog(c, "8s"), "offered again")
+    -- the third buyout gets no answer: the first two limits end nothing
+    c.ah.bidOutcome = "silent"
+    c.click(d.buyButton)
+    equal(c.ah.bids[3].auctionID, 9, "the third offer's id")
+    equal(c.ah.bids[3].amount, 800, "the third offer's amount")
+    c.advance(4.5)
+    check(buyingShown(c), "still buying 4.5 s after the third bid, past the first bids' limits")
+    equal(#c.ah.sends, c.browses, "no check yet")
+    c.advance(0.6)
+    check(inDialog(c, "The purchase did not go through."), "the third bid's limit")
+    equal(visible(d.buyButton), false, "no Buy after silence")
+    c.advance(5)
+    equal(#c.ah.sends, c.browses + 1, "one check")
+    equal(#c.ah.searches, 3, "no search after silence")
+    c.click(d.closeButton)
+    c.advance(5)
+    equal(#c.ah.sends, c.browses + 1, "still one check")
+end)
+
+test("buy re-offer: nothing left reads This item is no longer for sale.; a failed search the failure; one check each", function()
+    for _, way in ipairs({ "nothing", "own only", "failed" }) do
+        local results = way == "nothing" and {}
+            or { auction(5, 100, { containsOwnerItem = true }), auction(6, 120, { containsAccountItem = true }) }
+        local c = refused(nil, results)
+        if way == "failed" then c.ah.silent = true end
+        c.advance(way == "failed" and 8 or 2)
+        local text = way == "failed" and "The purchase did not go through." or "This item is no longer for sale."
+        check(inDialog(c, text), way .. ": " .. text)
+        check(inDialog(c, "Close"), way .. ": Close")
+        equal(visible(dialogOf(c).buyButton), false, way .. ": no Buy")
+        c.advance(5)
+        equal(#c.ah.sends, c.browses + 1, way .. ": one check")
+        c.click(dialogOf(c).closeButton)
+        check(not dialogShown(c), way .. ": closed")
+        c.advance(5)
+        equal(#c.ah.sends, c.browses + 1, way .. ": still one check")
+        equal(#c.ah.bids, 1, way .. ": bids")
+    end
+end)
+
+test("buy re-offer: silence for 5 s gives the failure, no new search and no offer; a late error changes nothing", function()
+    local c = buyWhole()
+    c.ah.bidOutcome = "silent"
+    local browses = #c.ah.sends
+    openDialog(c)
+    c.ah.searchListings["501:0"] = { auction(8, 650) }
+    c.click(dialogOf(c).buyButton)
+    c.advance(5.2)
+    check(inDialog(c, "The purchase did not go through."), "failed")
+    c.fire("AUCTION_HOUSE_SHOW_ERROR", 4)
+    c.fire("AUCTION_HOUSE_PURCHASE_COMPLETED", 8)
+    c.advance(10)
+    equal(#c.ah.searches, 1, "no new search")
+    check(not inDialog(c, SOLD_CHEAPEST) and not inDialog(c, LOOKING), "no offer")
+    equal(visible(dialogOf(c).buyButton), false, "no Buy")
+    check(inDialog(c, "The purchase did not go through."), "still failed")
+    equal(#c.ah.sends, browses + 1, "one check")
+    equal(#c.ah.bids, 1, "bids")
+end)
+
+test("buy re-offer: an error event for nothing in flight does nothing", function()
+    -- no dialog
+    local c = buyWhole()
+    local searches, sends = #c.ah.searches, #c.ah.sends
+    c.fire("AUCTION_HOUSE_SHOW_ERROR", 1)
+    c.advance(5)
+    equal(#c.ah.searches, searches, "no dialog: searches")
+    equal(#c.ah.sends, sends, "no dialog: browses")
+    check(not dialogShown(c), "no dialog: none opened")
+    -- finding, and offering before any click
+    c.click(rowBuy(c))
+    c.fire("AUCTION_HOUSE_SHOW_ERROR", 1)
+    check(inDialog(c, "Finding the cheapest auction"), "finding: unchanged")
+    c.advance(0.6)
+    c.fire("AUCTION_HOUSE_SHOW_ERROR", 1)
+    c.advance(5)
+    check(inDialog(c, "5s") and not inDialog(c, SOLD_CHEAPEST) and not inDialog(c, SOLD_SAME), "offer: unchanged")
+    equal(#c.ah.searches, 1, "offer: no new search")
+    equal(#c.ah.sends, sends, "offer: no check")
+    -- after a completed purchase
+    c.click(dialogOf(c).buyButton)
+    c.advance(6)
+    local after = #c.ah.searches
+    c.fire("AUCTION_HOUSE_SHOW_ERROR", 1)
+    c.advance(5)
+    equal(#c.ah.searches, after, "completed: no new search")
+    check(not dialogShown(c), "completed: stays closed")
+    equal(#c.ah.bids, 1, "bids")
+    equal(#c.errors, 0, "errors")
+end)
+
+-- TC-33 review: AUCTION_HOUSE_SHOW_ERROR is one event for every auction
+-- house error. A first Buy on auction 7 with no outcome, the next search
+-- answering auction 8 at 6s 50c; then the error with code (Lua's nil when
+-- omitted; fire = false fires none).
+local FAILED = "The purchase did not go through."
+local function bidSilent(code, opts, fire)
+    local c = buyWhole(opts)
+    c.ah.bidOutcome = "silent"
+    c.browses = #c.ah.sends
+    openDialog(c)
+    c.ah.searchListings["501:0"] = { auction(8, 650) }
+    check(c.click(dialogOf(c).buyButton), "the first Buy took the click")
+    c.advance(0.2)
+    if fire ~= false then c.fire("AUCTION_HOUSE_SHOW_ERROR", code) end
+    return c
+end
+-- Every way to click the dialog's Buy; answers the number of bids after.
+local function clickAll(c)
+    local d = dialogOf(c)
+    c.click(d.buyButton)
+    d.buyButton.scripts.OnClick(d.buyButton, "LeftButton", false)
+    c.key("ENTER")
+    return #c.ah.bids
+end
+
+test("buy error codes: ItemNotFound and ItemNotAvailable look again and offer, with and without the enum", function()
+    for _, absent in ipairs({ false, true }) do
+        for _, code in ipairs({ 4, 25 }) do
+            local what = ("code %d, enum %s"):format(code, absent and "absent" or "present")
+            local c = bidSilent(code, absent and { client = { noAuctionErrors = true } } or nil)
+            check(inDialog(c, LOOKING), what .. ": looking again")
+            reoffered(c)
+            equal(#c.ah.searches, 2, what .. ": one new search")
+            check(inDialog(c, SOLD_CHEAPEST) and inDialog(c, "6s 50c"), what .. ": the re-offer")
+            equal(#c.ah.sends, c.browses, what .. ": no check while offering")
+            equal(#c.ah.bids, 1, what .. ": bids")
+            equal(#c.errors, 0, what .. ": errors")
+        end
+    end
+end)
+
+test("buy error codes: every other code, none or a string ends as the failure: no new search, one check", function()
+    local codes = { { 0 }, { 1 }, { 7 }, { 10 }, { 12 }, { 23 }, { 24 }, { nil, "nil" }, { "4", "the string 4" } }
+    for _, entry in ipairs(codes) do
+        local what = "code " .. (entry[2] or tostring(entry[1]))
+        local c = bidSilent(entry[1])
+        check(inDialog(c, FAILED), what .. ": " .. FAILED)
+        check(inDialog(c, "Close"), what .. ": Close")
+        check(not inDialog(c, LOOKING) and not inDialog(c, SOLD_CHEAPEST) and not inDialog(c, SOLD_SAME),
+            what .. ": no sold line")
+        equal(visible(dialogOf(c).buyButton), false, what .. ": no Buy")
+        c.advance(10)
+        equal(#c.ah.searches, 1, what .. ": no new search")
+        equal(#c.ah.sends, c.browses + 1, what .. ": one check")
+        equal(clickAll(c), 1, what .. ": bids")
+        c.click(dialogOf(c).closeButton)
+        check(not dialogShown(c), what .. ": closed")
+        c.advance(5)
+        equal(#c.ah.sends, c.browses + 1, what .. ": still one check")
+        equal(#c.errors, 0, what .. ": errors")
+    end
+end)
+
+test("buy completion wins: the first auction completing while a re-offer is shown withdraws it", function()
+    local c = bidSilent(4)
+    reoffered(c)
+    check(inDialog(c, SOLD_CHEAPEST), "the re-offer is shown")
+    c.fire("AUCTION_HOUSE_PURCHASE_COMPLETED", 7)
+    check(not dialogShown(c), "completed: closed")
+    equal(clickAll(c), 1, "no bid after the completion")
+    c.advance(10)
+    equal(#c.ah.bids, 1, "bids: the one click")
+    equal(#c.ah.searches, 2, "searches")
+    equal(#c.ah.sends, c.browses + 1, "one check")
+    equal(#c.errors, 0, "errors")
+end)
+
+test("buy completion wins: the first auction completing while the re-offer's bid is in flight ends as completed", function()
+    local c = bidSilent(4)
+    reoffered(c)
+    check(c.click(dialogOf(c).buyButton), "the re-offer's click")
+    equal(#c.ah.bids, 2, "the second bid")
+    c.advance(0.1)
+    c.fire("AUCTION_HOUSE_PURCHASE_COMPLETED", 7)
+    check(not dialogShown(c), "completed: closed")
+    -- the second bid's own outcome, either one, changes nothing
+    c.fire("AUCTION_HOUSE_PURCHASE_COMPLETED", 8)
+    c.fire("AUCTION_HOUSE_SHOW_ERROR", 4)
+    equal(clickAll(c), 2, "no bid after the completion")
+    c.advance(10)
+    check(not dialogShown(c), "stays closed")
+    equal(#c.ah.bids, 2, "bids: the two clicks")
+    equal(#c.ah.searches, 2, "searches")
+    equal(#c.ah.sends, c.browses + 1, "one check")
+    equal(#c.errors, 0, "errors")
+    -- a new dialog opens and offers again
+    openDialog(c)
+    check(dialogShown(c), "a new dialog")
+end)
+
+test("buy completion wins: the first auction completing while looking again ends as completed; nothing is offered", function()
+    local c = bidSilent(4)
+    check(inDialog(c, LOOKING), "looking again")
+    c.fire("AUCTION_HOUSE_PURCHASE_COMPLETED", 7)
+    check(not dialogShown(c), "completed: closed")
+    equal(clickAll(c), 1, "no bid after the completion")
+    c.advance(10)
+    check(not dialogShown(c), "stays closed")
+    check(not inDialog(c, SOLD_CHEAPEST), "no offer")
+    equal(#c.ah.bids, 1, "bids: the one click")
+    equal(#c.ah.sends, c.browses + 1, "one check")
+    equal(#c.errors, 0, "errors")
+end)
+
+test("buy completion wins: a completion after the limit or a refusal closes the dialog as completed; one check", function()
+    for _, way in ipairs({ "limit", "refusal" }) do
+        local c = bidSilent(7, nil, way == "refusal")
+        if way == "limit" then c.advance(5.1) end
+        check(inDialog(c, FAILED), way .. ": the failure")
+        c.advance(5)
+        equal(#c.ah.sends, c.browses + 1, way .. ": one check")
+        c.fire("AUCTION_HOUSE_PURCHASE_COMPLETED", 9)
+        check(inDialog(c, FAILED), way .. ": another auction's completion changes nothing")
+        c.fire("AUCTION_HOUSE_PURCHASE_COMPLETED", 7)
+        check(not dialogShown(c), way .. ": completed: closed")
+        equal(clickAll(c), 1, way .. ": no bid after the completion")
+        c.advance(10)
+        equal(#c.ah.bids, 1, way .. ": bids")
+        equal(#c.ah.searches, 1, way .. ": searches")
+        equal(#c.ah.sends, c.browses + 1, way .. ": still one check")
+        equal(#c.errors, 0, way .. ": errors")
+    end
+end)
+
+test("buy re-offer safety 5: Cancel, Escape, leaving the tab, closing the window while looking or on a re-offer buy nothing", function()
+    local ways = {
+        cancel = function(c) c.click(dialogOf(c).closeButton) end,
+        escape = function(c) equal(c.key("ESCAPE").passed, false, "Escape taken by the dialog") end,
+        leave = function(c) selectBuy(); c.tabs[1].frameRef:Hide() end,
+        close = function(c) c.closeAuction() end,
+    }
+    for name, way in pairs(ways) do
+        for _, phase in ipairs({ "looking", "offer" }) do
+            local what = name .. ", " .. phase
+            local c = refused(nil, { auction(8, 650) })
+            if phase == "offer" then reoffered(c) end
+            local searches = #c.ah.searches
+            way(c)
+            check(not dialogShown(c), what .. ": closed")
+            c.advance(30)
+            equal(#c.ah.bids, 1, what .. ": no bid")
+            -- the new search waits 1 s, so looking stops it before its send
+            equal(#c.ah.searches, phase == "looking" and 1 or searches, what .. ": the search stopped")
+            -- the player's own close runs the check once; leaving reads nothing
+            local checks = (name == "cancel" or name == "escape") and 1 or 0
+            equal(#c.ah.sends, c.browses + checks, what .. ": checks")
+            if checks == 1 then
+                check(c.click(rowBuy(c)), what .. ": a later Buy on the row works")
+                c.advance(2)
+                check(inDialog(c, "6s 50c") and not inDialog(c, SOLD_CHEAPEST), what .. ": a fresh first offer")
+            end
+            equal(#c.errors, 0, what .. ": errors")
+        end
+    end
+end)
+
+test("buy re-offer safety 1 to 4: one bid per click, inside it, the shown offer's id and amount, never the own or the account's", function()
+    local c = refused(nil, { auction(5, 100, { containsOwnerItem = true }), auction(6, 120, { containsAccountItem = true }),
+        auction(9, 900), auction(8, 650) })
+    reoffered(c)
+    local d = dialogOf(c)
+    check(inDialog(c, "6s 50c"), "4: the own and the account's cheaper auctions skipped")
+    c.ah.bidOutcome = "silent"
+    c.click(d.buyButton)
+    c.click(d.buyButton)
+    d.buyButton.scripts.OnClick(d.buyButton, "LeftButton", true)
+    for _ = 1, 3 do c.key("ENTER") end
+    equal(#c.ah.bids, 2, "2: one click, one bid")
+    equal(c.ah.bids[2].inClick and c.ah.bids[2].button == d.buyButton, true, "1: inside the dialog Buy's click")
+    noCallBefore(c, 2, "1")
+    equal(c.ah.bids[2].auctionID .. ":" .. c.ah.bids[2].amount, "8:650", "3: the offer's id and amount")
+    equal(d.price.amount, 650, "3: the price shown is that number")
+end)
+
+test("buy re-offer safety 6: the re-offer's Buy follows money, the client's ready state and the queue", function()
+    local c = refused(nil, { auction(8, 650) })
+    reoffered(c)
+    local d = dialogOf(c)
+    equal(d.buyButton:IsEnabled(), true, "on")
+    c.money = 649
+    c.fire("PLAYER_MONEY")
+    equal(d.buyButton:IsEnabled(), false, "money short")
+    check(find(c, function(w) return w.text == "You do not have enough money." and visible(w) and under(w, d) end), "the money line")
+    c.money = 650
+    c.fire("PLAYER_MONEY")
+    equal(d.buyButton:IsEnabled(), true, "money back")
+    c.ah.ready = false
+    c.advance(0.21)
+    equal(d.buyButton:IsEnabled(), false, "not ready")
+    c.ah.ready = true
+    c.fire("AUCTION_HOUSE_THROTTLED_SYSTEM_READY")
+    equal(d.buyButton:IsEnabled(), true, "ready")
+    -- another read overlapping the offer: off while the queue is busy, on
+    -- again when it is idle, never left off
+    TC.AuctionQueue.Browse({ searchString = "x", sorts = {}, filters = {} }, 1, { done = function() end, failed = function() end })
+    c.advance(0.21)
+    equal(d.buyButton:IsEnabled(), false, "queue busy")
+    c.advance(2)
+    equal(d.buyButton:IsEnabled(), true, "queue idle: on again")
+    equal(#c.ah.bids, 1, "bids")
+    equal(#c.ah.sends, c.browses + 1, "only that browse, no check while offering")
+end)
+
+test("buy re-offer safety 7: after a refusal only one search runs; nothing more is read or bought without a click", function()
+    local c = refused(nil, { auction(8, 650) })
+    reoffered(c)
+    c.advance(60)
+    equal(#c.ah.searches, 2, "searches")
+    equal(#c.ah.bids, 1, "bids")
+    equal(#c.ah.sends, c.browses, "browses")
+end)
+
+test("R4: a raise while computing whether Buy is allowed leaves it not allowed", function()
+    local c = buyWhole()
+    openDialog(c)
+    local d = dialogOf(c)
+    equal(d.buyButton:IsEnabled(), true, "on")
+    local errors = #c.errors
+    c.ah.readyRaises = true
+    c.fire("PLAYER_MONEY")
+    equal(#c.errors, errors + 1, "the raise reported")
+    -- the button was not redrawn: the click handler must refuse on its own
+    check(c.click(d.buyButton), "the stale button takes the click")
+    d.buyButton.scripts.OnClick(d.buyButton)
+    equal(#c.ah.bids, 0, "no bid")
+    c.ah.readyRaises = nil
+    c.fire("PLAYER_MONEY")
+    check(c.click(d.buyButton), "on again")
+    equal(#c.ah.bids, 1, "one bid once it computes")
+end)
+
+test("R2: a draw that raises when the 5-second limit fails the buyout still ends the flow and runs the check", function()
+    local c = buyWhole()
+    c.ah.bidOutcome = "silent"
+    local browses = #c.ah.sends
+    openDialog(c)
+    c.click(dialogOf(c).buyButton)
+    c.advance(4.9)
+    local errors = #c.errors
+    c.qualityColorRaises = 1
+    local ok, err = pcall(c.advance, 0.3)
+    check(ok, "the limit's timer did not raise: " .. tostring(err))
+    equal(#c.errors, errors + 1, "the raise reported")
+    c.advance(5)
+    equal(#c.ah.sends, browses + 1, "the check ran")
+    c.click(dialogOf(c).closeButton)
+    check(c.click(rowBuy(c)), "a later Start works")
+    equal(#c.ah.bids, 1, "bids")
+end)
+
+test("R3: the click's recorder sees global functions, pcall, xpcall and TC module calls before PlaceBid, then restores them", function()
+    local c = buyWhole()
+    local getTime, queueIdle = GetTime, TC.AuctionQueue.IsIdle
+    local button = CreateFrame("Button", nil, UIParent)
+    button:SetScript("OnClick", function()
+        GetTime()
+        PlaySound(856)
+        InCombatLockdown()
+        pcall(function() end)
+        xpcall(function() end, print)
+        TC.AuctionQueue.IsIdle()
+        C_AuctionHouse.PlaceBid(1, 1)
+        GetTime()
+    end)
+    c.click(button)
+    local before = table.concat(c.ah.bids[1].before, ",")
+    for _, name in ipairs({ "GetTime", "PlaySound", "InCombatLockdown", "pcall", "xpcall", "TC.AuctionQueue.IsIdle" }) do
+        check(("," .. before .. ","):find("," .. name .. ",", 1, true), name .. " recorded, got " .. before)
+    end
+    equal(#c.ah.bids[1].before, 6, "nothing after PlaceBid recorded: " .. before)
+    equal(GetTime, getTime, "GetTime restored")
+    equal(TC.AuctionQueue.IsIdle, queueIdle, "TC.AuctionQueue.IsIdle restored")
+    -- and the dialog's click makes none of them
+    openDialog(c)
+    c.click(dialogOf(c).buyButton)
+    noCallBefore(c, 2, "the dialog")
+end)
+
+-- The Blizzard parts the dialog is built from, and a client without them.
+local STYLE_TEMPLATES = { DialogBorderDarkTemplate = true, MoneyDisplayFrameTemplate = true, SpinnerTemplate = true,
+    UIPanelButtonTemplate = true }
+test("buy style: with the templates the dialog is Blizzard's buy dialog in layout and art", function()
+    local c = buyWhole({ listed = 450, results = { auction(7, 500) } })
+    c.qualityColors = { [2] = { 0.12, 1, 0 } }
+    c.money = 499
+    openDialog(c)
+    local d = dialogOf(c)
+    equal(d.border and d.border.template, "DialogBorderDarkTemplate", "the dark dialog border")
+    equal(d.price.template, "MoneyDisplayFrameTemplate", "the money display")
+    equal(d.price.amount, 500, "the money display's amount")
+    equal(d.price.font, PriceFontRed, "the price in red when short")
+    equal(d.price.calls.SetResizeToFit and d.price.calls.SetResizeToFit[1], true, "sized to fit")
+    equal(d.spinner and d.spinner.template, "SpinnerTemplate", "the large spinner")
+    equal(d.spinner.width, 60, "60 wide")
+    equal(d.box.width, 420, "420 wide")
+    for _, b in ipairs({ d.buyButton, d.closeButton }) do
+        equal(b.template, "UIPanelButtonTemplate", "panel buttons")
+        equal(b.width .. "x" .. b.height, "120x22", "120 x 22")
+    end
+    equal(d.buyButton.points[1].x .. "," .. d.buyButton.points[1].y, "-64,18", "Buy at -64, 18")
+    equal(d.closeButton.points[1].x .. "," .. d.closeButton.points[1].y, "64,18", "Cancel at 64, 18")
+    local color = d.nameText.textColor
+    equal(color[1] .. "," .. color[2] .. "," .. color[3], "0.12,1,0", "the name in its quality colour")
+    check(visible(d.changedText) and d.changedText.text == "The price changed since the check.", "the changed line")
+    check(visible(d.hintText), "the bind hint")
+    check(visible(d.moneyText), "the money line")
+    c.money = 100 * 10000
+    c.fire("PLAYER_MONEY")
+    equal(d.price.font, PriceFontWhite, "white when affordable")
+    c.ah.bidOutcome = "silent"
+    c.click(d.buyButton)
+    noCallBefore(c, 1, "with templates")
+    check(visible(d.overlay) and visible(d.spinner), "overlay and spinner while buying")
+    check(not inDialog(c, "Buying"), "the spinner, not the word")
+    c.advance(5.2)
+    check(not visible(d.overlay), "no overlay after")
+    equal(d.closeButton.points[1].x .. "," .. d.closeButton.points[1].y, "0,18", "one centred Close")
+    equal(#c.misuse, 0, "misuse of the fake: " .. table.concat(c.misuse, "; "))
+end)
+
+test("buy style: without the templates and atlases the plain dialog has every text and both buttons", function()
+    for _, atlases in ipairs({ false, true }) do
+        local what = atlases and "atlases, no templates" or "neither"
+        local c = buyWhole({ listed = 450, results = { auction(7, 500) },
+            client = { noTemplates = STYLE_TEMPLATES, noAtlases = not atlases } })
+        local errors = #c.errors
+        c.click(rowBuy(c))
+        local d = dialogOf(c)
+        equal(d.border, nil, what .. ": no border")
+        equal(d.spinner, nil, what .. ": no spinner")
+        check(inDialog(c, "Finding the cheapest auction"), what .. ": Finding")
+        check(visible(d.buyButton) and inDialog(c, "Cancel"), what .. ": both buttons")
+        c.advance(0.6)
+        check(inDialog(c, "5s"), what .. ": the price as text")
+        check(inDialog(c, "The price changed since the check."), what .. ": changed")
+        check(visible(d.hintText) and d.hintText.text:find("binds when equipped", 1, true), what .. ": the hint")
+        c.money = 499
+        c.fire("PLAYER_MONEY")
+        check(inDialog(c, "You do not have enough money."), what .. ": the money line")
+        c.money = 100 * 10000
+        c.fire("PLAYER_MONEY")
+        c.ah.bidOutcome = "error"
+        c.ah.searchListings["501:0"] = { auction(8, 650) }
+        c.click(d.buyButton)
+        noCallBefore(c, 1, what)
+        check(buyingShown(c) and inDialog(c, "Buying"), what .. ": the word Buying on the overlay")
+        c.advance(0.25)
+        check(inDialog(c, LOOKING), what .. ": looking again")
+        reoffered(c)
+        check(inDialog(c, SOLD_CHEAPEST) and inDialog(c, "6s 50c"), what .. ": the re-offer")
+        c.ah.searchListings["501:0"] = {}
+        c.click(d.buyButton)
+        noCallBefore(c, 2, what .. ", re-offer")
+        c.advance(0.25)
+        reoffered(c)
+        check(inDialog(c, "This item is no longer for sale.") and inDialog(c, "Close"), what .. ": gone and Close")
+        equal(#c.errors, errors, what .. ": errors")
+    end
+    -- the spinner needs its atlases even where the template exists
+    local c = buyWhole({ client = { noAtlases = true } })
+    openDialog(c)
+    equal(dialogOf(c).spinner, nil, "no atlases: no spinner")
+    check(c.atlasAsked ~= nil, "the atlases were asked")
+end)
 
 local function noErrors(c, what)
     equal(#c.misuse, 0, what .. ": misuse of the fake: " .. table.concat(c.misuse, "; "))
