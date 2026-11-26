@@ -1,0 +1,1128 @@
+-- A fake WoW: Forever client for the browser harness. It defines the globals
+-- the addon's files call, keeps Collections' own settings so a test can see
+-- whether the addon left them as it found them, and fires events at the
+-- frames that registered for them. Dev-only; never shipped.
+local Fake = {}
+
+local PLAYER_CLASS = 9 -- Warlock, the character the probe ran on
+
+-- Enum.TransmogCollectionType (TransmogSharedDocumentation.lua:6-40).
+local CATEGORIES = { None = 0, Head = 1, Shoulder = 2, Back = 3, Chest = 4, Shirt = 5, Tabard = 6, Wrist = 7,
+    Hands = 8, Waist = 9, Legs = 10, Feet = 11, Wand = 12, OneHAxe = 13, OneHSword = 14, OneHMace = 15, Dagger = 16,
+    Fist = 17, Shield = 18, Holdable = 19, TwoHAxe = 20, TwoHSword = 21, TwoHMace = 22, Staff = 23, Polearm = 24,
+    Bow = 25, Gun = 26, Crossbow = 27, Warglaives = 28, Paired = 29 }
+Fake.CATEGORIES = CATEGORIES
+-- The inventory slot each armor category is listed for (spec 4.3), and the
+-- weapon slot of each weapon category in the fixed split.
+local SLOT_OF_CATEGORY = { [1] = 1, [2] = 3, [3] = 15, [4] = 5, [5] = 4, [6] = 19, [7] = 9, [8] = 10, [9] = 6,
+    [10] = 7, [11] = 8, [12] = 18, [13] = 16, [14] = 16, [15] = 16, [16] = 16, [17] = 16, [18] = 17, [19] = 17,
+    [20] = 16, [21] = 16, [22] = 16, [23] = 16, [24] = 16, [25] = 18, [26] = 18, [27] = 18 }
+Fake.SLOT_OF_CATEGORY = SLOT_OF_CATEGORY
+-- The client's names of the weapon categories, made up for the fake.
+local CATEGORY_NAMES = { [12] = "Wands", [13] = "One-Handed Axes", [14] = "One-Handed Swords",
+    [15] = "One-Handed Maces", [16] = "Daggers", [17] = "Fist Weapons", [18] = "Shields", [19] = "Held In Off-hand",
+    [20] = "Two-Handed Axes", [21] = "Two-Handed Swords", [22] = "Two-Handed Maces", [23] = "Staves",
+    [24] = "Polearms", [25] = "Bows", [26] = "Guns", [27] = "Crossbows", [28] = "Warglaives" }
+
+-- A fixture of one category (default Head): total appearances for the
+-- player's class from id `first` + 1 on (default 1000), the first `collected`
+-- of them (by id) collected through one of their three sources, two hidden
+-- visuals, and one appearance only another class lists.
+function Fake.appearances(total, collected, category, first)
+    local list = {}
+    first = first or 1000
+    for i = 1, total do
+        local id = first + i
+        local sources = { id * 10 + 1, id * 10 + 2, id * 10 + 3 }
+        list[#list + 1] = {
+            id = id, uiOrder = total - i, minIlvl = i, sources = sources, category = category,
+            collectedSource = i <= collected and sources[3] or nil,
+            classes = { [PLAYER_CLASS] = true, [8] = true },
+        }
+    end
+    local extra = first * 9 + 1
+    list[#list + 1] = { id = extra, uiOrder = 0, sources = { extra * 10 + 1 }, hide = true, category = category,
+        classes = { [PLAYER_CLASS] = true } }
+    list[#list + 1] = { id = extra + 1, uiOrder = 0, sources = { extra * 10 + 11 }, hide = true, category = category,
+        classes = { [PLAYER_CLASS] = true } }
+    list[#list + 1] = { id = extra + 2, uiOrder = 0, sources = { extra * 10 + 21 }, category = category,
+        classes = { [8] = true } }
+    return list
+end
+
+-- opts:
+--   appearances     fixture list (default: 370 Head appearances, 5 collected);
+--                   an entry's category is Head (1) unless it says another
+--   noCategoryInfo  GetCategoryInfo answers nothing for every category, as
+--                   it did for feet in game
+--   categoryInfo    { [category] = { name, isWeapon, canHaveIllusions,
+--                   canMainHand, canOffHand, canRanged } } replaces the fake's
+--                   answers (by default the weapon categories answer with the
+--                   fixed split's flags; armor categories answer nothing)
+--   classFilter     Collections' class filter at the start (default the player's)
+--   uncollectedShown, collectedShown, search: Collections' other settings
+--   listRaises      GetCategoryAppearances raises an error (true: always;
+--                   a number: on that many first reads)
+--   listRaisesFor   GetCategoryAppearances raises for that category
+--   noEnumMembers   a list of { enum name, member } the client lacks
+--   listNil         GetCategoryAppearances returns nil
+--   listEmpty       the first that many reads of GetCategoryAppearances
+--                   return an empty table
+--   setClassRaises  SetClassFilter changes the filter and then raises
+--   setClassFires   SetClassFilter fires TRANSMOG_COLLECTION_UPDATED at once
+--   noTransmog      C_TransmogCollection is nil
+--   noList          C_TransmogCollection.GetCategoryAppearances is nil
+--   noCompare       CollectionWardrobeUtil is nil
+--   noSortSources   CollectionWardrobeUtil.SortSources is nil
+--   sourcesNil      GetAppearanceSources returns nil
+--   noButtonTemplate  CreateFrame raises for UIPanelButtonTemplate
+--   noMenuTemplates CreateFrame raises for the menu's dropdown templates
+--   noMenuAPI       the dropdown templates lack SetupMenu and the text methods
+--   noFontObjects   the GameFont* font objects are nil
+--   items           { [itemID] = { name, quality, bindType, subType, load,
+--                   classID, subClassID } }:
+--                   item data; load nil means cached at the start, a number
+--                   loads that many seconds after RequestLoadItemDataByID,
+--                   "never" never loads, "fail" answers
+--                   ITEM_DATA_LOAD_RESULT with success false 0.1 s after
+--                   the request and never loads. classID and subClassID are
+--                   what GetItemInfoInstant answers at once, loaded or not; a
+--                   listed item without them answers nothing. An item not
+--                   listed is a cached bind-on-equip green cloth armor piece
+--                   named "Item <id>".
+--   noItemInstant   C_Item.GetItemInfoInstant is nil
+--   noClassList     C_SpecializationInfo and C_CreatureInfo are nil
+--   sourceItems     { [sourceID] = itemID } (default: the source id itself)
+--   sourceInfoNil   GetSourceInfo answers nothing
+--   noAuctionHouse  C_AuctionHouse is nil
+--   noAuction       a list of C_AuctionHouse function names that are nil
+--   noTimer         C_Timer is nil
+--   noItemTransmog  C_TransmogCollection.GetItemInfo is nil
+--   noScanEnums     Enum.ItemClass is nil
+--   noMoney         GetMoney is nil (c.money is the player's copper)
+--   noEscHandlers   RegisterGameMenuEscHandler is nil
+--   noTemplates     { [template] = true }: CreateFrame raises for those
+--   noAtlases       true, or { [atlas] = true }: C_Texture.GetAtlasInfo
+--                   answers nothing for every atlas, or for those
+function Fake.new(opts)
+    opts = opts or {}
+    local c = {
+        widgets = {}, misuse = {}, forbidden = {}, auctionTouches = {},
+        tryOn = {}, cameras = {}, printed = {},
+        collections = {
+            classFilter = opts.classFilter or PLAYER_CLASS,
+            uncollectedShown = opts.uncollectedShown == nil and false or opts.uncollectedShown,
+            collectedShown = opts.collectedShown == nil and true or opts.collectedShown,
+            search = opts.search or "",
+        },
+        listCalls = 0, listed = {}, categoryInfoCalls = 0, itemAppearances = {},
+    }
+    local appearances = opts.appearances or Fake.appearances(370, 5)
+    local byID, collectedSources = {}, {}
+    for _, a in ipairs(appearances) do
+        a.category = a.category or CATEGORIES.Head
+        byID[a.id] = a
+        if a.collectedSource then collectedSources[a.collectedSource] = true end
+    end
+    c.collectedSources = collectedSources
+    -- the inventory slot each source is worn in
+    c.slotOfSource = {}
+    for _, a in ipairs(appearances) do
+        for _, source in ipairs(a.sources) do c.slotOfSource[source] = SLOT_OF_CATEGORY[a.category] end
+    end
+
+    local function misuse(cond, what)
+        if not cond then c.misuse[#c.misuse + 1] = what end
+    end
+    function c.snapshot()
+        local s = {}
+        for k, v in pairs(c.collections) do s[k] = v end
+        return s
+    end
+
+    -- Widgets: every method exists. Known ones keep state; the rest record
+    -- the call, so a test can read what the panel did.
+    local methods = {}
+    function methods:RegisterEvent(event) self.events[event] = true end
+    function methods:UnregisterEvent(event) self.events[event] = nil end
+    function methods:SetScript(name, fn) self.scripts[name] = fn end
+    function methods:GetScript(name) return self.scripts[name] end
+    -- ScriptObject:HookScript runs the hook after the script there is.
+    function methods:HookScript(name, fn)
+        local old = self.scripts[name]
+        self.scripts[name] = function(...)
+            if old then old(...) end
+            fn(...)
+        end
+    end
+    -- A button's highlight held on (SimpleFrameAPIDocumentation.lua:983).
+    function methods:LockHighlight() self.highlightLocked = true end
+    function methods:UnlockHighlight() self.highlightLocked = false end
+    -- The pointer: a test sets w.mouseOver on the frames under it.
+    function methods:IsMouseOver() return self.mouseOver == true end
+    function methods:SetPoint(point, relativeTo, relativePoint, x, y)
+        self.points[#self.points + 1] = { point = point, relativeTo = relativeTo, relativePoint = relativePoint, x = x or 0, y = y or 0 }
+    end
+    function methods:ClearAllPoints() self.points = {} end
+    function methods:SetSize(w, h) self.width, self.height = w, h end
+    function methods:SetWidth(w) self.width = w end
+    function methods:SetHeight(h) self.height = h end
+    function methods:GetSize() return self.width, self.height end
+    -- Visibility as the client keeps it: a frame is visible when it and every
+    -- parent is shown, and OnShow / OnHide fire when that changes, for the
+    -- frame and for each shown child under it. Children get theirs before
+    -- the parent's own script runs, the worst order for a child that must not
+    -- see OnShow (the client's real order is not established).
+    local function visible(w)
+        while w do
+            if not w.shown then return false end
+            w = w.parent
+        end
+        return true
+    end
+    local function cascade(w, script)
+        for _, child in ipairs(w.children) do
+            if child.shown then cascade(child, script) end
+        end
+        if w.scripts[script] then w.scripts[script](w) end
+    end
+    function methods:Show()
+        if self.shown then return end
+        self.shown = true
+        if visible(self) then cascade(self, "OnShow") end
+    end
+    function methods:Hide()
+        if not self.shown then return end
+        local was = visible(self)
+        self.shown = false
+        if was then cascade(self, "OnHide") end
+    end
+    function methods:IsVisible() return visible(self) end
+    function methods:SetShown(shown) if shown then self:Show() else self:Hide() end end
+    function methods:IsShown() return self.shown end
+    function methods:GetParent() return self.parent end
+    function methods:GetFrameLevel() return self.parent and self.parent:GetFrameLevel() + 1 or 0 end
+    function methods:IsObjectType(t)
+        return t == self.kind or t == "Frame" or (t == "Button" and self.kind == "DropdownButton")
+    end
+    -- An edit box runs OnTextChanged(self, userInput) when its text changes;
+    -- c.type is the player typing.
+    function methods:SetText(text)
+        local changed = self.text ~= text
+        self.text = text
+        if self.kind == "EditBox" and changed and self.scripts.OnTextChanged then
+            self.scripts.OnTextChanged(self, false)
+        end
+    end
+    function methods:SetFocus() self.focus = true end
+    function methods:ClearFocus() self.focus = false end
+    function methods:HasFocus() return self.focus == true end
+    function methods:GetText() return self.text end
+    function methods:GetName() return self.name end
+    function methods:SetEnabled(on) self.enabled = on and true or false end
+    function methods:Enable() self.enabled = true end
+    function methods:Disable() self.enabled = false end
+    function methods:IsEnabled() return self.enabled ~= false end
+    function methods:SetColorTexture(r, g, b, a) self.color = { r, g, b, a } end
+    function methods:SetVertexColor(r, g, b, a) self.color = { r, g, b, a } end
+    function methods:SetTextColor(r, g, b, a) self.textColor = { r, g, b, a } end
+    -- Keyboard input (SimpleFrameAPIDocumentation.lua:247-256, 1426-1435):
+    -- SetPropagateKeyboardInput is restricted, recorded as misuse in combat.
+    -- A frame passes no key on until told to (the client's default is
+    -- inferred, the worst case for the fake).
+    function methods:EnableKeyboard(on) self.keyboard = on and true or false end
+    function methods:IsKeyboardEnabled() return self.keyboard == true end
+    function methods:SetPropagateKeyboardInput(on)
+        misuse(not c.combat, "SetPropagateKeyboardInput in combat")
+        if c.combat then c.propagateInCombat = c.propagateInCombat + 1 end
+        self.propagate = on and true or false
+    end
+    function methods:CreateTexture() return c.newWidget("Texture", nil, self) end
+    function methods:CreateFontString() return c.newWidget("FontString", nil, self) end
+    -- SimpleButtonAPIDocumentation.lua:423-430: the argument is a font object.
+    function methods:SetNormalFontObject(font)
+        misuse(type(font) == "table", "SetNormalFontObject with " .. type(font))
+        self.font = font
+    end
+    function methods:TryOn(source)
+        misuse(type(source) == "number", "TryOn with " .. tostring(source))
+        c.tryOn[#c.tryOn + 1] = { model = self, source = source }
+        -- a piece replaces the one worn in its inventory slot
+        self.worn = self.worn or {}
+        self.worn[c.slotOfSource[source] or 0] = source
+        return 0
+    end
+    -- DressUpModel:Undress takes off everything TryOn put on.
+    function methods:Undress()
+        self.worn = {}
+        self.callCount.Undress = (self.callCount.Undress or 0) + 1
+    end
+    -- SimpleModelAPIDocumentation.lua:745-757; the fake's transform is the
+    -- identity, so a test reads the camera-space position it was given.
+    function methods:TransformCameraSpaceToModelSpace(v)
+        misuse(type(v) == "table" and v.x and v.y and v.z, "TransformCameraSpaceToModelSpace argument")
+        return { GetXYZ = function() return v.x, v.y, v.z end }
+    end
+    function methods:SetItemAppearance(appearanceID)
+        misuse(type(appearanceID) == "number", "SetItemAppearance with " .. tostring(appearanceID))
+        c.itemAppearances[#c.itemAppearances + 1] = { model = self, appearance = appearanceID }
+    end
+    local meta = { __index = function(w, key)
+        if methods[key] then return methods[key] end
+        if type(key) == "string" and key:match("^[A-Z]") then
+            return function(self, ...)
+                self.calls[key] = { ... }
+                self.callCount[key] = (self.callCount[key] or 0) + 1
+            end
+        end
+        return nil
+    end }
+    function c.newWidget(kind, name, parent, template)
+        local w = setmetatable({ kind = kind, name = name, parent = parent, template = template, shown = true,
+            events = {}, scripts = {}, points = {}, calls = {}, callCount = {}, children = {} }, meta)
+        if parent then parent.children[#parent.children + 1] = w end
+        c.widgets[#c.widgets + 1] = w
+        if name then _G[name] = w end
+        return w
+    end
+    function c.type(box, text)
+        box.focus = true
+        box.text = text
+        if box.scripts.OnTextChanged then box.scripts.OnTextChanged(box, true) end
+    end
+    function c.fire(event, ...)
+        local targets = {}
+        for _, w in ipairs(c.widgets) do
+            if w.events[event] and w.scripts.OnEvent then targets[#targets + 1] = w end
+        end
+        for _, w in ipairs(targets) do w.scripts.OnEvent(w, event, ...) end
+        return #targets
+    end
+
+    -- Globals the existing files and the libraries read.
+    TC, TC_ItemChecker, TransmogCheckerDB, AuctionHouseFrame, LibStub = nil, nil, nil, nil, nil
+    strmatch = string.match
+    WOW_PROJECT_MAINLINE, WOW_PROJECT_CAMELOT = 1, 99
+    WOW_PROJECT_ID = WOW_PROJECT_CAMELOT
+    SlashCmdList = {}
+    Enum = {
+        TooltipDataType = { Item = 0 },
+        TransmogCollectionType = CATEGORIES,
+        TransmogCollectionTypeMeta = { NumValues = 30 },
+        TransmogType = { Appearance = 0 },
+        TransmogModification = { Main = 0 },
+        -- ItemConstantsDocumentation.lua:249-261, AuctionHouseEnumsDocumentation.lua:122-135
+        ItemBind = { None = 0, OnAcquire = 1, OnEquip = 2, OnUse = 3, Quest = 4 },
+        AuctionHouseSortOrder = { Price = 0, Name = 1, Level = 2, Bid = 3, Buyout = 4, TimeRemaining = 5 },
+        -- ItemConstantsDocumentation.lua:182-246, 269-296, 618-646
+        ItemClass = { Weapon = 2, Armor = 4 },
+        ItemArmorSubclass = { Generic = 0, Cloth = 1, Leather = 2, Mail = 3, Plate = 4, Cosmetic = 5, Shield = 6 },
+        ItemWeaponSubclass = { Axe1H = 0, Axe2H = 1, Bows = 2, Guns = 3, Mace1H = 4, Mace2H = 5, Polearm = 6,
+            Sword1H = 7, Sword2H = 8, Warglaive = 9, Staff = 10, Unarmed = 13, Generic = 14, Dagger = 15, Thrown = 16,
+            Crossbow = 18, Wand = 19 },
+        InventoryType = { IndexHeadType = 1, IndexShoulderType = 3, IndexBodyType = 4, IndexChestType = 5,
+            IndexWaistType = 6, IndexLegsType = 7, IndexFeetType = 8, IndexWristType = 9, IndexHandType = 10,
+            IndexWeaponType = 13, IndexShieldType = 14, IndexCloakType = 16, IndexTabardType = 19,
+            IndexRobeType = 20, IndexHoldableType = 23 },
+    }
+    if opts.noScanEnums then Enum.ItemClass = nil end
+    -- a list of { enum, member } the client lacks
+    for _, missing in ipairs(opts.noEnumMembers or {}) do Enum[missing[1]][missing[2]] = nil end
+    GameTooltip = c.newWidget("GameTooltip", "GameTooltip")
+    TooltipDataProcessor = { AddTooltipPostCall = function() end }
+    UIParent = c.newWidget("Frame", "UIParent")
+    GameFontNormal = not opts.noFontObjects and c.newWidget("Font", "GameFontNormal") or nil
+    GameFontHighlightSmall = not opts.noFontObjects and c.newWidget("Font", "GameFontHighlightSmall") or nil
+    print = function(...)
+        local parts = {}
+        for i = 1, select("#", ...) do parts[#parts + 1] = tostring((select(i, ...))) end
+        c.printed[#c.printed + 1] = table.concat(parts, " ")
+    end
+    -- The client's error handler records what it is given.
+    c.errors = {}
+    function geterrorhandler()
+        return function(err) c.errors[#c.errors + 1] = tostring(err) end
+    end
+    function hooksecurefunc(object, name, hook)
+        local original = object[name]
+        object[name] = function(...)
+            original(...)
+            hook(...)
+        end
+    end
+    -- SharedUIPanelTemplates.lua:477-509 with a made-up text width of 6 per
+    -- letter and 20 of padding; LibAHTab sizes its tab with them.
+    function PanelTemplates_TabResize(tab, padding, absoluteSize, minWidth)
+        tab.width = math.max(#(tab.text or "") * 6 + 20 + (padding or 0), minWidth or 0)
+    end
+    function PanelTemplates_DeselectTab(tab) tab.selected = false end
+    function PanelTemplates_SelectTab(tab) tab.selected = true end
+
+    -- C_Texture.GetAtlasInfo (TextureUtilsDocumentation.lua:75-88): a table
+    -- for an atlas the client has; noAtlases lists the ones it lacks (true:
+    -- every one). c.atlasAsked records the names asked.
+    c.atlasAsked = {}
+    C_Texture = { GetAtlasInfo = function(atlas)
+        misuse(type(atlas) == "string", "GetAtlasInfo with " .. type(atlas))
+        c.atlasAsked[#c.atlasAsked + 1] = atlas
+        local missing = opts.noAtlases == true or (type(opts.noAtlases) == "table" and opts.noAtlases[atlas])
+        if missing then return nil end
+        return { width = 32, height = 32, file = 1 }
+    end }
+
+    -- Blizzard_Menu's dropdowns (MenuTemplates.xml:3-39, 66-117) and the
+    -- menu they open (DropdownButton.lua). A press runs the intrinsic
+    -- OnMouseDown, which opens or closes the menu; opening runs the
+    -- generator into a new root description. c.menu is the open menu:
+    -- { owner, elements }, each element { kind = "radio" | "button" |
+    -- "divider", text, data, isSelected, setSelected, callback, enabled,
+    -- elements }: a button with elements is a submenu
+    -- (11_0_0_MenuImplementationGuide.lua:24-32), SetEnabled(false) greys an
+    -- element (Menu.lua:830). c.choose picks an element as a click does, in
+    -- the menu or a submenu: its responder runs, then every menu closes (a
+    -- radio has no response of its own, MenuTemplates.lua:384-395,
+    -- Menu.lua:2325-2350); a greyed element and a submenu's own button take
+    -- no pick. noMenuTemplates: CreateFrame raises for both templates;
+    -- noMenuAPI: the templates exist without SetupMenu and the text methods.
+    local MENU_TEMPLATES = { WowStyle1DropdownTemplate = true, WowStyle1FilterDropdownTemplate = true }
+    -- What the dropdown mixins define. A template frame has no catch-all for
+    -- them: a name its template lacks is nil, as on the client.
+    local MENU_API = { SetupMenu = true, CloseMenu = true, OpenMenu = true, IsMenuOpen = true,
+        SetMenuOpen = true, GenerateMenu = true, SignalUpdate = true, OverrideText = true,
+        SetDefaultText = true, GetMenuDescription = true }
+    local dropdownMeta = { __index = function(w, key)
+        if MENU_API[key] then return nil end
+        return meta.__index(w, key)
+    end }
+    c.menuOpens = 0
+    -- A menu callback that raises is recorded as misuse and raised again, as
+    -- the client raises it.
+    local function callback(fn, ...)
+        local ok, result = pcall(fn, ...)
+        if not ok then
+            c.misuse[#c.misuse + 1] = "a menu callback raised: " .. tostring(result)
+            error(result, 0)
+        end
+        return result
+    end
+    -- An element description: CreateRadio, CreateButton and CreateDivider
+    -- add to it (MenuUtil.lua:209-230, 270) and answer the new element.
+    local function newDescription(kind, text, data)
+        local d = { kind = kind, text = text, data = data, elements = {} }
+        function d:CreateRadio(radioText, isSelected, setSelected, radioData)
+            misuse(type(isSelected) == "function" and type(setSelected) == "function", "CreateRadio arguments")
+            local e = newDescription("radio", radioText, radioData)
+            e.isSelected, e.setSelected = isSelected, setSelected
+            self.elements[#self.elements + 1] = e
+            return e
+        end
+        function d:CreateButton(buttonText, callback, buttonData)
+            misuse(callback == nil or type(callback) == "function", "CreateButton callback")
+            local e = newDescription("button", buttonText, buttonData)
+            e.callback = callback
+            self.elements[#self.elements + 1] = e
+            return e
+        end
+        function d:CreateDivider() self.elements[#self.elements + 1] = { kind = "divider" } end
+        function d:SetEnabled(on) self.enabled = on end
+        return d
+    end
+    local function newDropdown(name, parent, template)
+        local w = c.newWidget("DropdownButton", name, parent, template)
+        setmetatable(w, dropdownMeta)
+        local selectionText = template == "WowStyle1DropdownTemplate"
+        w.intrinsic = "DropdownButton"
+        w.Text = w:CreateFontString()
+        w.scripts.OnMouseDown = function(self) self:SetMenuOpen(not self:IsMenuOpen()) end
+        if opts.noMenuAPI then return w end
+        -- DropdownTextMixin:SetText (MenuTemplates.lua:731-734); the filter
+        -- template starts on FILTER and has its Background
+        -- (MenuTemplates.xml:91)
+        function w:SetText(text)
+            self.text = text
+            self.Text.text = text
+        end
+        if template == "WowStyle1FilterDropdownTemplate" then
+            w:SetText("Filter")
+            w.Background = w:CreateTexture()
+        else
+            -- DropdownSelectionTextMixin:OverrideText (MenuTemplates.lua:804-811):
+            -- the text stays, whatever the selection
+            function w:OverrideText(text)
+                if not text then return end
+                self.disableSelectionText = true
+                self:SetText(text)
+            end
+        end
+        -- DropdownButton.lua:255-264: the generator fills a new root
+        -- description (a generator that raises is reported, not raised:
+        -- securecallfunction), then SignalUpdate
+        function w:GenerateMenu()
+            if not self.menuGenerator then return end
+            local root = newDescription("root")
+            local ok, err = pcall(self.menuGenerator, self, root)
+            if not ok then
+                c.misuse[#c.misuse + 1] = "a menu generator raised: " .. tostring(err)
+                geterrorhandler()(err)
+            end
+            self.menuRoot = root
+            self:SignalUpdate()
+        end
+        -- DropdownButton.lua:279-288, 326-345 and DropdownSelectionTextMixin:
+        -- UpdateToMenuSelections (MenuTemplates.lua:826-857): every radio's
+        -- selected callback is evaluated; the selected radio's text becomes
+        -- the text unless OverrideText was used
+        function w:SignalUpdate()
+            local text
+            for _, e in ipairs(self.menuRoot and self.menuRoot.elements or {}) do
+                if e.kind == "radio" and callback(e.isSelected, e.data) and text == nil then text = e.text end
+            end
+            if selectionText and not self.disableSelectionText then self:SetText(text or self.defaultText) end
+        end
+        -- DropdownButton.lua:246-248 (generated at once when shown) and
+        -- DropdownSelectionTextMixin:OnShow (MenuTemplates.lua:869-873)
+        function w:SetupMenu(generator)
+            misuse(type(generator) == "function", "SetupMenu without a generator")
+            self.menuGenerator = generator
+            if self.shown then self:GenerateMenu() end
+        end
+        if selectionText then w.scripts.OnShow = function(self) self:GenerateMenu() end end
+        function w:IsMenuOpen() return c.menu ~= nil and c.menu.owner == self end
+        function w:OpenMenu()
+            if not self:IsEnabled() or self:IsMenuOpen() or not self.menuGenerator then return end
+            self:GenerateMenu()
+            c.menu = { owner = self, elements = self.menuRoot.elements }
+            c.menuOpens = c.menuOpens + 1
+        end
+        -- DropdownButton.lua:132-139: closing signals an update
+        function w:CloseMenu()
+            if self:IsMenuOpen() then c.menu = nil end
+            self:SignalUpdate()
+        end
+        function w:SetMenuOpen(open) if open then self:OpenMenu() else self:CloseMenu() end end
+        return w
+    end
+    -- The open menu's radios as { text, selected, enabled }, buttons as
+    -- { text, enabled, submenu } (submenu: its entries, or nil), dividers
+    -- as "-".
+    local function entries(elements)
+        local out = {}
+        for _, e in ipairs(elements) do
+            if e.kind == "divider" then
+                out[#out + 1] = "-"
+            elseif e.kind == "radio" then
+                out[#out + 1] = { text = e.text, selected = callback(e.isSelected, e.data), enabled = e.enabled ~= false }
+            else
+                out[#out + 1] = { text = e.text, enabled = e.enabled ~= false,
+                    submenu = e.elements[1] and entries(e.elements) or nil }
+            end
+        end
+        return out
+    end
+    function c.menuEntries() return entries(c.menu and c.menu.elements or {}) end
+    local function pick(elements, text)
+        for _, e in ipairs(elements) do
+            if e.kind ~= "divider" and e.elements[1] then
+                local found = pick(e.elements, text)
+                if found ~= nil then return found end
+            elseif e.text == text and e.kind ~= "divider" then
+                if e.enabled == false then return false end
+                local fn = e.kind == "radio" and e.setSelected or e.callback
+                local response = fn and callback(fn, e.data, { context = 1, buttonName = "LeftButton" }, c.menu)
+                misuse(response == nil, "a responder answered " .. tostring(response))
+                local owner = c.menu.owner
+                c.menu = nil
+                owner:SignalUpdate()
+                return true
+            end
+        end
+    end
+    function c.choose(text)
+        return pick(c.menu and c.menu.elements or {}, text) == true
+    end
+
+    function CreateFrame(kind, name, parent, template)
+        if (opts.noButtonTemplate and template == "UIPanelButtonTemplate")
+            or (template and opts.noTemplates and opts.noTemplates[template]) then
+            error("fake: unknown template " .. template)
+        end
+        if MENU_TEMPLATES[template] then
+            if opts.noMenuTemplates then error("fake: unknown template " .. template) end
+            misuse(kind == "DropdownButton", "CreateFrame kind " .. tostring(kind) .. " for " .. template)
+            return newDropdown(name, parent, template)
+        end
+        misuse(kind == "Frame" or kind == "Button" or kind == "DressUpModel" or kind == "EditBox",
+            "CreateFrame kind " .. tostring(kind))
+        local w = c.newWidget(kind, name, parent, template)
+        -- IconButtonTemplate's Icon (IconButtonTemplate.xml:23-29)
+        if template == "SquareIconButtonTemplate" then w.Icon = w:CreateTexture() end
+        return w
+    end
+    function UnitClass(unit)
+        misuse(unit == "player", "UnitClass unit")
+        return "Warlock", "WARLOCK", PLAYER_CLASS
+    end
+    -- The nine classes in the client's order, as the probe read them on
+    -- 2026-11-25 (C_SpecializationInfo.GetAllClassIDs), and their info
+    -- (CreatureInfoDocumentation.lua:127-135).
+    local CLASSES = { [1] = { "Warrior", "WARRIOR" }, [2] = { "Paladin", "PALADIN" }, [3] = { "Hunter", "HUNTER" },
+        [4] = { "Rogue", "ROGUE" }, [5] = { "Priest", "PRIEST" }, [7] = { "Shaman", "SHAMAN" },
+        [8] = { "Mage", "MAGE" }, [9] = { "Warlock", "WARLOCK" }, [11] = { "Druid", "DRUID" } }
+    Fake.CLASS_IDS = { 1, 2, 3, 4, 5, 7, 8, 9, 11 }
+    C_SpecializationInfo = not opts.noClassList and { GetAllClassIDs = function()
+        local out = {}
+        for i, id in ipairs(Fake.CLASS_IDS) do out[i] = id end
+        return out
+    end } or nil
+    C_CreatureInfo = not opts.noClassList and { GetClassInfo = function(classID)
+        local info = CLASSES[classID]
+        return info and { className = info[1], classFile = info[2], classID = classID } or nil
+    end } or nil
+    -- ColorUtil.lua:66-73: r, g, b and the colour string; the fake's colours.
+    function GetClassColor(classFile)
+        return 1, 1, 1, "ff" .. (classFile or "none")
+    end
+    function Model_ApplyUICamera(model, cameraID)
+        misuse(type(model) == "table" and type(cameraID) == "number", "Model_ApplyUICamera arguments")
+        c.cameras[#c.cameras + 1] = cameraID
+        -- the camera this model was last framed with
+        model.uiCamera = cameraID
+    end
+    -- CameraDocumentation.lua:21-43: a position, a facing and an animation.
+    function GetUICameraInfo(cameraID)
+        misuse(type(cameraID) == "number", "GetUICameraInfo with " .. type(cameraID))
+        return 1, 0, 0, 0, 0, 0, 0, 0, -1, false
+    end
+
+    -- The clock: GetTime, C_Timer.After and C_Timer.NewTicker run on it, and
+    -- c.advance moves it, running every timer that falls due on the way.
+    c.now = 1000
+    local timers = {}
+    local function after(delay, fn)
+        local t = { at = c.now + delay, fn = fn }
+        timers[#timers + 1] = t
+        return t
+    end
+    c.after = after
+    function c.advance(seconds)
+        local stop = c.now + seconds
+        while true do
+            local due, index
+            for i, t in ipairs(timers) do
+                if t.at <= stop and (not due or t.at < due.at) then due, index = t, i end
+            end
+            if not due then break end
+            table.remove(timers, index)
+            c.now = math.max(c.now, due.at)
+            if not due.cancelled then due.fn() end
+        end
+        c.now = stop
+    end
+    function c.pendingTimers()
+        local n = 0
+        for _, t in ipairs(timers) do if not t.cancelled then n = n + 1 end end
+        return n
+    end
+    function GetTime() return c.now end
+    -- C_Timer.After(0) runs on the next frame; c.frame() runs one frame.
+    c.FRAME = 0.016
+    function c.frame() c.advance(c.FRAME) end
+    C_Timer = not opts.noTimer and {
+        After = function(seconds, fn) after(seconds == 0 and c.FRAME or seconds, fn) end,
+        NewTicker = function(seconds, fn, iterations)
+            local ticker = { runs = 0 }
+            local function tick()
+                if ticker.cancelled then return end
+                ticker.runs = ticker.runs + 1
+                fn(ticker)
+                if not ticker.cancelled and (not iterations or ticker.runs < iterations) then
+                    ticker.timer = after(seconds, tick)
+                end
+            end
+            ticker.timer = after(seconds, tick)
+            function ticker:Cancel()
+                self.cancelled = true
+                if self.timer then self.timer.cancelled = true end
+            end
+            return ticker
+        end,
+    } or nil
+
+    -- Item data: what C_Item answers before and after an item loads.
+    local itemDefs = opts.items or {}
+    local itemLoaded = {}
+    c.loadRequests = {}
+    c.itemInfoCalls, c.transmogInfoCalls = 0, 0
+    local function itemDef(itemID)
+        return itemDefs[itemID] or { name = "Item " .. itemID, quality = 2, bindType = 2, subType = "Cloth",
+            classID = 4, subClassID = 1 }
+    end
+    local function isLoaded(itemID)
+        if itemLoaded[itemID] ~= nil then return itemLoaded[itemID] end
+        return itemDef(itemID).load == nil
+    end
+    C_Item = {
+        -- ItemDocumentation.lua:659-679: itemID, itemType, itemSubType,
+        -- itemEquipLoc, icon, classID, subClassID, without item data.
+        GetItemInfoInstant = not opts.noItemInstant and function(itemID)
+            misuse(type(itemID) == "number", "GetItemInfoInstant with " .. type(itemID))
+            c.instantCalls = (c.instantCalls or 0) + 1
+            local d = itemDef(itemID)
+            if not d.classID then return nil end
+            return itemID, "Armor", d.subType or "", "INVTYPE_FEET", 0, d.classID, d.subClassID
+        end or nil,
+        -- c.qualityColorRaises: the next that many calls raise
+        GetItemQualityColor = function(quality)
+            misuse(type(quality) == "number", "GetItemQualityColor with " .. type(quality))
+            if (c.qualityColorRaises or 0) > 0 then
+                c.qualityColorRaises = c.qualityColorRaises - 1
+                error("fake: GetItemQualityColor failed")
+            end
+            return 1, 1, 1, "ffffffff"
+        end,
+        -- ItemDocumentation.lua: 1 name, 3 quality, 7 subtype, 14 bind type;
+        -- nothing until the data has loaded.
+        GetItemInfo = function(itemID)
+            c.itemInfoCalls = c.itemInfoCalls + 1
+            if type(itemID) ~= "number" or not isLoaded(itemID) then return nil end
+            local d = itemDef(itemID)
+            return d.name, "link", d.quality, 1, 1, "Armor", d.subType, 1, "INVTYPE_FEET", 0, 0, 4, 1, d.bindType
+        end,
+        IsItemDataCachedByID = function(itemID) return isLoaded(itemID) end,
+        -- ItemDocumentation.lua:1020-1036; the names are the fake's
+        GetItemSubClassInfo = function(classID, subClassID)
+            misuse(type(classID) == "number" and type(subClassID) == "number", "GetItemSubClassInfo arguments")
+            return ("Subclass %d.%d"):format(classID, subClassID), false
+        end,
+        RequestLoadItemDataByID = function(itemID)
+            misuse(type(itemID) == "number", "RequestLoadItemDataByID with " .. type(itemID))
+            c.loadRequests[#c.loadRequests + 1] = itemID
+            local load = itemDef(itemID).load
+            if isLoaded(itemID) or load == "never" or c.loading[itemID] then return end
+            c.loading[itemID] = true
+            if load == "fail" then
+                return after(0.1, function() c.fire("ITEM_DATA_LOAD_RESULT", itemID, false) end)
+            end
+            after(load, function()
+                itemLoaded[itemID] = true
+                c.fire("ITEM_DATA_LOAD_RESULT", itemID, true)
+            end)
+        end,
+    }
+    c.loading = {}
+
+    -- The auction house. Every C_AuctionHouse access is recorded in
+    -- auctionTouches. c.ah holds the fake server: listings (rows with name,
+    -- itemID, itemLevel, itemSuffix, minPrice, totalQuantity) answer a name
+    -- browse by case-insensitive substring, in pages of pageSize, answerDelay
+    -- after the send; the throttle closes on every send and opens readyDelay
+    -- later, with AUCTION_HOUSE_THROTTLED_SYSTEM_READY unless readyEvent is
+    -- false. silent: no answer ever; fail: AUCTION_HOUSE_BROWSE_FAILURE
+    -- instead of rows; neverReady: the throttle stays closed once closed.
+    local ah = { ready = true, sends = {}, more = {}, listings = {}, keyNames = {}, pageSize = 500,
+        answerDelay = 0.25, readyDelay = 0.3, readyEvent = true, keyInfoCalls = 0, keyAsked = {}, keyKnown = {}, keyCount = {},
+        keyEvent = true, keyNever = {}, searches = {}, searchListings = {}, searchResults = {}, dropSearches = 0,
+        searchRepeat = true, repeatDelay = 0.3, bids = {}, bidOutcome = "completed" }
+    c.ah = ah
+    local function closeThrottle()
+        ah.ready = false
+        if ah.neverReady then return end
+        after(ah.readyDelay, function()
+            ah.ready = true
+            if ah.readyEvent then c.fire("AUCTION_HOUSE_THROTTLED_SYSTEM_READY") end
+        end)
+    end
+    local function rowOf(l)
+        return { itemKey = { itemID = l.itemID, itemLevel = l.itemLevel or 0, itemSuffix = l.itemSuffix or 0,
+            battlePetSpeciesID = 0 }, minPrice = l.minPrice, totalQuantity = l.totalQuantity or 1,
+            containsOwnerItem = false }
+    end
+    local function answer(event, payload)
+        if ah.silent then return end
+        after(ah.answerDelay, function()
+            if ah.fail then return c.fire("AUCTION_HOUSE_BROWSE_FAILURE") end
+            c.fire(event, payload)
+        end)
+    end
+    local AH = {
+        IsThrottledMessageSystemReady = function() return ah.ready end,
+        SendBrowseQuery = function(query)
+            misuse(ah.ready or ah.sendingForeign, "SendBrowseQuery while the throttle is closed")
+            ah.sends[#ah.sends + 1] = { query = query, at = c.now, foreign = ah.sendingForeign }
+            closeThrottle()
+            local text = (query.searchString or ""):lower()
+            local pages, page = {}, nil
+            for _, l in ipairs(ah.listings) do
+                if l.name:lower():find(text, 1, true) then
+                    if not page or #page >= ah.pageSize then page = {}; pages[#pages + 1] = page end
+                    page[#page + 1] = rowOf(l)
+                end
+            end
+            ah.pages, ah.delivered, ah.results = pages, 0, {}
+            ah.delivered = 1
+            for _, row in ipairs(pages[1] or {}) do ah.results[#ah.results + 1] = row end
+            answer("AUCTION_HOUSE_BROWSE_RESULTS_UPDATED")
+        end,
+        RequestMoreBrowseResults = function()
+            misuse(ah.ready, "RequestMoreBrowseResults while the throttle is closed")
+            ah.more[#ah.more + 1] = c.now
+            closeThrottle()
+            ah.delivered = ah.delivered + 1
+            local page = ah.pages[ah.delivered] or {}
+            for _, row in ipairs(page) do ah.results[#ah.results + 1] = row end
+            answer("AUCTION_HOUSE_BROWSE_RESULTS_ADDED", page)
+        end,
+        GetBrowseResults = function() return ah.results or {} end,
+        HasFullBrowseResults = function() return (ah.delivered or 0) >= #(ah.pages or {}) end,
+        -- As the client does: the first call for a key answers nothing and
+        -- ITEM_KEY_ITEM_INFO_RECEIVED fires 12 ms later (9 to 14 ms measured);
+        -- from then on the call answers a table, with the name keyNames
+        -- gives, if any. keyEvent false: the info arrives without the event
+        -- (only polling sees it); keyNever[text]: the info never arrives.
+        GetItemKeyInfo = function(itemKey)
+            misuse(type(itemKey) == "table", "GetItemKeyInfo with " .. type(itemKey))
+            ah.keyInfoCalls = ah.keyInfoCalls + 1
+            local text = itemKey.itemID .. ":" .. itemKey.itemSuffix
+            ah.keyCount[text] = (ah.keyCount[text] or 0) + 1
+            if not ah.keyAsked[text] and not ah.keyNever[text] then
+                ah.keyAsked[text] = true
+                after(0.012, function()
+                    ah.keyKnown[text] = true
+                    if ah.keyEvent then c.fire("ITEM_KEY_ITEM_INFO_RECEIVED", itemKey.itemID) end
+                end)
+            end
+            if not ah.keyKnown[text] then return nil end
+            return { itemID = itemKey.itemID, itemName = ah.keyNames[text], quality = 2 }
+        end,
+        -- The search for one item variant (AuctionHouseDocumentation.lua:1031-1044).
+        -- As the client does (spec 4.5): a send while the key's info is not
+        -- there, or one of the first dropSearches sends, is dropped silently:
+        -- the throttle stays open and no answer comes. Otherwise the throttle
+        -- closes and ITEM_SEARCH_RESULTS_UPDATED(itemKey) comes answerDelay
+        -- later, and again repeatDelay (0.3 s) after that unless searchRepeat
+        -- is false.
+        -- searchListings[text] are the results, ItemSearchResultInfo tables.
+        SendSearchQuery = function(itemKey, sorts, separateOwnerItems)
+            misuse(ah.ready, "SendSearchQuery while the throttle is closed")
+            misuse(type(itemKey) == "table" and type(sorts) == "table" and type(separateOwnerItems) == "boolean",
+                "SendSearchQuery arguments")
+            local text = itemKey.itemID .. ":" .. itemKey.itemSuffix
+            local record = { itemKey = itemKey, sorts = sorts, separate = separateOwnerItems, at = c.now }
+            ah.searches[#ah.searches + 1] = record
+            if not ah.keyKnown[text] or ah.dropSearches > 0 then
+                ah.dropSearches = math.max(0, ah.dropSearches - 1)
+                record.dropped = true
+                return
+            end
+            closeThrottle()
+            if ah.silent then return end
+            local function deliver()
+                local results = {}
+                for i, r in ipairs(ah.searchListings[text] or {}) do
+                    local copy = { itemKey = itemKey }
+                    for k, v in pairs(r) do copy[k] = v end
+                    results[i] = copy
+                end
+                ah.searchResults[text] = results
+                c.fire("ITEM_SEARCH_RESULTS_UPDATED", { itemID = itemKey.itemID, itemLevel = itemKey.itemLevel,
+                    itemSuffix = itemKey.itemSuffix, battlePetSpeciesID = itemKey.battlePetSpeciesID })
+            end
+            after(ah.answerDelay, function()
+                deliver()
+                if ah.searchRepeat then after(ah.repeatDelay, deliver) end
+            end)
+        end,
+        GetNumItemSearchResults = function(itemKey)
+            misuse(type(itemKey) == "table", "GetNumItemSearchResults with " .. type(itemKey))
+            return #(ah.searchResults[itemKey.itemID .. ":" .. itemKey.itemSuffix] or {})
+        end,
+        GetItemSearchResultInfo = function(itemKey, index)
+            misuse(type(itemKey) == "table" and type(index) == "number", "GetItemSearchResultInfo arguments")
+            return (ah.searchResults[itemKey.itemID .. ":" .. itemKey.itemSuffix] or {})[index]
+        end,
+        -- The buyout (AuctionHouseDocumentation.lua:852-862). Each call is
+        -- recorded with whether it was made inside a click the fake started
+        -- (c.click) and on which button. bidOutcome: "completed" (default)
+        -- fires AUCTION_HOUSE_PURCHASE_COMPLETED(auctionID) 0.2 s later,
+        -- "error" AUCTION_HOUSE_SHOW_ERROR, "other" a completion for another
+        -- auction id, "silent" nothing.
+        PlaceBid = function(auctionID, amount)
+            misuse(type(auctionID) == "number" and type(amount) == "number", "PlaceBid arguments")
+            ah.bids[#ah.bids + 1] = { auctionID = auctionID, amount = amount, inClick = c.clicking ~= nil,
+                button = c.clicking, at = c.now }
+            local outcome = ah.bidOutcome
+            after(0.2, function()
+                if outcome == "completed" then
+                    c.fire("AUCTION_HOUSE_PURCHASE_COMPLETED", auctionID)
+                elseif outcome == "error" then
+                    c.fire("AUCTION_HOUSE_SHOW_ERROR", 1)
+                elseif outcome == "other" then
+                    c.fire("AUCTION_HOUSE_PURCHASE_COMPLETED", auctionID + 1)
+                end
+            end)
+        end,
+    }
+    -- Another addon, or Blizzard's own code, sends a browse; it goes through
+    -- whatever hooks are on C_AuctionHouse.SendBrowseQuery.
+    function c.foreignBrowse(query)
+        ah.sendingForeign = true
+        C_AuctionHouse.SendBrowseQuery(query or { searchString = "", sorts = {}, filters = {} })
+        ah.sendingForeign = nil
+    end
+    for _, name in ipairs(opts.noAuction or {}) do AH[name] = nil end
+    C_AuctionHouse = not opts.noAuctionHouse and setmetatable({}, { __index = function(_, key)
+        c.auctionTouches[#c.auctionTouches + 1] = key
+        return AH[key]
+    end }) or nil
+
+    -- The player's money in copper (PlayerScriptDocumentation.lua:642-649).
+    c.money = 100 * 10000
+    GetMoney = not opts.noMoney and function() return c.money end or nil
+
+    -- A real click by the player: OnClick runs only on a shown, enabled
+    -- button, and c.clicking names the button while it runs, so PlaceBid
+    -- can tell a call made inside the click from any other.
+    function c.click(button, mouse)
+        if not (button and visible(button) and button:IsEnabled() and button.scripts.OnClick) then return false end
+        c.clicking = button
+        local ok, err = pcall(button.scripts.OnClick, button, mouse or "LeftButton", false)
+        c.clicking = nil
+        if not ok then error(err, 0) end
+        return true
+    end
+
+    -- Escape (Blizzard_GameMenuEsc.lua:76-113): handlers in priority order,
+    -- the first that answers true takes it; otherwise CloseAllWindows
+    -- (AddOnPost, UIParentPanelManager.lua:1190) closes the auction window.
+    GameMenuEscPriority = { Dialog = 1, Menu = 2, AddOn = 8, AddOnPost = 9 }
+    c.escHandlers = {}
+    RegisterGameMenuEscHandler = not opts.noEscHandlers and function(priority, handler)
+        misuse(type(priority) == "number" and type(handler) == "function", "RegisterGameMenuEscHandler arguments")
+        c.escHandlers[#c.escHandlers + 1] = { priority = priority, handler = handler }
+        table.sort(c.escHandlers, function(a, b) return a.priority < b.priority end)
+    end or nil
+    function c.escape()
+        for _, entry in ipairs(c.escHandlers) do
+            if entry.handler() then return "handled" end
+        end
+        if AuctionHouseFrame and AuctionHouseFrame:IsShown() then c.closeAuction() end
+        return "closed windows"
+    end
+
+    -- A key press by the player: the last made shown frame with keyboard
+    -- enabled and an OnKeyDown script gets it first; when no frame takes it,
+    -- or that frame passes it on, the game's own handling follows (Escape:
+    -- c.escape). c.keys records each press: { key, frame, passed }.
+    -- c.combat is InCombatLockdown's answer; c.enterCombat and c.leaveCombat
+    -- change it and fire PLAYER_REGEN_DISABLED / PLAYER_REGEN_ENABLED.
+    -- c.kept records each key a frame kept: { key, frame }; record.kept says
+    -- it for one press. c.propagateInCombat counts SetPropagateKeyboardInput
+    -- calls made in combat.
+    c.keys, c.kept, c.propagateInCombat = {}, {}, 0
+    function InCombatLockdown() return c.combat == true end
+    function c.enterCombat()
+        c.combat = true
+        c.fire("PLAYER_REGEN_DISABLED")
+    end
+    function c.leaveCombat()
+        c.combat = false
+        c.fire("PLAYER_REGEN_ENABLED")
+    end
+    function c.key(key)
+        local target
+        for _, w in ipairs(c.widgets) do
+            if w.keyboard and w.scripts.OnKeyDown and visible(w) then target = w end
+        end
+        local record = { key = key, frame = target }
+        c.keys[#c.keys + 1] = record
+        if target then target.scripts.OnKeyDown(target, key) end
+        record.passed = not target or target.propagate == true
+        record.kept = not record.passed
+        if record.kept then c.kept[#c.kept + 1] = { key = key, frame = target } end
+        if record.passed and key == "ESCAPE" then c.escape() end
+        return record
+    end
+
+    if not opts.noCompare then
+        CollectionWardrobeUtil = {
+            -- This client's comparator, copied from
+            -- Blizzard_FrameXMLUtil/Camelot/CollectionsUtilOverrides.lua:1-27.
+            CompareAppearance = function(source1, source2)
+                if source1.isCollected ~= source2.isCollected then return source1.isCollected end
+                if source1.isUsable ~= source2.isUsable then return source1.isUsable end
+                if source1.isFavorite ~= source2.isFavorite then return source1.isFavorite end
+                if source1.canDisplayOnPlayer ~= source2.canDisplayOnPlayer then return source1.canDisplayOnPlayer end
+                if source1.isHideVisual ~= source2.isHideVisual then return source1.isHideVisual end
+                if source1.hasActiveRequiredHoliday ~= source2.hasActiveRequiredHoliday then
+                    return source1.hasActiveRequiredHoliday
+                end
+                if source1.minIlvl and source2.minIlvl then return source1.minIlvl < source2.minIlvl end
+                if source1.uiOrder and source2.uiOrder then return source1.uiOrder > source2.uiOrder end
+                return source1.sourceID > source2.sourceID
+            end,
+            -- Not Blizzard's: highest source id first, enough to tell the
+            -- sorted list from the one the client gives.
+            SortSources = not opts.noSortSources and function(sources)
+                table.sort(sources, function(a, b) return a.sourceID > b.sourceID end)
+                return sources
+            end or nil,
+        }
+    else
+        CollectionWardrobeUtil = nil
+    end
+
+    local function forbid(name)
+        return function() c.forbidden[#c.forbidden + 1] = name end
+    end
+    local col = c.collections
+    local T = {
+        GetCategoryAppearances = function(category, location)
+            c.listCalls = c.listCalls + 1
+            c.listed[#c.listed + 1] = { category = category, slotID = type(location) == "table" and location.slotID }
+            misuse(SLOT_OF_CATEGORY[category] ~= nil, "GetCategoryAppearances category " .. tostring(category))
+            misuse(type(location) == "table" and location.slotID == SLOT_OF_CATEGORY[category] and location.type == 0
+                and location.modification == 0, "GetCategoryAppearances location for " .. tostring(category))
+            if opts.listRaisesFor == category then error("fake: GetCategoryAppearances failed for " .. category) end
+            if opts.listRaises == true or (tonumber(opts.listRaises) or 0) >= c.listCalls then
+                error("fake: GetCategoryAppearances failed")
+            end
+            if opts.listNil then return nil end
+            if (opts.listEmpty or 0) >= c.listCalls then return {} end
+            local result = {}
+            -- the client's own order is by id, descending: not Collections' order
+            for i = #appearances, 1, -1 do
+                local a = appearances[i]
+                if a.category == category and a.classes[col.classFilter] then
+                    -- the fields of TransmogCategoryAppearanceInfo
+                    -- (TransmogItemsDocumentation.lua:1190-1207)
+                    result[#result + 1] = { visualID = a.id, uiOrder = a.uiOrder, minIlvl = a.minIlvl,
+                        isHideVisual = a.hide or false, isCollected = a.collectedSource ~= nil, isUsable = true,
+                        isFavorite = false, canDisplayOnPlayer = true, exclusions = 0, hasRequiredHoliday = false,
+                        hasActiveRequiredHoliday = false, isValidForEquippedItem = false }
+                end
+            end
+            return result
+        end,
+        GetAllAppearanceSources = function(id)
+            local a = byID[id]
+            if not a then return nil end
+            local copy = {}
+            for i, s in ipairs(a.sources) do copy[i] = s end
+            return copy
+        end,
+        GetAppearanceSources = function(id, category, location)
+            local a = byID[id]
+            misuse(a and category == a.category and type(location) == "table"
+                and location.slotID == SLOT_OF_CATEGORY[category], "GetAppearanceSources arguments")
+            if not a or opts.sourcesNil then return nil end
+            local infos = {}
+            for i, s in ipairs(a.sources) do infos[i] = { sourceID = s } end
+            return infos
+        end,
+        PlayerHasTransmogItemModifiedAppearance = function(sourceID)
+            return collectedSources[sourceID] == true
+        end,
+        -- AppearanceSourceInfo (AppearanceSourceDocumentation.lua:6-30), the
+        -- fields the browser reads.
+        GetSourceInfo = function(sourceID)
+            misuse(type(sourceID) == "number", "GetSourceInfo with " .. type(sourceID))
+            if opts.sourceInfoNil then return nil end
+            return { sourceID = sourceID, itemID = (opts.sourceItems or {})[sourceID] or sourceID, sourceType = 1 }
+        end,
+        -- TransmogItemsDocumentation.lua:521-536: an item's appearance and
+        -- source, or nothing; by the fixture's sources (sourceItems).
+        GetItemInfo = function(itemID)
+            misuse(type(itemID) == "number", "C_TransmogCollection.GetItemInfo with " .. type(itemID))
+            c.transmogInfoCalls = c.transmogInfoCalls + 1
+            for _, a in ipairs(appearances) do
+                for _, s in ipairs(a.sources) do
+                    if ((opts.sourceItems or {})[s] or s) == itemID then return a.id, s end
+                end
+            end
+        end,
+        GetAppearanceCameraID = function() return 486 end,
+        -- TransmogItemsDocumentation.lua:296-315: name, isWeapon,
+        -- canHaveIllusions, canMainHand, canOffHand, canRanged, or nothing.
+        GetCategoryInfo = function(category)
+            misuse(type(category) == "number", "GetCategoryInfo with " .. type(category))
+            c.categoryInfoCalls = c.categoryInfoCalls + 1
+            if opts.noCategoryInfo then return nil end
+            local info = opts.categoryInfo and opts.categoryInfo[category]
+            if info then return unpack(info) end
+            if opts.categoryInfo or not CATEGORY_NAMES[category] or category == CATEGORIES.Warglaives then return nil end
+            local slotID = SLOT_OF_CATEGORY[category]
+            return CATEGORY_NAMES[category], true, false, slotID == 16, slotID == 17, slotID == 18
+        end,
+        GetClassFilter = function() return col.classFilter end,
+        SetClassFilter = function(classID)
+            col.classFilter = classID
+            c.setClassCalls = (c.setClassCalls or 0) + 1
+            if opts.setClassFires then c.fire("TRANSMOG_COLLECTION_UPDATED") end
+            if opts.setClassRaises then error("fake: SetClassFilter failed") end
+        end,
+        GetUncollectedShown = function() return col.uncollectedShown end,
+        SetUncollectedShown = function(v) col.uncollectedShown = v end,
+        GetCollectedShown = function() return col.collectedShown end,
+        SetCollectedShown = function(v) col.collectedShown = v end,
+        SetSearch = function(_, text) col.search = text end,
+        ClearSearch = function() col.search = "" end,
+        GetAppearanceInfoBySource = forbid("GetAppearanceInfoBySource"),
+        AccountCanCollectSource = forbid("AccountCanCollectSource"),
+        PlayerCanCollectSource = forbid("PlayerCanCollectSource"),
+    }
+    if opts.noList then T.GetCategoryAppearances = nil end
+    if opts.noItemTransmog then T.GetItemInfo = nil end
+    C_TransmogCollection = not opts.noTransmog and T or nil
+
+    -- What Blizzard's AUCTION_HOUSE_SHOW handler does before an addon's runs:
+    -- load Blizzard_AuctionHouseUI, which makes the frame with its three tabs.
+    function c.loadAuctionUI()
+        if AuctionHouseFrame then return end
+        local frame = c.newWidget("Frame", "AuctionHouseFrame")
+        frame.width, frame.height = 800, 538
+        frame.Tabs = {}
+        for i = 1, 3 do
+            frame.Tabs[i] = c.newWidget("Button", "AuctionHouseFrameTab" .. i, frame)
+            frame.Tabs[i].blizzard = true
+        end
+        frame.displayMode = { "BuyTab" }
+        function frame:SetDisplayMode(mode) self.displayMode = mode end
+        function frame:SetTitle(title) self.title = title end
+        frame.shown = false
+        -- AuctionHouseFrameMixin:OnShow puts the window on Buy
+        -- (Blizzard_AuctionHouseFrame.lua:389-394).
+        frame.scripts.OnShow = function(self) self:SetDisplayMode({ "BuyTab" }) end
+    end
+
+    -- The auction window opening and closing: Blizzard's handlers show and
+    -- hide the frame (GameEvent.HandleAuctionHouseShow / Closed,
+    -- Blizzard_Game/Mainline/EventImplementation.lua:454-465) before an
+    -- addon's handler runs (the order is assumed).
+    function c.openAuction()
+        c.loadAuctionUI()
+        AuctionHouseFrame:Show()
+        c.fire("AUCTION_HOUSE_SHOW")
+    end
+    function c.closeAuction()
+        AuctionHouseFrame:Hide()
+        c.fire("AUCTION_HOUSE_CLOSED")
+    end
+
+    -- Loads the addon's files in the .toc's order.
+    function c.loadToc(dir)
+        local loaded = {}
+        for line in io.lines(dir .. "/TransmogChecker.toc") do
+            line = line:gsub("\r", ""):gsub("\\", "/")
+            if line ~= "" and line:sub(1, 2) ~= "##" then
+                local chunk = assert(loadfile(dir .. "/" .. line))
+                chunk("TransmogChecker", {})
+                loaded[#loaded + 1] = line
+            end
+        end
+        return loaded
+    end
+
+    return c
+end
+
+return Fake
