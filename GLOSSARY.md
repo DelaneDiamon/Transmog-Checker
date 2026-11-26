@@ -33,20 +33,24 @@ The place on a character where an appearance is worn or held, such as chest, fee
 _Avoid_: Category, type
 
 **Appearance browser**:
-The tab on the auction house window that lists the game's appearances for a slot and tells the player which of them are for sale.
-_Avoid_: AH view, transmog browser, catalogue
+The tab on the auction house window that lists the game's appearances for a slot, narrowed by its filters and ordered by its sort, and tells the player which of them are for sale.
+_Avoid_: AH view, transmog browser, catalogue, sweep view
 
 **Tile**:
 One cell of the appearance browser: a model showing a single appearance, with the lowest price it is for sale at once that is known.
 _Avoid_: Card, cell, model
 
-**All**:
-The appearance browser's default mode: every appearance the game lists for the slot, with nothing read from the auction house until a tile is clicked.
-_Avoid_: Catalogue, browse mode
+**For sale only**:
+The appearance browser's filter that keeps only appearances with a known price, from the slot's scan or a check of this visit.
+_Avoid_: Available, on AH, collectable mode, For sale mode
 
-**For sale**:
-The appearance browser's mode that keeps only appearances that are not collected and have an item on the auction house now, cheapest first.
-_Avoid_: Available, on AH, collectable mode
+**Source filter**:
+The appearance browser's filter by how an appearance's items are obtained, one entry per source type the game names and Other; an appearance passes when any of its items comes from a ticked type.
+_Avoid_: Origin filter, drop filter
+
+**Scan when shown**:
+The appearance browser's setting that scans the slot when the tab is shown or the slot is selected, unless the slot has a scan from this visit. Off, only a click reads the auction house.
+_Avoid_: Auto-scan, auto-refresh
 
 **Check**:
 One lookup of the auction house for the items that carry a single appearance, started by a click on its tile.

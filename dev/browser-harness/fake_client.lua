@@ -605,8 +605,8 @@ function Fake.new(opts)
     -- menu they open (DropdownButton.lua). A press runs the intrinsic
     -- OnMouseDown, which opens or closes the menu; opening runs the
     -- generator into a new root description. c.menu is the open menu:
-    -- { owner, elements }, each element { kind = "radio" | "button" |
-    -- "divider", text, data, isSelected, setSelected, callback, enabled,
+    -- { owner, elements }, each element { kind = "radio" | "checkbox" |
+    -- "button" | "title" | "divider", text, data, isSelected, setSelected, callback, enabled,
     -- elements }: a button with elements is a submenu
     -- (11_0_0_MenuImplementationGuide.lua:24-32), SetEnabled(false) greys an
     -- element (Menu.lua:830). c.choose picks an element as a click does, in
@@ -651,6 +651,21 @@ function Fake.new(opts)
             misuse(callback == nil or type(callback) == "function", "CreateButton callback")
             local e = newDescription("button", buttonText, buttonData)
             e.callback = callback
+            self.elements[#self.elements + 1] = e
+            return e
+        end
+        -- a checkbox keeps the menu open and asks isSelected again
+        -- (MenuTemplates.lua:369-382, Menu.lua:2353-2360)
+        function d:CreateCheckbox(boxText, isSelected, setSelected, boxData)
+            misuse(type(isSelected) == "function" and type(setSelected) == "function", "CreateCheckbox arguments")
+            local e = newDescription("checkbox", boxText, boxData)
+            e.isSelected, e.setSelected = isSelected, setSelected
+            self.elements[#self.elements + 1] = e
+            return e
+        end
+        -- a title takes no pick (MenuTemplates.lua:294-303)
+        function d:CreateTitle(titleText)
+            local e = newDescription("title", titleText)
             self.elements[#self.elements + 1] = e
             return e
         end
@@ -740,7 +755,8 @@ function Fake.new(opts)
         function w:SetMenuOpen(open) if open then self:OpenMenu() else self:CloseMenu() end end
         return w
     end
-    -- The open menu's radios as { text, selected, enabled }, buttons as
+    -- The open menu's radios and checkboxes as { text, selected, enabled,
+    -- checkbox }, titles as { text, title }, buttons as
     -- { text, enabled, submenu } (submenu: its entries, or nil), dividers
     -- as "-".
     local function entries(elements)
@@ -748,8 +764,11 @@ function Fake.new(opts)
         for _, e in ipairs(elements) do
             if e.kind == "divider" then
                 out[#out + 1] = "-"
-            elseif e.kind == "radio" then
-                out[#out + 1] = { text = e.text, selected = callback(e.isSelected, e.data), enabled = e.enabled ~= false }
+            elseif e.kind == "radio" or e.kind == "checkbox" then
+                out[#out + 1] = { text = e.text, selected = callback(e.isSelected, e.data), enabled = e.enabled ~= false,
+                    checkbox = e.kind == "checkbox" or nil }
+            elseif e.kind == "title" then
+                out[#out + 1] = { text = e.text, title = true }
             else
                 out[#out + 1] = { text = e.text, enabled = e.enabled ~= false,
                     submenu = e.elements[1] and entries(e.elements) or nil }
@@ -763,11 +782,13 @@ function Fake.new(opts)
             if e.kind ~= "divider" and e.elements[1] then
                 local found = pick(e.elements, text)
                 if found ~= nil then return found end
-            elseif e.text == text and e.kind ~= "divider" then
+            elseif e.text == text and e.kind ~= "divider" and e.kind ~= "title" then
                 if e.enabled == false then return false end
-                local fn = e.kind == "radio" and e.setSelected or e.callback
+                local fn = (e.kind == "radio" or e.kind == "checkbox") and e.setSelected or e.callback
                 local response = fn and callback(fn, e.data, { context = 1, buttonName = "LeftButton" }, c.menu)
                 misuse(response == nil, "a responder answered " .. tostring(response))
+                -- a checkbox's Refresh: the menu stays open as built
+                if e.kind == "checkbox" then return true end
                 local owner = c.menu.owner
                 c.menu = nil
                 owner:OnMenuClosed()

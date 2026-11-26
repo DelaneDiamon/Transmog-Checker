@@ -216,14 +216,17 @@ local CAN_LEARN = {
 -- The character's own class gets, besides what the client answered for it,
 -- what its class can learn (CAN_LEARN); the other classes keep the client's
 -- answer. A category gets the name any class's answer gave it, else the
--- client's subclass name, else its number.
+-- client's subclass name, else its number. A slot no class answered for is
+-- not widened, so it keeps the fixed split (WeaponTypes).
 local function addOwnClass(learnt)
     local id = UnitClass and select(3, UnitClass("player"))
     local own, can = id and learnt[id], id and CAN_LEARN[id]
     if not (own and can) then return end
+    local answered = {}
+    for slot in pairs(can) do answered[slot] = own[slot] and anyType(learnt, slot) end
     for slot, categories in pairs(can) do
         for _, category in ipairs(categories) do
-            if own[slot] and not own[slot][category] then
+            if answered[slot] and not own[slot][category] then
                 local name
                 for _, has in pairs(learnt) do name = name or (has[slot] and has[slot][category]) end
                 local filter = Appearances.CategoryFilter(category)

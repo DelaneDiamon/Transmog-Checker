@@ -109,42 +109,20 @@ local INSET_Y = 66
 local INSET_CORNERS = { "BGCornerTopLeft", "BGCornerTopRight", "BGCornerBottomLeft", "BGCornerBottomRight" }
 -- Parts of a line 6 apart.
 local TOOLS_GAP = 6
--- The header row (layout B, 1.1): the catalogue and sweep toggles at x 60
--- and 94, 30 square, then the slot row, Search and the funnel. The toggles'
--- glyphs are the game art the owner chose in game, drawn 16 square: the
--- catalogue the atlas lootroll-icon-transmog (Blizzard_Collections/Mainline/
--- Blizzard_Wardrobe.xml:694), the sweep the coin icon, its built-in border
--- cropped. Without the atlas, or without the icon file where the client can
--- tell (GetFileIDFromPath, unverified on Forever), the addon's own art
--- (Media).
-local TOGGLE_Y, TOGGLE_SIZE, GLYPH_SIZE = 4, 30, 16
+-- The header row (layout B, 1.1): the slot row, Search and the funnel.
 local MEDIA = "Interface\\AddOns\\TransmogChecker\\Media\\"
-local ICON_CROP = { 0.08, 0.92, 0.08, 0.92 }
--- The toggles are round plates like the slot buttons: the game art 25 across
--- inside the ring, masked round on a dark round base, or 18 and cropped
--- without the mask API.
-local GLYPH_MASKED, GLYPH_UNMASKED, TOGGLE_BASE = 25, 18, { 0.05, 0.045, 0.04, 1 }
-local CIRCLE_MASK = "Interface\\CharacterFrame\\TempPortraitAlphaMask"
--- The Media catalogue glyph is white art tinted, lit and dim (the page's colours).
-local GLYPH_ON, GLYPH_OFF = { 1, 0.914, 0.659, 1 }, { 0.604, 0.569, 0.498, 1 }
--- The unselected glyph's alpha while the selected toggle carries the ring.
-local GLYPH_DIM_ALPHA = 0.45
-local TOGGLES = {
-    { mode = "All", x = 60, art = "catalogue", atlas = "lootroll-icon-transmog", tint = true, title = "All appearances",
-        text = "Every appearance of the slot. A click on a tile checks it." },
-    { mode = "For sale", x = 94, art = "sweep", icon = "Interface\\Icons\\INV_Misc_Coin_01", title = "For sale, cheapest first",
-        text = "Scans this slot and shows what you have not collected, cheapest first." },
-}
--- The scan action's glyph on "Price this slot" and "Scan again", left of
--- the text, when the client has the atlas (the owner's choice).
+-- The scan action's glyph on the scan control, left of the text, when the
+-- client has the atlas (the owner's choice).
 local SCAN_ATLAS, SCAN_GLYPH = "UI-RefreshButton", 14
+local SCAN_TIP = "Scans this slot's items on the auction house now."
 -- The slot row: round buttons of 31, 2 apart, 19 between groups
--- (Blizzard_Collections/Camelot/Blizzard_Wardrobe.lua:24-27), at x 136
--- (layout B). Collections' own art (WardrobeSlotButtonTemplate,
+-- (Blizzard_Collections/Camelot/Blizzard_Wardrobe.lua:24-27), starting at the
+-- grid's left edge, x 28, where the catalogue and sweep toggles were
+-- before (slice B). Collections' own art (WardrobeSlotButtonTemplate,
 -- Blizzard_Collections/Mainline/Blizzard_Wardrobe.xml:99-130, and
 -- CreateSlotButtons, Blizzard_Wardrobe.lua:460-503); that this client has
 -- these atlases is read from source and unverified in game.
-local SLOTS_X, SLOTS_Y, SLOT_SIZE, SLOT_GAP, GROUP_GAP = 136, 4, 31, 2, 19
+local SLOTS_X, SLOTS_Y, SLOT_SIZE, SLOT_GAP, GROUP_GAP = 28, 4, 31, 2, 19
 local SLOT_ART, SLOT_SELECTED, SLOT_HIGHLIGHT = "transmog-nav-slot-%s", "transmog-nav-slot-selected", "bags-roundhighlight"
 -- Search at x 642, y 9, 108 x 20; the funnel at x 757, y 4, 30 square, with
 -- the world map's filter art (Blizzard_WorldMap/Mainline/
@@ -167,8 +145,11 @@ local FUNNEL_PRESSED = "common-dropdown-a-button-settings-pressed-shadowless"
 local FUNNEL_PRESSED_HOVER = "common-dropdown-a-button-settings-pressedhover-shadowless"
 local FUNNEL_OPEN = "common-dropdown-a-button-settings-open-shadowless"
 local FUNNEL_FALLBACK, RESET_ATLAS = "Map-Filter-Button", "auctionhouse-ui-filter-redx"
-local FUNNEL_TEXT, FUNNEL_TIP = "Filter", "Filter: show and class"
+local FUNNEL_TEXT, FUNNEL_TIP = "Filter", "Filter and sort"
 local CLASS_TEXT, RESET_TEXT = "Class: %s", "Reset filters"
+local FOR_SALE_TEXT, SOURCE_TEXT, SORT_TEXT, SCAN_SHOWN_TEXT = "For sale only", "Source", "Sort", "Scan when shown"
+-- A checkbox's mark in the panel's own list menu, without Blizzard's menu.
+local TICKED, UNTICKED = "[x] ", "[ ] "
 -- The band under the header: the count at x 28, y 42, and the weapon type
 -- dropdown (Collections' width, Blizzard_Wardrobe.lua:568) at x 598, its
 -- vertical centre at y 50 (a 22 high box from y 39, whatever height the
@@ -989,100 +970,6 @@ local function listMenu(panel, button, width, side)
     return menu
 end
 
--- A catalogue or sweep toggle: a round plate in the slot row's look (the
--- owner: a round ring needs no square outline), holding its glyph: the
--- chosen game art, or the addon's own from Media. The tooltip
--- names it. The selected one carries the slot row's gold ring and the
--- other's glyph is dimmed; without the ring's atlas the selected one is lit
--- instead (LockHighlight). It forwards the click to the state.
--- A texture masked to a circle (CreateMaskTexture,
--- SimpleFrameAPIDocumentation.lua:113-127; AddMaskTexture,
--- SimpleTextureAPIDocumentation.lua:10), with the round mask the client's
--- round icons use (Interface\CharacterFrame\TempPortraitAlphaMask, as
--- Blizzard_AccountStoreCategoryList.xml:27); answers whether it is masked.
-local function circle(button, texture)
-    if not (button.CreateMaskTexture and texture.AddMaskTexture) then return false end
-    local ok = pcall(function()
-        local mask = button:CreateMaskTexture()
-        mask:SetTexture(CIRCLE_MASK, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
-        mask:SetAllPoints(texture)
-        texture:AddMaskTexture(mask)
-        texture.mask = mask
-    end)
-    return ok and texture.mask ~= nil
-end
-
-local function newToggle(panel, toggle)
-    -- a plain round plate like the slot buttons (WardrobeSlotButtonTemplate,
-    -- Blizzard_Wardrobe.xml:99-129): 31 square, its centre (both ways) where
-    -- the 30 square toggle's was, the slot row's round highlight, no square frame
-    local button = CreateFrame("Button", nil, panel)
-    button:SetSize(SLOT_SIZE, SLOT_SIZE)
-    local grow = (SLOT_SIZE - TOGGLE_SIZE) / 2
-    button:SetPoint("TOPLEFT", panel, "TOPLEFT", toggle.x - grow, -(TOGGLE_Y - grow))
-    button.Icon = button:CreateTexture(nil, "ARTWORK")
-    button.Icon:SetPoint("CENTER")
-    if hasAtlas(SLOT_HIGHLIGHT) then
-        local highlight = button:CreateTexture(nil, "HIGHLIGHT")
-        highlight:SetSize(SLOT_SIZE, SLOT_SIZE)
-        highlight:SetPoint("CENTER", button, "CENTER", 0, 1)
-        setAtlas(highlight, SLOT_HIGHLIGHT)
-        highlight:SetBlendMode("ADD")
-    else
-        button:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight", "ADD")
-    end
-    local tint, game = toggle.tint, true
-    if toggle.atlas and hasAtlas(toggle.atlas) then
-        setAtlas(button.Icon, toggle.atlas)
-        tint = false
-    elseif toggle.icon and not (GetFileIDFromPath and GetFileIDFromPath(toggle.icon) == nil) then
-        button.Icon:SetTexture(toggle.icon)
-        button.Icon:SetTexCoord(unpack(ICON_CROP))
-    else
-        button.Icon:SetTexture(MEDIA .. toggle.art)
-        game = false
-    end
-    -- the game art fills the plate inside the ring, cut to a circle; without
-    -- the mask API it is cropped (above) and shrunk to fit inside the ring
-    local size = GLYPH_SIZE
-    if game then
-        size = GLYPH_UNMASKED
-        -- a dark round base under the glyph, as a slot plate has
-        local base = button:CreateTexture(nil, "BACKGROUND")
-        base:SetSize(GLYPH_MASKED, GLYPH_MASKED)
-        base:SetPoint("CENTER")
-        base:SetColorTexture(unpack(TOGGLE_BASE))
-        if circle(button, base) and circle(button, button.Icon) then
-            size = GLYPH_MASKED
-        else
-            base:Hide()
-        end
-        button.base = base
-    end
-    button.Icon:SetSize(size, size)
-    button:SetScript("OnClick", function() State.SelectMode(toggle.mode) end)
-    tooltip(button, toggle.title, toggle.text)
-    button.mode = toggle.mode
-    if button.CreateTexture and hasAtlas(SLOT_SELECTED) then
-        button.ring = button:CreateTexture(nil, "OVERLAY")
-        button.ring:SetPoint("CENTER")
-        setAtlas(button.ring, SLOT_SELECTED, true)
-    end
-    function button.draw(selected)
-        if button.ring then
-            button.ring:SetShown(selected)
-            button.Icon:SetAlpha(selected and 1 or GLYPH_DIM_ALPHA)
-            if button.Icon.SetDesaturated then button.Icon:SetDesaturated(not selected) end
-        elseif selected then
-            button:LockHighlight()
-        else
-            button:UnlockHighlight()
-        end
-        if tint then button.Icon:SetVertexColor(unpack(selected and GLYPH_ON or GLYPH_OFF)) end
-    end
-    return button
-end
-
 -- The slot row: one round button per slot of TC.Slots, in its groups, with
 -- Collections' art, its highlight and its gold ring on the chosen slot, and
 -- the slot's name on hover. Built as Collections' template is, not from the
@@ -1169,35 +1056,57 @@ local function newDropdown(panel, width, pick)
     return button
 end
 
--- The funnel (layout B, 1.3): the Show choices (the Filter), then the class
--- as a submenu, then "Reset filters" while a choice differs from the start.
--- In For sale Show is fixed and greyed; the class still works. Blizzard's
--- filter dropdown (WowStyle1FilterDropdownTemplate) drawn with the world
--- map's filter art when the client has it; its menu is filled from the
--- view at each opening (a button with radios under it is a submenu,
--- 11_0_0_MenuImplementationGuide.lua:24-32; SetEnabled, Menu.lua:830).
--- Without the template or its menu API, a button that opens a list of the
--- same entries; without the art, either reads "Filter". The reset mark at
--- its top left shows while a choice differs from the start.
+-- The funnel (layout B, 1.3, slice B): the Show choices (the Filter); For
+-- sale only; the Source entries and the class as submenus; the sort's
+-- three choices; Scan when shown; then "Reset filters" while Reset would
+-- change something. Blizzard's filter dropdown
+-- (WowStyle1FilterDropdownTemplate) drawn with the world map's filter art
+-- when the client has it; its menu is filled from the view at each opening
+-- (a button with radios under it is a submenu,
+-- 11_0_0_MenuImplementationGuide.lua:24-32, 57-68; CreateCheckbox and
+-- CreateTitle, MenuTemplates.lua:294-303, 369-382). A checkbox keeps the
+-- menu open (MenuResponse.Refresh, Menu.lua:2353-2360), which asks its
+-- selected state again: it reads the view drawn last, never the entry the
+-- menu was built with. Without the template or its menu API, a button that
+-- opens a list of the same entries, each checkbox marked by its text;
+-- without the art, either reads "Filter". The reset mark at its top left
+-- shows while Reset would change something.
 local function newFunnel(panel)
     local current
     local function selected(entry) return entry ~= nil and entry.selected end
     local function pickShow(entry) if entry then State.SetFilter(entry.value) end end
     local function pickClass(entry) if entry then State.SelectClass(entry.value) end end
+    local function pickSort(entry) if entry then State.SetSort(entry.value) end end
+    local function forSaleOnly() return current ~= nil and current.forSaleOnly end
+    local function toggleForSale() State.SetForSaleOnly(not forSaleOnly()) end
+    local function scanWhenShown() return current ~= nil and current.scanWhenShown end
+    local function toggleScan() State.SetScanWhenShown(not scanWhenShown()) end
+    local function sourceTicked(key)
+        for _, entry in ipairs(current and current.sources or {}) do
+            if entry.value == key then return entry.selected end
+        end
+        return false
+    end
+    local function toggleSource(key) State.SetSource(key, not sourceTicked(key)) end
     local funnel = menuDropdown(panel, "WowStyle1FilterDropdownTemplate", FUNNEL_SIZE, FUNNEL_SIZE, "SetText",
         function(root)
             if not current then return end
-            for _, entry in ipairs(current.filters) do
-                local radio = root:CreateRadio(entry.name, selected, pickShow, entry)
-                if current.filterFixed and radio and radio.SetEnabled then radio:SetEnabled(false) end
-            end
+            for _, entry in ipairs(current.filters) do root:CreateRadio(entry.name, selected, pickShow, entry) end
             root:CreateDivider()
+            root:CreateCheckbox(FOR_SALE_TEXT, forSaleOnly, toggleForSale)
+            local sources = root:CreateButton(SOURCE_TEXT)
+            for _, entry in ipairs(current.sources) do sources:CreateCheckbox(entry.name, sourceTicked, toggleSource, entry.value) end
             local classes = current.classes
             local submenu = root:CreateButton(CLASS_TEXT:format(inClassColour(classes.text, classes.classFile)))
             for i, entry in ipairs(classes.entries) do
                 submenu:CreateRadio(inClassColour(entry.name, entry.classFile), selected, pickClass, entry)
                 if i == 1 then submenu:CreateDivider() end
             end
+            root:CreateDivider()
+            if root.CreateTitle then root:CreateTitle(SORT_TEXT) end
+            for _, entry in ipairs(current.sorts) do root:CreateRadio(entry.name, selected, pickSort, entry) end
+            root:CreateDivider()
+            root:CreateCheckbox(SCAN_SHOWN_TEXT, scanWhenShown, toggleScan)
             if current.filtersChanged then
                 root:CreateDivider()
                 root:CreateButton(RESET_TEXT, State.ResetFilters)
@@ -1279,15 +1188,25 @@ local function newFunnel(panel)
             if view.filtersChanged then funnel:LockHighlight() else funnel:UnlockHighlight() end
         end
         if not menu then return end
+        local function mark(on) return on and TICKED or UNTICKED end
         local items = {}
         for _, entry in ipairs(view.filters) do
-            items[#items + 1] = { text = entry.name, enabled = not view.filterFixed,
-                action = function() State.SetFilter(entry.value) end }
+            items[#items + 1] = { text = entry.name, action = function() State.SetFilter(entry.value) end }
+        end
+        items[#items + 1] = { text = mark(view.forSaleOnly) .. FOR_SALE_TEXT, line = true, action = toggleForSale }
+        for _, entry in ipairs(view.sources) do
+            items[#items + 1] = { text = mark(entry.selected) .. SOURCE_TEXT .. ": " .. entry.name,
+                action = function() State.SetSource(entry.value, not entry.selected) end }
         end
         for i, entry in ipairs(view.classes.entries) do
             items[#items + 1] = { text = inClassColour(entry.name, entry.classFile), line = i <= 2,
                 action = function() State.SelectClass(entry.value) end }
         end
+        for i, entry in ipairs(view.sorts) do
+            items[#items + 1] = { text = SORT_TEXT .. ": " .. entry.name, line = i == 1,
+                action = function() State.SetSort(entry.value) end }
+        end
+        items[#items + 1] = { text = mark(view.scanWhenShown) .. SCAN_SHOWN_TEXT, line = true, action = toggleScan }
         if view.filtersChanged then items[#items + 1] = { text = RESET_TEXT, line = true, action = State.ResetFilters } end
         menu.fill(items)
     end
@@ -1334,8 +1253,6 @@ end
 -- Builds the browser inside the tab's panel, draws whenever the state's
 -- answer changes, and answers the draw function.
 local function buildBrowser(panel)
-    local toggles = {}
-    for i, toggle in ipairs(TOGGLES) do toggles[i] = newToggle(panel, toggle) end
     local slotButtons = newSlotRow(panel)
     local search = newSearchBox(panel)
     search:SetPoint("TOPLEFT", panel, "TOPLEFT", SEARCH_X, -SEARCH_Y)
@@ -1496,6 +1413,7 @@ local function buildBrowser(panel)
     local statusButton = newButton(panel, "", STATUS_BUTTON, 20, function()
         if statusAction then statusAction() end
     end)
+    tooltip(statusButton, SCAN_TIP)
     statusButton:SetPoint("TOPLEFT", panel, "TOPLEFT", GRID_X, -STATUS_Y - 2)
     -- the scan glyph left of the button's text, the text moved right by
     -- half the glyph so the pair stays centred; without the atlas text only
@@ -1544,7 +1462,6 @@ local function buildBrowser(panel)
     local function draw()
         local view = State.View()
         count:SetText(view.count)
-        for _, toggle in ipairs(toggles) do toggle.draw(view.mode == toggle.mode) end
         for i, button in ipairs(slotButtons) do button.ring:SetShown(view.slots[i].selected) end
         weaponType.draw(view.weaponTypes)
         funnel.draw(view)
@@ -1589,6 +1506,7 @@ local function buildBrowser(panel)
         status:SetText(view.status)
         statusButton:SetText(view.statusButton or "")
         statusButton:SetShown(view.statusButton ~= nil)
+        statusButton:SetEnabled(view.statusEnabled ~= false)
         statusAction = view.statusAction
         status:ClearAllPoints()
         status:SetPoint("TOPLEFT", panel, "TOPLEFT", view.statusButton and (GRID_X + STATUS_BUTTON + TOOLS_GAP) or GRID_X,
@@ -1664,7 +1582,8 @@ opener:SetScript("OnEvent", function(self)
         State.SetBags(TC.Appearances.ReadBags())
         -- the first draw, also when there is no list to tell of
         if not State.Refresh() and first then draw() end
-        -- in For sale, a scan stopped by leaving the tab runs again (A6)
+        -- with Scan when shown on, the slot is scanned unless it has a kept
+        -- scan, and a scan stopped by leaving the tab runs again (A6)
         State.Enter()
     end)
     panel:RegisterEvent("TRANSMOG_COLLECTION_UPDATED")
@@ -1672,7 +1591,7 @@ opener:SetScript("OnEvent", function(self)
     -- An item variant's name arrives after the check (spec 4.1); the list
     -- shows it once it is there.
     panel:RegisterEvent("ITEM_KEY_ITEM_INFO_RECEIVED")
-    -- Search in For sale asks for every found variant's name, so the names
+    -- Search with For sale only asks for every found variant's name, so the names
     -- can arrive by the hundred: they redraw once per frame.
     local keyWait = false
     panel:SetScript("OnEvent", function(self, event, itemID)

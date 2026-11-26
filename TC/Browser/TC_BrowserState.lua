@@ -13,20 +13,60 @@ local PAGE_SIZE = 24
 local ALL_WEAPON_TYPES = "All weapon types"
 -- From 100 gold up a tile leaves the copper out (spec 2.5).
 local TILE_COPPER_BELOW = 100 * 10000
-local STATUS_ALL = "Click an appearance to check the auction house."
+local NOT_SCANNED = "Not scanned yet"
 local STATUS_FAILED = "The auction house did not answer."
 local NO_APPEARANCES = "No appearances found for this slot."
-local SCAN_AGAIN = "Scan again"
-local PRICE_SLOT = "Price this slot"
--- In All the Filter starts on "Not collected" (spec Assumption A1).
-local START_FILTER = "Not collected"
+local SCAN_SLOT = "Scan slot"
 -- Spec Assumption A10: the progress bar expects the page count of the slot's
 -- last scan, or 5 for a first scan, and stays below 95 percent until the end.
 local FIRST_SCAN_PAGES, MAX_PROGRESS = 5, 0.95
 
 State.FILTERS = { "All", "Collected", "Not collected" }
--- The Show choice offered in All while an appearance is pending (TC-39).
+-- The Show choice offered while an appearance is pending (TC-39).
 local PENDING_FILTER = "Bought, not collected"
+-- The sort's choices: the game's order, or by the lowest known price, the
+-- appearances without one after the priced ones in the game's order.
+local SORTS = { { value = "default", name = "Default" }, { value = "priceLow", name = "Price: low to high" },
+    { value = "priceHigh", name = "Price: high to low" } }
+-- The Source filter's entry for a source whose type it does not name.
+local OTHER_SOURCE, OTHER_TEXT = "other", "Other"
+
+-- The four choices kept between sessions (slice B), each with its default:
+-- Scan when shown, Show, For sale only and the sort. saved is the table
+-- they are kept in: TransmogCheckerDB.browser once State.Bind handed it
+-- over, a table of this file's own before.
+local DEFAULTS = { scanWhenShown = true, show = "All", forSaleOnly = false, sort = "default" }
+local saved = {}
+
+local function isSort(value)
+    for _, sort in ipairs(SORTS) do
+        if sort.value == value then return true end
+    end
+    return false
+end
+
+-- A saved value as the state takes it: a missing or malformed one is its
+-- default; a saved Show of Bought, not collected is All (nothing may be
+-- pending in a new session).
+local function flag(value, default)
+    if type(value) == "boolean" then return value end
+    return default
+end
+local function savedValues(t)
+    local show = DEFAULTS.show
+    for _, value in ipairs(State.FILTERS) do
+        if t.show == value then show = value end
+    end
+    return { scanWhenShown = flag(t.scanWhenShown, DEFAULTS.scanWhenShown), show = show,
+        forSaleOnly = flag(t.forSaleOnly, DEFAULTS.forSaleOnly), sort = isSort(t.sort) and t.sort or DEFAULTS.sort }
+end
+-- Takes t as the saved table: its values as the state takes them are
+-- written back into it, so it holds no malformed value.
+local function useSaved(t)
+    for key, value in pairs(savedValues(t)) do t[key] = value end
+    saved = t
+end
+useSaved(saved)
 local PENDING_TEXT = {
     bags = "In your bags: equip it or sell it to a vendor to collect.",
     bought = "Bought: take it from the mailbox, then equip it or sell it to a vendor to collect.",
@@ -41,6 +81,8 @@ local view, listener
 -- noneFound: the slots whose last list read answered no appearance or raised
 -- (testpass F9); they are read again on the next Refresh.
 local list, lists, collected, learnt, learning, noneFound
+-- The weapon slot Scan when shown left waiting for that pass, or nil.
+local waitingSlot
 -- True while a Refresh runs: changing Collections' class filter to learn
 -- the weapon types is inferred to fire TRANSMOG_COLLECTION_UPDATED at once,
 -- which would start a Refresh inside this one.
@@ -63,6 +105,9 @@ local kept, latest, checking, waitingChecks, active, known, reading, variantName
 -- slot whose last scan failed, with the tiles it had found. stoppedScan: the
 -- slot whose scan was stopped by leaving the tab (A6).
 local scans, scan, failures, stoppedScan
+-- The source types of each appearance, read once per visit and only while
+-- the Source filter narrows: by appearance id, a set of Source entries.
+local sourcesOf
 -- Item variant names (TC-32). keyState: by item key, "asked" once
 -- GetItemKeyInfo was called for it, "ready" when its item's event arrived
 -- (one more read is allowed), "done" after that read. keyOf: the keys asked,
@@ -75,6 +120,8 @@ local keyGen = 0
 local visit = 0
 -- True from Leave until Enter: the tab is not shown, so nothing is asked.
 local away = false
+-- True from Enter until Leave: the tab is shown, so Scan when shown may scan.
+local entered = false
 local KEYS_PER_FRAME = 20
 -- Bought, not collected (TC-39): an item that binds when equipped is
 -- collected only when it is equipped or sold to a vendor (measured in game).
@@ -101,15 +148,19 @@ local function startView()
     -- open: the appearance whose flyout is open, or nil; weaponType: the
     -- category the weapon type dropdown picks, nil for all weapon types;
     -- class: a class id or ALL_CLASSES, nil for the character's own class;
-    -- search: the Search box's text
-    return { mode = "All", slot = START_SLOT, filter = START_FILTER, page = 1, search = "" }
+    -- search: the Search box's text; filter: Show; forSaleOnly, sort: as
+    -- saved; sourcesOff: the Source filter's unticked entries (a source
+    -- type, or OTHER_SOURCE), none at the start
+    local start = savedValues(saved)
+    return { slot = START_SLOT, filter = start.show, forSaleOnly = start.forSaleOnly, sort = start.sort,
+        sourcesOff = {}, page = 1, search = "" }
 end
 view = startView()
 
 local function clearResults()
     kept, latest, checking, waitingChecks, active, known, reading, variantNames, noAnswer = {}, {}, {}, {}, nil, {}, {}, {}, {}
-    scans, scan, failures, stoppedScan = {}, nil, {}, nil
-    list, lists, collected, learnt, learning, noneFound = nil, {}, {}, nil, false, {}
+    scans, scan, failures, stoppedScan, sourcesOf = {}, nil, {}, nil, {}
+    list, lists, collected, learnt, learning, noneFound, waitingSlot = nil, {}, {}, nil, false, {}, nil
     keyState, keyOf, keyQueue, keyTicking = {}, {}, {}, false
     keyGen = keyGen + 1
 end
@@ -219,11 +270,18 @@ local function tileResult(id)
     return kept[id] or scanResult(id)
 end
 
--- For sale also keeps the tiles a failed first scan had found (spec 2.9),
--- though that scan is not kept.
+-- What the tiles, the tooltip, For sale only and the sort know of an
+-- appearance's price: the tile's result, else the rows a failed first scan
+-- of the slot had found (spec 2.9), though that scan is not kept.
 local function forSaleResult(id)
     local failure = failures[view.slot]
     return tileResult(id) or (failure and runResult(failure, id))
+end
+
+-- The lowest price known for an appearance, or nil.
+local function priceOf(id)
+    local result = forSaleResult(id)
+    return result and result.rows[1] and result.rows[1].minPrice
 end
 
 -- The list narrowed to the weapon type and the class filter, on the client
@@ -261,46 +319,89 @@ local function typed()
     return out
 end
 
--- For sale (A3): the list narrowed to the appearances that are not collected,
--- not pending (TC-39) and are found for sale, lowest price first, equal
--- prices by appearance id.
-local function forSale()
-    local out, price = {}, {}
-    for _, appearance in ipairs(typed()) do
-        local result = not collected[appearance.id] and not pending[appearance.id] and forSaleResult(appearance.id)
-        if result and result.rows[1] then
-            out[#out + 1] = appearance
-            price[appearance] = result.rows[1].minPrice
-        end
-    end
-    table.sort(out, function(a, b)
-        if price[a] ~= price[b] then return price[a] < price[b] end
-        return a.id < b.id
-    end)
-    return out
+-- A client string when it has a text, else the fallback (the tile tooltip
+-- and the Source filter).
+local function nonEmpty(s)
+    return type(s) == "string" and s ~= "" and s or nil
+end
+local function clientText(name, fallback)
+    return nonEmpty(_G[name]) or fallback
 end
 
--- Whether the scan found a look for sale that is pending and none that is
--- not (the sweep view then has nothing left to buy).
-local function allPending()
-    for _, appearance in ipairs(typed()) do
-        local result = pending[appearance.id] and not collected[appearance.id] and forSaleResult(appearance.id)
-        if result and result.rows[1] then return true end
+-- The Source filter's entries: one per source type the client names
+-- (TRANSMOG_SOURCE_n, else TC.SOURCE_TYPES' English name), n from 1 to
+-- C_TransmogCollection.GetNumTransmogSources, else to the last English
+-- one, leaving out a type IsValidTransmogSource refuses, as Collections
+-- lists them (Blizzard_Collections/Mainline/Blizzard_Wardrobe.lua:67-71;
+-- TransmogItemsDocumentation.lua:574, 833); then Other. Read once.
+local sourceEntries
+local function sourceTypes()
+    if sourceEntries then return sourceEntries end
+    local TCol, english = C_TransmogCollection, TC.SOURCE_TYPES or {}
+    local ok, count = false, nil
+    if TCol and TCol.GetNumTransmogSources then ok, count = pcall(TCol.GetNumTransmogSources) end
+    if not (ok and type(count) == "number") then count = #english end
+    local entries = {}
+    for n = 1, count do
+        local valid = true
+        if TCol and TCol.IsValidTransmogSource then
+            local asked, answer = pcall(TCol.IsValidTransmogSource, n)
+            valid = not asked or answer ~= false
+        end
+        local name = valid and clientText("TRANSMOG_SOURCE_" .. n, english[n])
+        if name then entries[#entries + 1] = { key = n, name = name } end
+    end
+    entries[#entries + 1] = { key = OTHER_SOURCE, name = OTHER_TEXT }
+    sourceEntries = entries
+    return entries
+end
+
+-- The Source entries of an appearance: the type of each of its sources as
+-- the tile tooltip reads them (TC.Appearances.Sources, one
+-- GetAppearanceSources call, no item data asked for), a type the filter
+-- does not name, none or a read that raises as Other. Read once per visit,
+-- unless a source's type came back nil (Nilable before its item data is in,
+-- AppearanceSourceDocumentation.lua:21): then it is read again on the next
+-- narrowing, until every type is known.
+local function sourceKeys(appearance)
+    local keys = sourcesOf[appearance.id]
+    if keys then return keys end
+    keys = {}
+    local named, unknown = {}, false
+    for _, entry in ipairs(sourceTypes()) do named[entry.key] = true end
+    local ok, sources = pcall(TC.Appearances.Sources, appearance)
+    if not ok then State.lastError = tostring(sources) end
+    for _, source in ipairs(ok and type(sources) == "table" and sources or {}) do
+        local n = source.sourceType
+        if n == nil then unknown = true end
+        keys[(type(n) == "number" and named[n]) and n or OTHER_SOURCE] = true
+    end
+    if not next(keys) then keys[OTHER_SOURCE] = true end
+    if not unknown then sourcesOf[appearance.id] = keys end
+    return keys
+end
+
+-- Whether the Source filter keeps the appearance: with every entry ticked
+-- it keeps all and reads nothing; else one of its sources' entries is ticked.
+local function fromSources(appearance)
+    if not next(view.sourcesOff) then return true end
+    for key in pairs(sourceKeys(appearance)) do
+        if not view.sourcesOff[key] then return true end
     end
     return false
 end
 
 -- Search (TC-32): an appearance stays when the name of one of its items
--- contains the text, whatever the case; in For sale also when the name of
--- an item variant the scan found does. A name the client has not loaded
--- does not match. It only reads what is known; names are asked for by
--- startSearch.
+-- contains the text, whatever the case; with For sale only also when the
+-- name of an item variant the scan found does. A name the client has not
+-- loaded does not match. It only reads what is known; names are asked for
+-- by startSearch.
 local function matches(appearance, text)
     for _, itemID in ipairs(TC.Appearances.ItemIDs(appearance)) do
         local name = TC.Appearances.ItemName(itemID)
         if name and name:lower():find(text, 1, true) then return true end
     end
-    if view.mode ~= "For sale" then return false end
+    if not view.forSaleOnly then return false end
     local result = forSaleResult(appearance.id)
     for _, row in ipairs(result and result.rows or {}) do
         local name = variantNames[keyText(row.itemKey)]
@@ -309,29 +410,57 @@ local function matches(appearance, text)
     return false
 end
 
--- The appearances the mode, the Filter and, unless ignoreSearch, the Search
--- keep, in the mode's order.
-local function shown(ignoreSearch)
-    local out
-    if view.mode == "For sale" then
-        out = forSale()
-    else
-        out = {}
-        for _, appearance in ipairs(typed()) do
-            local isCollected = collected[appearance.id]
-            if view.filter == PENDING_FILTER then
-                if pending[appearance.id] and not isCollected then out[#out + 1] = appearance end
-            elseif view.filter == "All" or (view.filter == "Collected") == isCollected then
-                out[#out + 1] = appearance
-            end
+-- The sort (A3 for the price): the game's order, or the priced appearances
+-- by their lowest price, equal prices in the game's order, then the others
+-- in the game's order.
+local function sorted(out)
+    if view.sort ~= "priceLow" and view.sort ~= "priceHigh" then return out end
+    local price, place = {}, {}
+    for i, appearance in ipairs(out) do price[appearance], place[appearance] = priceOf(appearance.id), i end
+    local high = view.sort == "priceHigh"
+    table.sort(out, function(a, b)
+        local pa, pb = price[a], price[b]
+        if pa and pb and pa ~= pb then
+            if high then return pa > pb end
+            return pa < pb
         end
+        if (pa == nil) ~= (pb == nil) then return pa ~= nil end
+        return place[a] < place[b]
+    end)
+    return out
+end
+
+-- The filters in the order the empty states ask about them: Show, Source,
+-- For sale only, Search. For sale only is tested before Source, so the
+-- sources of an appearance it leaves out are not read.
+local STAGES = { show = 1, source = 2, sale = 3, search = 4 }
+
+-- The appearances the filters keep, all of them or up to the stage upTo
+-- (the empty states ask which one left nothing), in the sort's order.
+local function shown(upTo)
+    local last = STAGES[upTo or "search"]
+    local out = {}
+    for _, appearance in ipairs(typed()) do
+        local id = appearance.id
+        local keep
+        if view.filter == PENDING_FILTER then
+            keep = pending[id] and not collected[id]
+        else
+            keep = view.filter == "All" or (view.filter == "Collected") == collected[id]
+        end
+        keep = keep and (last < 3 or not view.forSaleOnly or priceOf(id) ~= nil)
+        keep = keep and (last < 2 or fromSources(appearance))
+        if keep then out[#out + 1] = appearance end
     end
-    if ignoreSearch or view.search == "" then return out end
-    local text, found = view.search:lower(), {}
-    for _, appearance in ipairs(out) do
-        if matches(appearance, text) then found[#found + 1] = appearance end
+    if last < 4 then return out end
+    if view.search ~= "" then
+        local text, found = view.search:lower(), {}
+        for _, appearance in ipairs(out) do
+            if matches(appearance, text) then found[#found + 1] = appearance end
+        end
+        out = found
     end
-    return found
+    return sorted(out)
 end
 
 local function pageCount(n)
@@ -418,9 +547,9 @@ local function startKeys()
     keyTick()
 end
 
--- Search is in use on the slot: the names of its items (item data) and, in
--- For sale, of its scan's item variants are asked for (never the auction
--- house's rows).
+-- Search is in use on the slot: the names of its items (item data) and,
+-- with For sale only, of its scan's item variants are asked for (never the
+-- auction house's rows).
 local function startSearch()
     if view.search == "" or not list or away then return end
     local ids = {}
@@ -428,31 +557,50 @@ local function startSearch()
         for _, itemID in ipairs(TC.Appearances.ItemIDs(appearance)) do ids[#ids + 1] = itemID end
     end
     TC.Appearances.LoadNames(ids)
-    if view.mode == "For sale" then startKeys() end
+    if view.forSaleOnly then startKeys() end
 end
 
--- "64 of 370 appearances" when the mode or the Filter narrows the list.
-local function countText(n, total)
-    local noun = total == 1 and "appearance" or "appearances"
-    if n == total and view.mode == "All" then
-        return ("%d %s"):format(total, noun)
+-- The count: the appearances shown and, once anything of the slot has a
+-- price result (a scan, kept, running or failed, or a check), how many of
+-- them are for sale: "365 appearances, 12 for sale".
+local function countText(appearances)
+    local n = #appearances
+    local text = ("%d %s"):format(n, n == 1 and "appearance" or "appearances")
+    local slot = view.slot
+    local known = scans[slot] ~= nil or failures[slot] ~= nil or (scan ~= nil and scan.slot == slot)
+    for _, result in pairs(kept) do known = known or result.slot == slot end
+    if not known then return text end
+    local forSale = 0
+    for _, appearance in ipairs(appearances) do
+        if priceOf(appearance.id) then forSale = forSale + 1 end
     end
-    return ("%d of %d %s"):format(n, total, noun)
+    return ("%s, %d for sale"):format(text, forSale)
 end
 
 function State.SetListener(fn)
     listener = fn
 end
 
+-- Scan when shown (below); declared here for the weapon type pass.
+local autoScan
+
 -- Starts learning every class's weapon types; a pass that ends on a later
--- frame refreshes.
+-- frame refreshes, and Scan when shown may then scan the weapon slot that
+-- waited for it, when it is still the current slot.
 local function learnWeaponTypes()
     learning = true
     local mine, now = visit, true
     TC.Appearances.LearnWeaponTypes(function(types)
         if mine ~= visit then return end
         learnt, learning = types, false
-        if not now then State.Refresh() end
+        if not now then
+            local waited = waitingSlot
+            waitingSlot = nil
+            batch(function()
+                State.Refresh()
+                if waited == view.slot and autoScan() then notify() end
+            end)
+        end
     end, function(text) State.lastError = text end)
     now = false
 end
@@ -503,6 +651,7 @@ end
 -- Reads the list if there is none and whether each appearance is collected;
 -- answers whether anything changed. An empty or failed read keeps no list,
 -- so the next Refresh reads again. A weapon slot waits for its weapon types.
+-- Answers also the error text when the list read raised.
 local function read()
     local changed = updatePending()
     local slot = view.slot
@@ -512,11 +661,13 @@ local function read()
         changed = true
     end
     if not list then
-        local result = TC.Appearances.List(slot, nil, weaponTypesOf(slot))
-        if type(result) ~= "table" or not result[1] then
+        local ok, result = pcall(TC.Appearances.List, slot, nil, weaponTypesOf(slot))
+        if not ok or type(result) ~= "table" or not result[1] then
             changed = changed or not noneFound[slot]
             noneFound[slot] = true
-            return changed
+            if ok then return changed end
+            lists[slot] = nil
+            return changed, tostring(result)
         end
         list, changed = result, true
         lists[slot], noneFound[slot] = result, nil
@@ -532,23 +683,24 @@ local function read()
 end
 
 -- Called when the panel is shown and when the collection changes; collected
--- is never kept beyond that. An error from the appearance source is no list
--- yet: the slot says no appearances were found, and the error is kept in
--- lastError and reported once. Answers whether the listener was told.
+-- is never kept beyond that. An error from the list read is no list yet: the
+-- slot says no appearances were found. An error elsewhere in the read keeps
+-- what the grid showed. Either is kept in lastError and reported once.
+-- Answers whether the listener was told.
 local readFailed = false
 function State.Refresh()
     if refreshing then return false end
     refreshing = true
-    local ok, changed = pcall(read)
+    local ok, changed, listError = pcall(read)
     refreshing = false
-    if not ok then
-        State.lastError = tostring(changed)
+    local failure = not ok and tostring(changed) or listError
+    if failure then
+        State.lastError = failure
         if not readFailed then
             readFailed = true
-            report(changed)
+            report(failure)
         end
-        changed = list ~= nil or not noneFound[view.slot]
-        list, lists[view.slot], noneFound[view.slot] = nil, nil, true
+        if not ok then changed = true end
     end
     changed = settle() or changed
     if clampPage() or changed then
@@ -610,14 +762,16 @@ end
 -- A new visit: the start state, and nothing kept from the last one. The
 -- queue is cancelled and late answers change nothing.
 function State.Reset()
-    local changed = next(lists) ~= nil or view.mode ~= "All" or view.slot ~= START_SLOT or view.filter ~= START_FILTER
+    local start = startView()
+    local changed = next(lists) ~= nil or view.slot ~= START_SLOT or view.filter ~= start.filter
+        or view.forSaleOnly ~= start.forSaleOnly or view.sort ~= start.sort or next(view.sourcesOff) ~= nil
         or view.page ~= 1 or view.open ~= nil or next(latest) ~= nil or next(checking) ~= nil or next(scans) ~= nil
         or scan ~= nil or next(failures) ~= nil or view.search ~= "" or view.class ~= nil
     if TC.Buy then TC.Buy.Close() end
     stopReads()
     TC.Appearances.StopWeaponTypes()
     visit = visit + 1
-    view = startView()
+    view = start
     clearResults()
     TC.Appearances.ResetLoads()
     if changed then notify() end
@@ -630,13 +784,13 @@ function State.Leave()
     -- leaving the tab closes the buy dialog and buys nothing
     if TC.Buy then TC.Buy.Close() end
     -- nothing is asked while the tab is not shown (TC-32)
-    away = true
+    away, entered = true, false
     dropKeys()
     TC.Appearances.StopLoads()
     -- a weapon type pass puts the class filter back at once and runs again
     -- on the next need
     TC.Appearances.StopWeaponTypes()
-    learning = false
+    learning, waitingSlot = false, nil
     if not next(checking) and not scan then return end
     batch(function()
         stopReads(true)
@@ -693,25 +847,28 @@ local function scanSlot()
     startScan()
 end
 
--- All or For sale (the catalogue and sweep toggles): page 1, no flyout. For
--- sale scans the slot at once unless it was scanned in this visit or a scan
--- of it runs; All reads nothing.
-function State.SelectMode(mode)
-    if mode == view.mode or dialogOpen() then return end
-    batch(function()
-        view.mode, view.page, view.open = mode, 1, nil
-        if mode == "For sale" and not scans[view.slot] then scanSlot() end
-        startSearch()
-        notify()
-    end)
+-- Scan when shown (slice B): while the tab is shown and the setting is on,
+-- the current slot is scanned unless a scan of it runs or it has a kept
+-- scan of this visit (again: also then, for a scan stopped by leaving the
+-- tab). A weapon slot waits for its weapon types (the pass ends on a later
+-- frame and comes back here). Answers whether a scan started.
+function autoScan(again)
+    if not (saved.scanWhenShown and entered) or away or dialogOpen() then return false end
+    if (scan and scan.slot == view.slot) or (scans[view.slot] and not again) then return false end
+    if TC.Slots[view.slot].weapon and learnt == nil then
+        waitingSlot = view.slot
+        return false
+    end
+    scanSlot()
+    return true
 end
 
 -- A click on a slot of the slot row: page 1, no item list, the weapon type
--- back on all weapon types; the mode and the Filter stay. In All nothing is
--- read from the auction house. In For sale the slot is scanned at once
--- unless it was scanned in this visit; then its kept result shows. A scan of
+-- back on all weapon types; the other filters and the sort stay. Nothing is
+-- read from the auction house, unless Scan when shown scans the slot
+-- (autoScan); a slot scanned in this visit shows its kept result. A scan of
 -- the slot left keeps running and is kept under that slot, unless this
--- slot needs a scan (scanSlot). The name loading of the slot left stops;
+-- slot is scanned (scanSlot). The name loading of the slot left stops;
 -- a search text that is not empty counts as a use of Search on the new slot.
 function State.SelectSlot(slot)
     if slot == view.slot or not TC.Slots[slot] or dialogOpen() then return end
@@ -721,7 +878,7 @@ function State.SelectSlot(slot)
         view.slot, view.weaponType, view.page, view.open = slot, nil, 1, nil
         list = lists[slot]
         State.Refresh()
-        if view.mode == "For sale" and not scans[slot] then scanSlot() end
+        autoScan()
         startSearch()
         notify()
     end)
@@ -748,8 +905,8 @@ local function fitWeaponType()
 end
 
 -- The funnel's class choice: a class id, or ALL_CLASSES. It narrows on the client
--- in both modes (A3), keeps the slot, the mode, the Filter, the weapon type
--- when the class has it, and the search, goes to page 1 and reads nothing.
+-- (A3), keeps the slot, the other filters, the weapon type when the class
+-- has it, the search and the sort, goes to page 1 and reads nothing.
 function State.SelectClass(value)
     local was = view.class == ALL_CLASSES and ALL_CLASSES or chosenClass()
     if value == nil or value == was then return end
@@ -761,8 +918,8 @@ end
 
 -- The Search box's text. Typing narrows on the client and goes to page 1.
 -- Its use asks the client for the names of the slot's items it has not
--- loaded (item data only, never the auction house's rows) and, in For sale,
--- of the item variants the scan found; each only once (startSearch). They
+-- loaded (item data only, never the auction house's rows) and, with For
+-- sale only, of the item variants the scan found; each only once (startSearch). They
 -- narrow further as they arrive.
 function State.SetSearch(text)
     text = text or ""
@@ -778,7 +935,7 @@ end
 function State.KeyInfoReceived(itemID)
     local keys = keyOf[itemID]
     if not keys then return end
-    local searching = not away and view.mode == "For sale" and view.search ~= ""
+    local searching = not away and view.forSaleOnly and view.search ~= ""
     for _, key in ipairs(keys) do
         if keyState[keyText(key)] == "asked" then
             keyState[keyText(key)] = "ready"
@@ -804,8 +961,8 @@ TC.Appearances.SetNameListener(function()
     if C_Timer and C_Timer.After then C_Timer.After(0, tell) else tell() end
 end)
 
--- "Scan again": a new scan of the current slot, in either mode. The old
--- result stays on screen until the new one ends.
+-- The scan control: a new scan of the current slot now, again when it was
+-- scanned. The old result stays on screen until the new one ends.
 function State.ScanAgain()
     if (scan and scan.slot == view.slot) or dialogOpen() then return end
     batch(function()
@@ -814,43 +971,96 @@ function State.ScanAgain()
     end)
 end
 
--- The player came back to the tab: in For sale a scan of this slot stopped
--- by leaving runs again (A6).
+-- The player selected the tab or came back to it: with Scan when shown on,
+-- the slot is scanned unless it has a kept scan, and again when its scan
+-- was stopped by leaving the tab (A6); with it off nothing is read.
 function State.Enter()
-    away = false
-    if not stoppedScan then return end
+    away, entered = false, true
     local stopped = stoppedScan
     stoppedScan = nil
-    if view.mode ~= "For sale" or stopped ~= view.slot or scan then return end
     batch(function()
-        startScan()
-        notify()
+        if autoScan(stopped == view.slot) then notify() end
     end)
 end
 
--- The funnel's Show choice (the Filter). In For sale it is fixed on Not
--- collected (D3); the player's choice for All stays.
-function State.SetFilter(filter)
-    if view.mode == "For sale" or filter == view.filter then return end
-    view.filter, view.page = filter, 1
+-- A choice of the funnel changed: page 1, the flyout closes when its tile
+-- left the page; nothing is read from the auction house.
+local function narrowed()
+    view.page = 1
     settle()
     notify()
 end
 
--- Whether the funnel's choices are the start's: Show on Not collected and the
--- character's own class.
-local function filtersAtStart()
-    -- in the sweep view Show is fixed, so only the class counts
-    return (view.mode == "For sale" or view.filter == START_FILTER) and (view.class == nil or view.class == (ownClass()))
+-- The funnel's Show choice (the Filter), kept between sessions.
+function State.SetFilter(filter)
+    if filter == view.filter then return end
+    view.filter, saved.show = filter, filter
+    narrowed()
 end
 
--- "Reset filters": Show and the class back to the start, page 1; reads nothing.
+-- For sale only: narrows to the appearances with a known price, from the
+-- slot's scan or a check of this visit; kept between sessions. With a
+-- search text, the names of the scan's item variants are asked for
+-- (startSearch).
+function State.SetForSaleOnly(on)
+    on = on == true
+    if on == view.forSaleOnly then return end
+    view.forSaleOnly, saved.forSaleOnly = on, on
+    startSearch()
+    narrowed()
+end
+
+-- A Source entry (a source type, or OTHER_SOURCE) ticked or unticked.
+function State.SetSource(key, on)
+    if (not view.sourcesOff[key]) == (on == true) then return end
+    view.sourcesOff[key] = (not on) or nil
+    narrowed()
+end
+
+-- The sort ("default", "priceLow", "priceHigh"), kept between sessions.
+function State.SetSort(value)
+    if value == view.sort or not isSort(value) then return end
+    view.sort, saved.sort = value, value
+    narrowed()
+end
+
+-- Scan when shown, kept between sessions. Turning it on starts no scan:
+-- the next show of the tab or slot change does.
+function State.SetScanWhenShown(on)
+    on = on == true
+    if on == saved.scanWhenShown then return end
+    saved.scanWhenShown = on
+    notify()
+end
+
+-- The saved table (TransmogCheckerDB.browser), handed over once the client
+-- has loaded it (TransmogChecker.lua, ADDON_LOADED): its values, malformed
+-- ones as the defaults, become the view's, and each change is written into
+-- it. The four values are Scan when shown, Show, For sale only and the sort.
+function State.Bind(t)
+    if type(t) ~= "table" then return end
+    useSaved(t)
+    view.filter, view.forSaleOnly, view.sort, view.page = t.show, t.forSaleOnly, t.sort, 1
+    settle()
+end
+
+-- Whether Reset filters would change nothing: Show All, For sale only off,
+-- every Source entry ticked, the character's own class, all weapon types,
+-- no search text and the Default sort.
+local function filtersAtStart()
+    return view.filter == DEFAULTS.show and view.forSaleOnly == DEFAULTS.forSaleOnly and not next(view.sourcesOff)
+        and (view.class == nil or view.class == (ownClass())) and view.weaponType == nil and view.search == ""
+        and view.sort == DEFAULTS.sort
+end
+
+-- "Reset filters": every filter and the sort back to its default, page 1;
+-- reads nothing.
 function State.ResetFilters()
     if filtersAtStart() then return end
-    view.filter, view.class, view.page = START_FILTER, nil, 1
-    fitWeaponType()
-    settle()
-    notify()
+    view.filter, view.forSaleOnly, view.sort, view.sourcesOff = DEFAULTS.show, DEFAULTS.forSaleOnly, DEFAULTS.sort, {}
+    saved.show, saved.forSaleOnly, saved.sort = view.filter, view.forSaleOnly, view.sort
+    view.class, view.weaponType, view.search = nil, nil, ""
+    narrowed()
 end
 
 -- Starts the next waiting check when none runs. One check runs at a time,
@@ -981,8 +1191,8 @@ end
 local function showAll()
     State.SetFilter("All")
 end
-local function selectAll()
-    State.SelectMode("All")
+local function showUnpriced()
+    State.SetForSaleOnly(false)
 end
 local function clearSearch()
     State.SetSearch("")
@@ -1132,24 +1342,26 @@ local function itemList()
     return out
 end
 
--- The status line (spec 2.8): its text, its button and, while a scan runs,
--- the progress value. In All a slot not scanned offers "Price this slot"
--- before the hint (layout B, 7.1): one scan of the slot, as Scan again.
+-- The bottom row's scan control (spec 2.8, slice B): one button, Scan
+-- slot, that scans the slot now (off while its scan runs), and its
+-- sub-line: not scanned yet, scanning with the progress value, the failure,
+-- or the scan's age.
 local function statusLine(answer)
     local slot = view.slot
+    answer.statusButton, answer.statusAction, answer.statusEnabled = SCAN_SLOT, State.ScanAgain, true
     if scan and scan.slot == slot then
         answer.status = "Scanning " .. TC.Slots[slot].name:lower()
         answer.progress = math.min(scan.pages / scan.expected, MAX_PROGRESS)
+        answer.statusEnabled = false
     elseif failures[slot] then
-        answer.status, answer.statusButton = STATUS_FAILED, SCAN_AGAIN
+        answer.status = STATUS_FAILED
     elseif scans[slot] then
-        answer.status, answer.statusButton = age(scans[slot].at, "Scanned"), SCAN_AGAIN
-    elseif view.mode == "All" then
-        answer.statusButton = PRICE_SLOT
+        answer.status = age(scans[slot].at, "Scanned")
+    else
+        answer.status = NOT_SCANNED
     end
-    -- the hint is advice, not state, and is drawn so (visual pass, board 9)
-    answer.statusHint = answer.status == STATUS_ALL
-    if answer.statusButton then answer.statusAction = State.ScanAgain end
+    -- nothing known is drawn as advice, not state (visual pass, board 9)
+    answer.statusHint = answer.status == NOT_SCANNED
 end
 
 -- The slot row: the 14 slots in their groups, the chosen one marked.
@@ -1177,14 +1389,31 @@ local function weaponDropdown()
     return { text = text, entries = entries }
 end
 
--- The funnel's Show entries: the Filter's values, the chosen one marked; in
--- All, while an appearance of any slot is pending, Bought, not collected too.
+-- The funnel's Show entries: the Filter's values, the chosen one marked;
+-- while an appearance of any slot is pending, Bought, not collected too.
 local function showEntries(filter)
     local entries = {}
     for i, value in ipairs(State.FILTERS) do entries[i] = { name = value, value = value, selected = value == filter } end
-    if view.mode == "All" and next(pending) then
+    if next(pending) then
         entries[#entries + 1] = { name = PENDING_FILTER, value = PENDING_FILTER, selected = filter == PENDING_FILTER }
     end
+    return entries
+end
+
+-- The funnel's Source entries, each { name, value, selected }: ticked
+-- unless the player unticked it.
+local function sourceEntriesOf()
+    local entries = {}
+    for i, entry in ipairs(sourceTypes()) do
+        entries[i] = { name = entry.name, value = entry.key, selected = not view.sourcesOff[entry.key] }
+    end
+    return entries
+end
+
+-- The funnel's sort entries, the chosen one marked.
+local function sortEntries()
+    local entries = {}
+    for i, sort in ipairs(SORTS) do entries[i] = { name = sort.name, value = sort.value, selected = sort.value == view.sort } end
     return entries
 end
 
@@ -1232,13 +1461,8 @@ end
 -- own (CollectionWardrobeUtil.SetAppearanceTooltip, Blizzard_FrameXMLUtil/
 -- CollectionsUtil.lua:183-384). The client's strings and colours are read
 -- when it has them; the English texts after them are the board's wording,
--- used only without them (their wording on Forever is unverified).
-local function nonEmpty(s)
-    return type(s) == "string" and s ~= "" and s or nil
-end
-local function clientText(name, fallback)
-    return nonEmpty(_G[name]) or fallback
-end
+-- used only without them (their wording on Forever is unverified):
+-- clientText, above.
 local function fontColour(name, r, g, b)
     local c = _G[name]
     if type(c) == "table" and c.GetRGB then return { c:GetRGB() } end
@@ -1494,7 +1718,7 @@ function State.TileTooltip(appearance)
     if waiting and not collected[appearance.id] then
         tail[1], tail[2] = { text = " " }, { text = PENDING_TEXT[waiting], color = c.white, wrap = true }
     end
-    local result = view.mode == "For sale" and forSaleResult(appearance.id) or tileResult(appearance.id)
+    local result = forSaleResult(appearance.id)
     if result then
         tail[#tail + 1] = { text = " " }
         local first = result.rows[1]
@@ -1540,18 +1764,23 @@ function State.TileTooltip(appearance)
     return lines
 end
 
+
+-- Every Source entry ticked again (an empty state's button).
+local function allSources()
+    view.sourcesOff = {}
+    narrowed()
+end
+
 -- What to draw now. Without a list there are no tiles; once a read of the
 -- slot answered nothing or raised, the empty state says so.
 function State.View()
-    local forSaleMode = view.mode == "For sale"
-    local filter = forSaleMode and "Not collected" or view.filter
     local slot = TC.Slots[view.slot]
     local answer = {
-        mode = view.mode, filter = filter, page = view.page, slots = slotRow(),
+        filter = view.filter, page = view.page, slots = slotRow(),
         weaponTypes = weaponDropdown(), classes = classDropdown(), search = view.search,
-        filters = showEntries(filter), filterFixed = forSaleMode, filtersChanged = not filtersAtStart(),
-        status = STATUS_ALL, tiles = {}, count = "",
-        pageText = "", paging = false, previousEnabled = false, nextEnabled = false,
+        filters = showEntries(view.filter), forSaleOnly = view.forSaleOnly, sources = sourceEntriesOf(),
+        sorts = sortEntries(), scanWhenShown = saved.scanWhenShown, filtersChanged = not filtersAtStart(),
+        tiles = {}, count = "", pageText = "", paging = false, previousEnabled = false, nextEnabled = false,
     }
     statusLine(answer)
     if not list then
@@ -1571,7 +1800,7 @@ function State.View()
             -- bought or in the bags, not collected (TC-39); never with collected
             pending = (pending[appearance.id] and not collected[appearance.id]) and true or nil,
         }
-        local result = forSaleMode and forSaleResult(appearance.id) or tileResult(appearance.id)
+        local result = forSaleResult(appearance.id)
         if result and result.rows[1] then
             tile.strip, tile.money = "price", money(result.rows[1].minPrice, true)
             tile.price = moneyText(tile.money)
@@ -1584,18 +1813,18 @@ function State.View()
         end
         answer.tiles[#answer.tiles + 1] = tile
     end
-    -- while the first scan of the slot runs, placeholders fill the page, each
-    -- framed like the slot's first listed appearance, and no empty state is
-    -- answered, whatever the search, the class or the Filter
-    local scanning = forSaleMode and scan ~= nil and scan.slot == view.slot and not scans[view.slot]
+    -- with For sale only, while the first scan of the slot runs, the tiles
+    -- appear as their prices arrive, placeholders fill the page, each framed
+    -- like the slot's first listed appearance, and no empty state is
+    -- answered, whatever the other filters
+    local scanning = view.forSaleOnly and scan ~= nil and scan.slot == view.slot and not scans[view.slot]
     if scanning then
         while #answer.tiles < size do
             answer.tiles[#answer.tiles + 1] = { placeholder = true, strip = "bar", cameraAppearance = list[1] }
         end
     end
     if view.open then answer.list = itemList() end
-    local total = #typed()
-    answer.count = countText(#appearances, total)
+    answer.count = countText(appearances)
     answer.pageText = ("Page %d / %d"):format(view.page, math.max(pages, 1))
     -- the widest form of the page text for this count, so its room never changes
     answer.pageTextWidest = ("Page %d / %d"):format(math.max(pages, 1), math.max(pages, 1))
@@ -1606,34 +1835,42 @@ function State.View()
     local class = chosenClass()
     local className = class and classInfo(class)
     local forClass = className and (" for " .. className) or ""
-    if scanning then
-        -- no empty state while the scan runs
-    elseif total == 0 then
+    if scanning or #appearances > 0 then
+        -- tiles, or placeholders while the scan runs
+    elseif not typed()[1] then
         -- the class filter or the weapon type leaves nothing of the slot (spec 2.9)
         answer.empty = { title = "No matches", text = ("No %s appearances%s."):format(slotWord, forClass) }
-    elseif #appearances == 0 and view.search ~= "" and shown(true)[1] then
-        -- only the search leaves nothing (spec 2.9)
-        answer.empty = { title = "No matches",
-            text = ("No %s appearance has an item named like \"%s\"."):format(slotWord, view.search),
-            button = "Clear search", action = clearSearch }
-    elseif forSaleMode then
-        -- only a kept scan says nothing is for sale
-        if #appearances == 0 and scans[view.slot] and allPending() then
-            answer.empty = { title = "Nothing left to buy",
-                text = ("Every %s appearance for sale here is one you bought and have not collected yet."):format(slotWord),
-                button = "Show all appearances", action = selectAll }
-        elseif #appearances == 0 and scans[view.slot] then
-            answer.empty = { title = "Nothing for sale",
-                text = ("No %s appearance you have not collected is on the auction house right now."):format(slotWord),
-                button = "Show all appearances", action = selectAll }
-        end
-    elseif #appearances == 0 then
+    elseif not shown("show")[1] then
         -- The list is never empty (an empty read keeps no list), so past
-        -- the weapon type only the Filter can leave nothing.
+        -- the weapon type Show is the first filter that can leave nothing.
         local text = view.filter == "Collected" and ("No collected %s appearances%s."):format(slotWord, forClass)
             or view.filter == PENDING_FILTER and ("No %s appearance%s is bought and not collected."):format(slotWord, forClass)
             or ("Every %s appearance%s is collected."):format(slotWord, forClass)
         answer.empty = { title = "No matches", text = text, button = "Show all", action = showAll }
+    elseif not shown("source")[1] then
+        answer.empty = { title = "No matches",
+            text = ("No %s appearance shown here comes from the sources ticked."):format(slotWord),
+            button = "All sources", action = allSources }
+    elseif not shown("sale")[1] and not scans[view.slot] and failures[view.slot] then
+        -- For sale only after the slot's scan failed: as the status line, scan again
+        answer.empty = { title = STATUS_FAILED,
+            text = ("Scan the %s slot again to see which appearances are for sale."):format(slotWord),
+            button = SCAN_SLOT, action = State.ScanAgain }
+    elseif not shown("sale")[1] and not scans[view.slot] then
+        -- For sale only on a slot with no kept scan: scan it
+        answer.empty = { title = "Not scanned yet",
+            text = ("Scan the %s slot to see which appearances are for sale."):format(slotWord),
+            button = SCAN_SLOT, action = State.ScanAgain }
+    elseif not shown("sale")[1] then
+        -- only a kept scan says nothing is for sale
+        answer.empty = { title = "Nothing for sale",
+            text = ("No %s appearance shown here is on the auction house right now."):format(slotWord),
+            button = "Show all appearances", action = showUnpriced }
+    else
+        -- only the search leaves nothing (spec 2.9)
+        answer.empty = { title = "No matches",
+            text = ("No %s appearance has an item named like \"%s\"."):format(slotWord, view.search),
+            button = "Clear search", action = clearSearch }
     end
     -- an empty state and tiles are never drawn together
     if answer.empty then answer.tiles = {} end

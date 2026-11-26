@@ -25,10 +25,23 @@ local function sameState(before, after, what)
     end
 end
 
--- A fresh client with every file of the .toc loaded.
+-- The saved browser choices (TransmogCheckerDB.browser) the tests written
+-- before slice B run with: Show on Not collected and Scan when shown off,
+-- the start and the reads of the catalogue they were written for. New tests
+-- give opts.saved: their own saved table, or false for none at all.
+local function oldStart() return { show = "Not collected", scanWhenShown = false } end
+
+-- A fresh client with every file of the .toc loaded and the saved table in
+-- place, handed to the state as ADDON_LOADED would hand it over.
 local function boot(opts)
     local c = Fake.new(opts)
     c.loaded = c.loadToc(repo)
+    local saved = opts and opts.saved
+    if saved == nil then saved = oldStart() end
+    if saved then
+        TransmogCheckerDB = { browser = saved }
+        TC.BrowserState.Bind(saved)
+    end
     return c
 end
 local function ids(list)
@@ -1068,15 +1081,52 @@ local function chosenSlot(v)
     end
 end
 
-test("start state: All, Head, Filter Not collected, page 1", function()
+-- ledger (slice B): the sweep view is gone; its look is Show Not collected,
+-- For sale only and Price: low to high in the one view (forSaleView), and
+-- selecting it also scanned a slot that had no kept scan and no scan
+-- running (sweep). The catalogue is For sale only off and the Default sort
+-- (catalogue), with the Show choice the catalogue had before, as its
+-- toggle gave it back. Each call counts as the ledger entry of the test
+-- it is in: "SelectMode" became these, the assertions unchanged unless
+-- marked.
+local showBefore
+local function forSaleView()
+    local v = TC.BrowserState.View()
+    if not v.forSaleOnly then showBefore = v.filter end
+    TC.BrowserState.SetFilter("Not collected")
+    TC.BrowserState.SetForSaleOnly(true)
+    TC.BrowserState.SetSort("priceLow")
+end
+local function sweep()
+    forSaleView()
+    local status = TC.BrowserState.View().status
+    if not (status:find("^Scanned") or status:find("^Scanning")) then TC.BrowserState.ScanAgain() end
+end
+-- ledger (slice B): the sweep view's scan on a slot change is Scan when
+-- shown's, which needs the tab shown (Enter) and the setting on.
+local function shownScanning()
+    TC.BrowserState.SetScanWhenShown(true)
+    TC.BrowserState.Enter()
+end
+local function catalogue()
+    if not TC.BrowserState.View().forSaleOnly then return end
+    TC.BrowserState.SetForSaleOnly(false)
+    TC.BrowserState.SetSort("default")
+    if showBefore then TC.BrowserState.SetFilter(showBefore) end
+end
+
+-- ledger (slice B): the view has no mode; with the old saved start Show is
+-- Not collected; the status line says the slot is not scanned (the
+-- defaults with nothing saved: "slice B saved: ..." tests).
+test("start state: Head, Filter Not collected as saved, page 1", function()
     local c = bootState()
     TC.BrowserState.Refresh()
     local v = TC.BrowserState.View()
-    equal(v.mode, "All", "mode")
+    equal(v.mode, nil, "no mode")
     equal(chosenSlot(v), "Head", "slot title")
     equal(v.filter, "Not collected", "Filter")
     equal(v.page, 1, "page")
-    equal(v.status, "Click an appearance to check the auction house.", "status line")
+    equal(v.status, "Not scanned yet", "status line")
     equal(#v.tiles, 24, "tiles on page 1")
     for _, tile in ipairs(v.tiles) do
         check(tile.collected == false, "no collected tile under Not collected")
@@ -1091,13 +1141,13 @@ test("each Filter value narrows as specified and returns to page 1", function()
     TC.BrowserState.NextPage()
     local v = TC.BrowserState.View()
     equal(v.page, 2, "page after NextPage")
-    equal(v.count, "365 of 370 appearances", "count under Not collected")
+    equal(v.count, "365 appearances", "count under Not collected")
     equal(v.pageText, "Page 2 / 16", "page text under Not collected")
 
     TC.BrowserState.SetFilter("Collected")
     v = TC.BrowserState.View()
     equal(v.page, 1, "page after the Filter changed")
-    equal(v.count, "5 of 370 appearances", "count under Collected")
+    equal(v.count, "5 appearances", "count under Collected")
     equal(#v.tiles, 5, "tiles under Collected")
     for _, tile in ipairs(v.tiles) do check(tile.collected == true, "every tile collected under Collected") end
     equal(v.paging, false, "paging with one page")
@@ -1136,7 +1186,7 @@ test("count text is singular for one appearance", function()
     TC.BrowserState.SetFilter("All")
     equal(TC.BrowserState.View().count, "1 appearance", "count of one")
     TC.BrowserState.SetFilter("Collected")
-    equal(TC.BrowserState.View().count, "0 of 1 appearance", "count of none of one")
+    equal(TC.BrowserState.View().count, "0 appearances", "count of none of one")
 end)
 
 test("Filter Collected with nothing collected gives the Filter's empty state", function()
@@ -1145,7 +1195,7 @@ test("Filter Collected with nothing collected gives the Filter's empty state", f
     TC.BrowserState.SetFilter("Collected")
     local v = TC.BrowserState.View()
     equal(#v.tiles, 0, "tiles")
-    equal(v.count, "0 of 30 appearances", "count")
+    equal(v.count, "0 appearances", "count")
     equal(v.paging, false, "paging")
     check(v.empty, "an empty state")
     equal(v.empty.title, "No matches", "empty title")
@@ -1160,7 +1210,7 @@ test("Filter Not collected with every appearance collected gives that empty stat
     TC.BrowserState.Refresh()
     local v = TC.BrowserState.View()
     equal(#v.tiles, 0, "tiles")
-    equal(v.count, "0 of 30 appearances", "count")
+    equal(v.count, "0 appearances", "count")
     equal(v.empty.title, "No matches", "empty title")
     equal(v.empty.text, "Every head appearance for Warlock is collected.", "empty text")
     equal(v.empty.button, "Show all", "empty button")
@@ -1206,13 +1256,33 @@ test("testpass F9: a list read that raises is recorded in lastError and reported
     noneFound(TC.BrowserState.View(), "after two failed reads")
 end)
 
+test("QA-A F2: a raise outside the list read does not say no appearances were found", function()
+    local c = bootState({})
+    TC.BrowserState.Refresh()
+    equal(#TC.BrowserState.View().tiles, 24, "tiles after the good read")
+    c.collectedRaises = true
+    local ok, err = pcall(TC.BrowserState.Refresh)
+    check(ok, "no error from Refresh: " .. tostring(err))
+    local v = TC.BrowserState.View()
+    check(not (v.empty and v.empty.text == NO_APPEARANCES), "not the no-appearances message")
+    equal(#v.tiles, 24, "the grid keeps what it showed")
+    check(TC.BrowserState.lastError and TC.BrowserState.lastError:find("PlayerHasTransmogItemModifiedAppearance", 1, true),
+        "the error recorded, got " .. tostring(TC.BrowserState.lastError))
+    TC.BrowserState.Refresh()
+    equal(#c.errors, 1, "reported once over two reads")
+    c.collectedRaises = false
+    TC.BrowserState.Refresh()
+    equal(#TC.BrowserState.View().tiles, 24, "tiles once the check works")
+    equal(TC.BrowserState.View().empty, nil, "no empty state")
+end)
+
 test("an empty first read is not kept: the next Refresh reads again", function()
     local c = bootState({ listEmpty = 1 })
     TC.BrowserState.Refresh()
     noneFound(TC.BrowserState.View(), "after the empty read")
     TC.BrowserState.Refresh()
     equal(c.listCalls, 2, "list reads")
-    equal(TC.BrowserState.View().count, "365 of 370 appearances", "count after the second read")
+    equal(TC.BrowserState.View().count, "365 appearances", "count after the second read")
     equal(TC.BrowserState.View().empty, nil, "no empty state once read")
 end)
 
@@ -1282,11 +1352,13 @@ test("the change notification fires once per change and not without one", functi
     c.collectedSources[1370 * 10 + 1] = true
     TC.BrowserState.Refresh()
     equal(c.changes, 3, "Refresh after a collection change")
-    equal(TC.BrowserState.View().count, "6 of 370 appearances", "count after the collection change")
+    equal(TC.BrowserState.View().count, "6 appearances", "count after the collection change")
     TC.BrowserState.Reset()
     equal(c.changes, 4, "Reset")
     local v = TC.BrowserState.View()
-    equal(v.filter, "Not collected", "Filter after Reset")
+    -- ledger (slice B): Show is kept between visits (saved), so the new
+    -- visit starts on the Collected chosen above
+    equal(v.filter, "Collected", "Filter after Reset")
     equal(#v.tiles, 0, "no tiles until the next Refresh")
 end)
 
@@ -1444,7 +1516,11 @@ test("state: after Price this slot every click opens the flyout and sends nothin
         equal(TC.BrowserState.View().list.appearance.id, TC.BrowserState.View().tiles[i].appearance.id, "tile " .. i .. " opens")
     end
     equal(#c.ah.sends, sends, "nothing sent")
-    TC.BrowserState.SelectMode("For sale")
+    -- ledger (slice B): the sweep view is its filters and sort; a filter
+    -- change keeps the open flyout while its tile is on the page (the toggle
+    -- closed it), so it is closed first
+    TC.BrowserState.CloseList()
+    sweep()
     click(TC.BrowserState.View().tiles[1])
     equal(TC.BrowserState.View().list.appearance.id, TC.BrowserState.View().tiles[1].appearance.id, "the sweep view opens too")
     equal(#c.ah.sends, sends, "nothing sent in the sweep view")
@@ -1797,14 +1873,14 @@ local SAMPLE = { [1010] = 500, [1020] = 300, [1030] = 300, [1001] = 100 }
 
 test("state: For sale on an unscanned slot starts one scan; selecting it again starts none", function()
     local c = scanState(SAMPLE)
-    TC.BrowserState.SelectMode("For sale")
+    sweep()
     equal(#c.ah.sends, 1, "browses on selecting For sale")
-    TC.BrowserState.SelectMode("All")
-    TC.BrowserState.SelectMode("For sale")
+    catalogue()
+    sweep()
     equal(#c.ah.sends, 1, "browses on selecting For sale again while the scan runs")
     c.advance(10)
-    TC.BrowserState.SelectMode("All")
-    TC.BrowserState.SelectMode("For sale")
+    catalogue()
+    sweep()
     c.advance(10)
     equal(#c.ah.sends, 1, "browses on selecting For sale after the scan")
 end)
@@ -1812,44 +1888,49 @@ end)
 test("state: For sale is All narrowed to not collected and for sale, cheapest first, ties by id, with the count text", function()
     local c = scanState(SAMPLE)
     c.ah.listings[#c.ah.listings + 1] = listing("Unknown", 999, 1)
-    TC.BrowserState.SelectMode("For sale")
+    sweep()
     c.advance(10)
     local v = TC.BrowserState.View()
-    equal(v.mode, "For sale", "mode")
+    -- ledger (slice B): no mode, the filters and the sort instead; equal
+    -- prices keep the game's order (here the same as by id); the count
+    -- says how many are for sale
+    equal(v.forSaleOnly, true, "For sale only")
     equal(tileIDs(v), "1020,1030,1010", "tiles")
     equal(v.tiles[1].price, "3s", "price on the first tile")
-    equal(v.count, "3 of 370 appearances", "count text")
+    equal(v.count, "3 appearances, 3 for sale", "count text")
     equal(v.empty, nil, "no empty state")
 end)
 
 test("state: in For sale the Filter shows Not collected and is fixed; All gets the player's choice back", function()
     local c = scanState(SAMPLE)
     TC.BrowserState.SetFilter("All")
-    TC.BrowserState.SelectMode("For sale")
+    sweep()
     c.advance(10)
     local v = TC.BrowserState.View()
     equal(v.filter, "Not collected", "Filter text in For sale")
-    equal(v.filterFixed, true, "Filter fixed in For sale")
+    -- ledger (slice B): Show is no longer fixed with the sweep's filters:
+    -- it combines with For sale only (the collected 1001 is for sale)
+    equal(v.filterFixed, nil, "Filter not fixed")
     TC.BrowserState.SetFilter("Collected")
-    equal(TC.BrowserState.View().filter, "Not collected", "Filter after a change in For sale")
-    equal(tileIDs(TC.BrowserState.View()), "1020,1030,1010", "tiles after a change in For sale")
-    TC.BrowserState.SelectMode("All")
+    equal(TC.BrowserState.View().filter, "Collected", "Filter after a change in For sale")
+    equal(tileIDs(TC.BrowserState.View()), "1001", "tiles after a change in For sale")
+    catalogue()
     v = TC.BrowserState.View()
     equal(v.filter, "All", "Filter back in All")
-    equal(v.filterFixed, false, "Filter free in All")
 end)
 
 test("state: while the first scan runs, the tiles found so far are followed by placeholders to fill the page", function()
     local c = scanState({ [1010] = 500, [1020] = 300, [1030] = 700 })
     c.ah.pageSize = 2
-    TC.BrowserState.SelectMode("For sale")
+    sweep()
     c.advance(0.26)
     local v = TC.BrowserState.View()
     equal(#v.tiles, 24, "tiles on the page")
     equal(tileIDs(v):sub(1, 21), "1020,1010,placeholder", "found tiles first, then placeholders")
     equal(v.tiles[3].strip, "bar", "a placeholder's strip")
     equal(v.tiles[1].strip, "price", "a found tile's strip")
-    equal(v.count, "2 of 370 appearances", "count while scanning")
+    -- ledger (slice B): the count says how many are for sale
+    equal(v.count, "2 appearances, 2 for sale", "count while scanning")
     c.advance(10)
     v = TC.BrowserState.View()
     equal(tileIDs(v), "1020,1010,1030", "tiles after the scan, no placeholder")
@@ -1858,9 +1939,9 @@ end)
 test("state: after a scan every tile in All has a price or Not for sale, collected ones too", function()
     local c = scanState(SAMPLE)
     TC.BrowserState.SetFilter("All")
-    TC.BrowserState.SelectMode("For sale")
+    sweep()
     c.advance(10)
-    TC.BrowserState.SelectMode("All")
+    catalogue()
     local v = TC.BrowserState.View()
     for i, tile in ipairs(v.tiles) do check(tile.strip ~= nil, "tile " .. i .. " has a strip state") end
     local collectedTile = tileOf(1001)
@@ -1868,7 +1949,8 @@ test("state: after a scan every tile in All has a price or Not for sale, collect
     equal(collectedTile.price, "1s", "the collected tile's price")
     equal(tileOf(1002).price, "Not for sale", "a tile the scan did not find")
     equal(v.status, "Scanned just now", "status line in All after the scan")
-    equal(v.statusButton, "Scan again", "status button in All after the scan")
+    -- ledger (slice B): the scan control has one label
+    equal(v.statusButton, "Scan slot", "status button in All after the scan")
 end)
 
 test("state: a scan replaces the slot's earlier check results; a later check replaces that one appearance's", function()
@@ -1878,9 +1960,9 @@ test("state: a scan replaces the slot's earlier check results; a later check rep
     c.advance(10)
     equal(tileOf(1010).price, "5s", "the check's price")
     c.ah.listings[1].minPrice = 700
-    TC.BrowserState.SelectMode("For sale")
+    sweep()
     c.advance(10)
-    TC.BrowserState.SelectMode("All")
+    catalogue()
     equal(tileOf(1010).price, "7s", "the scan's price replaces the check's")
     -- a toggle change closed the flyout; opened again it shows the scan
     TC.BrowserState.ClickTile(tileOf(1010).appearance)
@@ -1894,7 +1976,7 @@ end)
 
 test("state: a click on a tile after a scan opens the list from the scan's rows and sends nothing", function()
     local c = scanState(SAMPLE)
-    TC.BrowserState.SelectMode("For sale")
+    sweep()
     c.advance(10)
     local sends, more = #c.ah.sends, #c.ah.more
     click(TC.BrowserState.View().tiles[1])
@@ -1917,7 +1999,7 @@ test("state: a click on a tile found while the first scan runs reads nothing; th
     local c = scanState({ [1010] = 500, [1020] = 300 })
     c.ah.listings[#c.ah.listings + 1] = listing("Item 10202", 10202, 900, { itemSuffix = 2 })
     c.ah.pageSize = 2
-    TC.BrowserState.SelectMode("For sale")
+    sweep()
     c.advance(0.26)
     click(TC.BrowserState.View().tiles[1])
     equal(#c.ah.sends, 1, "browses: the scan's only")
@@ -1932,12 +2014,17 @@ test("state: the status line in each state of 2.8, and the progress never above 
     for i = 1, 8 do c.ah.listings[i] = listing("Item " .. (10001 + i * 10), 10001 + i * 10, i * 100) end
     c.ah.pageSize = 1
     local v = TC.BrowserState.View()
-    equal(v.status, "Click an appearance to check the auction house.", "All, not scanned")
-    equal(v.statusButton, "Price this slot", "Price this slot in All, not scanned")
-    TC.BrowserState.SelectMode("For sale")
+    -- ledger (slice B): the scan control is "Scan slot" in every state, off
+    -- while its scan runs (it was hidden then), and its sub-line says "Not
+    -- scanned yet" before a scan (the catalogue's hint before)
+    equal(v.status, "Not scanned yet", "All, not scanned")
+    equal(v.statusButton, "Scan slot", "Scan slot, not scanned")
+    equal(v.statusEnabled, true, "on, not scanned")
+    sweep()
     v = TC.BrowserState.View()
     equal(v.status, "Scanning head", "scanning")
-    equal(v.statusButton, nil, "no button while scanning")
+    equal(v.statusButton, "Scan slot", "the button while scanning")
+    equal(v.statusEnabled, false, "off while scanning")
     equal(v.progress, 0, "progress before the first page")
     -- every distinct progress value while the scan runs, in order
     local seen = {}
@@ -1951,7 +2038,8 @@ test("state: the status line in each state of 2.8, and the progress never above 
     c.advance(10)
     v = TC.BrowserState.View()
     equal(v.status, "Scanned just now", "scanned")
-    equal(v.statusButton, "Scan again", "button after the scan")
+    equal(v.statusButton, "Scan slot", "button after the scan")
+    equal(v.statusEnabled, true, "on after the scan")
     equal(v.progress, nil, "no progress after the scan")
     c.advance(4 * 60)
     equal(TC.BrowserState.View().status, "Scanned 4 min ago", "scanned 4 min ago")
@@ -1963,13 +2051,13 @@ test("state: the status line in each state of 2.8, and the progress never above 
     c.advance(30)
     v = TC.BrowserState.View()
     equal(v.status, "The auction house did not answer.", "failed")
-    equal(v.statusButton, "Scan again", "button after a failure")
+    equal(v.statusButton, "Scan slot", "button after a failure")
 end)
 
 test("state: Scan again keeps the old tiles on screen until the new scan ends", function()
     local c = scanState(SAMPLE)
     c.ah.pageSize = 1
-    TC.BrowserState.SelectMode("For sale")
+    sweep()
     c.advance(30)
     c.ah.listings = { listing("Item 10401", 10401, 50), listing("Item 10101", 10101, 800) }
     TC.BrowserState.ScanAgain()
@@ -1987,37 +2075,42 @@ test("state: a scan that finds nothing not collected shows Nothing for sale with
     local c = scanState({ [1001] = 100, [1002] = 100 })
     c.collectedSources[10023] = true
     TC.BrowserState.Refresh()
-    TC.BrowserState.SelectMode("For sale")
+    sweep()
     c.advance(10)
     local v = TC.BrowserState.View()
     equal(#v.tiles, 0, "tiles")
+    -- ledger (slice B): the For sale only empty state speaks of the filters
+    -- shown, and its button turns For sale only off (it selected All)
     equal(v.empty.title, "Nothing for sale", "empty title")
-    equal(v.empty.text, "No head appearance you have not collected is on the auction house right now.", "empty text")
+    equal(v.empty.text, "No head appearance shown here is on the auction house right now.", "empty text")
     equal(v.empty.button, "Show all appearances", "empty button")
-    equal(v.count, "0 of 370 appearances", "count")
+    equal(v.count, "0 appearances, 0 for sale", "count")
     equal(v.status, "Scanned just now", "status")
-    equal(v.statusButton, "Scan again", "status button")
+    equal(v.statusButton, "Scan slot", "status button")
     v.empty.action()
-    equal(TC.BrowserState.View().mode, "All", "mode after the button")
+    equal(TC.BrowserState.View().forSaleOnly, false, "For sale only after the button")
     equal(#c.ah.sends, 1, "browses")
 end)
 
 test("state: a failed scan is not kept: the failure text with Scan again, tiles found stay, For sale scans again", function()
     local c = scanState(SAMPLE)
     c.ah.pageSize = 2
-    TC.BrowserState.SelectMode("For sale")
+    sweep()
     c.advance(0.26)
     c.ah.fail = true
     c.advance(10)
     local v = TC.BrowserState.View()
     equal(v.status, "The auction house did not answer.", "status")
-    equal(v.statusButton, "Scan again", "status button")
+    equal(v.statusButton, "Scan slot", "status button")
     equal(tileIDs(v), "1020", "the tile found before the failure stays")
     equal(v.empty, nil, "no empty state")
-    TC.BrowserState.SelectMode("All")
-    equal(tileOf(1020).strip, nil, "nothing kept for All")
+    catalogue()
+    -- ledger (slice B): one view, one rule for a tile's price: the price a
+    -- failed scan found stays on its tile with For sale only off too (the
+    -- catalogue showed nothing for it); the scan is still not kept
+    equal(tileOf(1020).strip, "price", "the failed scan's price in the one view")
     c.ah.fail = false
-    TC.BrowserState.SelectMode("For sale")
+    sweep()
     equal(#c.ah.sends, 2, "For sale scans again")
     c.advance(10)
     equal(TC.BrowserState.View().status, "Scanned just now", "the new scan kept")
@@ -2027,7 +2120,7 @@ test("state: a scan of 4 pages reads no item data; a list opened from a scan res
     local c = scanState({ [1010] = 500, [1020] = 300, [1030] = 700, [1040] = 900 })
     c.ah.pageSize = 1
     local info, loads = c.itemInfoCalls, #c.loadRequests
-    TC.BrowserState.SelectMode("For sale")
+    sweep()
     c.advance(30)
     equal(tileIDs(TC.BrowserState.View()), "1020,1010,1030,1040", "tiles after 4 pages")
     equal(c.itemInfoCalls - info, 0, "C_Item.GetItemInfo calls during the scan and the draw")
@@ -2041,23 +2134,23 @@ end)
 
 test("state: a Scan again that fails keeps the good result, its tiles and prices", function()
     local c = scanState(SAMPLE)
-    TC.BrowserState.SelectMode("For sale")
+    sweep()
     c.advance(10)
     TC.BrowserState.ScanAgain()
     c.ah.fail = true
     c.advance(10)
     local v = TC.BrowserState.View()
     equal(v.status, "The auction house did not answer.", "failure text")
-    equal(v.statusButton, "Scan again", "status button")
+    equal(v.statusButton, "Scan slot", "status button")
     equal(tileIDs(v), "1020,1030,1010", "tiles stay")
     equal(v.tiles[1].price, "3s", "price stays")
-    TC.BrowserState.SelectMode("All")
+    catalogue()
     equal(tileOf(1010).price, "5s", "the good scan is still kept")
 end)
 
 test("state: an appearance collected after a scan leaves For sale and sends nothing", function()
     local c = scanState(SAMPLE)
-    TC.BrowserState.SelectMode("For sale")
+    sweep()
     c.advance(10)
     local sends, more = #c.ah.sends, #c.ah.more
     c.collectedSources[10203] = true
@@ -2069,25 +2162,29 @@ test("state: an appearance collected after a scan leaves For sale and sends noth
     equal(#c.ah.more, more, "page requests")
 end)
 
-test("state: leaving the tab during a scan cancels it; coming back in For sale scans once", function()
+-- ledger (slice B): coming back scans again with Scan when shown on (it
+-- did in For sale), and starts nothing with it off (as in All)
+test("state: leaving the tab during a scan cancels it; coming back with Scan when shown scans once", function()
     local c = scanState(SAMPLE)
     c.ah.pageSize = 1
-    TC.BrowserState.SelectMode("For sale")
+    TC.BrowserState.SetScanWhenShown(true)
+    sweep()
     c.advance(0.26)
     TC.BrowserState.Leave()
     local sends, more = #c.ah.sends, #c.ah.more
     c.advance(30)
     equal(#c.ah.sends + #c.ah.more, sends + more, "messages after leaving")
     local v = TC.BrowserState.View()
-    equal(v.mode, "For sale", "the view as it was")
+    equal(v.forSaleOnly, true, "the view as it was")
     TC.BrowserState.Enter()
     equal(#c.ah.sends, sends + 1, "a new scan on coming back")
     TC.BrowserState.Enter()
     equal(#c.ah.sends, sends + 1, "no second scan on entering again")
     c.advance(30)
     equal(tileIDs(TC.BrowserState.View()), "1020,1030,1010", "tiles after the new scan")
-    -- in All, coming back starts nothing
-    TC.BrowserState.SelectMode("All")
+    -- with Scan when shown off, coming back starts nothing
+    catalogue()
+    TC.BrowserState.SetScanWhenShown(false)
     TC.BrowserState.ScanAgain()
     TC.BrowserState.Leave()
     sends = #c.ah.sends
@@ -2097,21 +2194,26 @@ end)
 
 test("state: closing the auction window discards the scan result and the mode", function()
     local c = scanState(SAMPLE)
-    TC.BrowserState.SelectMode("For sale")
+    sweep()
     c.advance(10)
     TC.BrowserState.Reset()
     TC.BrowserState.Refresh()
     local v = TC.BrowserState.View()
-    equal(v.mode, "All", "mode")
-    equal(v.status, "Click an appearance to check the auction house.", "status")
-    for _, tile in ipairs(v.tiles) do equal(tile.strip, nil, "strip after closing") end
-    TC.BrowserState.SelectMode("For sale")
+    -- ledger (slice B): For sale only and the sort are kept between visits
+    -- (the mode was not); the scan result is discarded: no tile, the
+    -- not-scanned empty state
+    equal(v.forSaleOnly, true, "For sale only kept")
+    equal(v.status, "Not scanned yet", "status")
+    equal(v.empty and v.empty.title, "Not scanned yet", "the empty state says to scan")
+    catalogue()
+    for _, tile in ipairs(TC.BrowserState.View().tiles) do equal(tile.strip, nil, "strip after closing") end
+    sweep()
     equal(#c.ah.sends, 2, "For sale scans again in the new visit")
     -- closing during a scan: late answers change nothing
     TC.BrowserState.Reset()
     c.advance(10)
     TC.BrowserState.Refresh()
-    equal(TC.BrowserState.View().status, "Click an appearance to check the auction house.", "status after a late answer")
+    equal(TC.BrowserState.View().status, "Not scanned yet", "status after a late answer")
 end)
 
 ---------------------------------------------------------------- Follow-ups of step 3
@@ -2374,8 +2476,8 @@ test("selecting the tab asks the state for one page and draws it", function()
     equal(AuctionHouseFrame.title, "Appearance Browser", "window title")
     equal(#c.tryOn, 24, "models dressed")
     equal(#c.cameras, 24, "cameras applied")
-    for _, text in ipairs({ "365 of 370 appearances", "Price this slot", "Page 1 / 16",
-        "Click an appearance to check the auction house." }) do
+    -- ledger (slice B): the scan control's one label and its sub-line
+    for _, text in ipairs({ "365 appearances", "Scan slot", "Page 1 / 16", "Not scanned yet" }) do
         check(textShown(c, text), "the text \"" .. text .. "\" on screen")
     end
     equal(#c.auctionTouches, 0, "C_AuctionHouse accesses")
@@ -2392,20 +2494,24 @@ test("the panel forwards the wheel, the arrows and the Filter menu to the state"
     check(textShown(c, "Page 1 / 16"), "page 1 after the wheel turned up")
     local _, choose = openMenu(c, funnelOf(c))
     check(choose("Collected"), "a \"Collected\" entry in the funnel's menu")
-    check(textShown(c, "5 of 370 appearances"), "count after choosing Collected")
+    check(textShown(c, "5 appearances"), "count after choosing Collected")
     equal(markedShow(c), "Collected", "the funnel marks Collected")
     local arrows = findAll(c, function(w) return w.kind == "Button" and visible(w) and w.width == 22 end)
     equal(#arrows, 0, "paging arrows shown with one page")
 end)
 
-test("closing the auction house starts the next visit fresh", function()
+-- ledger (slice B): Show is kept between visits now (saved); the class goes
+-- back to the character's own, the list is read again
+test("closing the auction house starts the next visit fresh, Show as chosen", function()
     local c, tabs = visitTwice()
     tabs[1].scripts.OnClick(tabs[1])
     TC.BrowserState.SetFilter("All")
+    TC.BrowserState.SelectClass(8)
     c.closeAuction()
     c.openAuction()
     tabs[1].scripts.OnClick(tabs[1])
-    equal(markedShow(c), "Not collected", "Show back on Not collected")
+    equal(markedShow(c), "All", "Show kept on All")
+    equal(TC.BrowserState.View().classes.text, "Warlock", "the class back on the character's own")
     equal(c.listCalls, 2, "list read again in the new visit")
 end)
 
@@ -2435,7 +2541,7 @@ test("a failing list call raises nothing to the player, and a later read fills t
     unavailableOnScreen(c, "failed read")
     c.fire("TRANSMOG_COLLECTION_UPDATED")
     equal(#c.tryOn, 24, "models dressed after a later read")
-    check(textShown(c, "365 of 370 appearances"), "count after a later read")
+    check(textShown(c, "365 appearances"), "count after a later read")
 end)
 
 test("an empty first read does not stick: the collection event and re-entering the tab read again", function()
@@ -2443,14 +2549,14 @@ test("an empty first read does not stick: the collection event and re-entering t
     tabs[1].scripts.OnClick(tabs[1])
     unavailableOnScreen(c, "empty read")
     c.fire("TRANSMOG_COLLECTION_UPDATED")
-    check(textShown(c, "365 of 370 appearances"), "count after the collection event")
+    check(textShown(c, "365 appearances"), "count after the collection event")
 
     c, tabs = visitTwice({ listEmpty = 1 })
     tabs[1].scripts.OnClick(tabs[1])
     unavailableOnScreen(c, "empty read")
     selectBuy()
     tabs[1].scripts.OnClick(tabs[1])
-    check(textShown(c, "365 of 370 appearances"), "count after re-entering the tab")
+    check(textShown(c, "365 appearances"), "count after re-entering the tab")
 end)
 
 test("the class filter writes of the weapon type pass firing the collection event give one read and one draw", function()
@@ -2502,7 +2608,7 @@ test("the collection event refreshes collected while the panel is shown and not 
     tabs[1].scripts.OnClick(tabs[1])
     c.collectedSources[1370 * 10 + 1] = true
     c.fire("TRANSMOG_COLLECTION_UPDATED")
-    check(textShown(c, "364 of 370 appearances"), "count after the event while shown")
+    check(textShown(c, "364 appearances"), "count after the event while shown")
     selectBuy()
     local views, realView = 0, TC.BrowserState.View
     TC.BrowserState.View = function() views = views + 1; return realView() end
@@ -2510,7 +2616,7 @@ test("the collection event refreshes collected while the panel is shown and not 
     c.fire("TRANSMOG_COLLECTION_UPDATED")
     equal(views, 0, "draws while hidden")
     tabs[1].scripts.OnClick(tabs[1])
-    check(textShown(c, "363 of 370 appearances"), "count on coming back")
+    check(textShown(c, "363 appearances"), "count on coming back")
 end)
 
 test("buttons without Blizzard's template get a font object, or none when it is missing", function()
@@ -2727,9 +2833,36 @@ end)
 
 ---------------------------------------------------------------- Whole addon: scans
 
--- The catalogue (All) or sweep (For sale) toggle.
-local function modeTab(c, mode)
-    return find(c, function(w) return w.kind == "Button" and w.mode == mode end)
+-- Chooses the funnel's entry of that text, as a click does, and closes a
+-- menu a checkbox left open; answers whether the entry was there.
+local function funnelPick(c, text)
+    local funnel = funnelOf(c)
+    local _, choose = openMenu(c, funnel)
+    local ok = choose(text)
+    if funnel.kind == "DropdownButton" and funnel:IsMenuOpen() then funnel:CloseMenu() end
+    return ok
+end
+-- The scan control, shown.
+local function scanControl(c)
+    return find(c, function(w) return w.kind == "Button" and w.text == "Scan slot" and visible(w) end)
+end
+-- ledger (slice B): the catalogue and sweep toggles became the funnel's
+-- choices: the sweep is Show Not collected, For sale only and Price: low to
+-- high, and its scan the scan control's click when the slot had no kept
+-- scan; the catalogue is For sale only off and the Default sort.
+local function panelSweep(c)
+    funnelPick(c, "Not collected")
+    if not TC.BrowserState.View().forSaleOnly then funnelPick(c, "For sale only") end
+    funnelPick(c, "Price: low to high")
+    local status = TC.BrowserState.View().status
+    if not (status:find("^Scanned") or status:find("^Scanning")) then
+        local control = scanControl(c)
+        control.scripts.OnClick(control)
+    end
+end
+local function panelCatalogue(c)
+    if TC.BrowserState.View().forSaleOnly then funnelPick(c, "For sale only") end
+    funnelPick(c, "Default")
 end
 
 test("whole: the files in .toc order, login, the window, the tab, paging, the Filter and All send nothing", function()
@@ -2743,8 +2876,7 @@ test("whole: the files in .toc order, login, the window, the tab, paging, the Fi
     wheel.scripts.OnMouseWheel(wheel, -1)
     wheel.scripts.OnMouseWheel(wheel, 1)
     TC.BrowserState.SetFilter("All")
-    local all = modeTab(c, "All")
-    all.scripts.OnClick(all)
+    panelCatalogue(c)
     c.fire("TRANSMOG_COLLECTION_UPDATED")
     selectBuy()
     tabs[1].scripts.OnClick(tabs[1])
@@ -2759,9 +2891,7 @@ test("whole: selecting For sale makes one browse and a page request per further 
     c.ah.pageSize = 2
     for id = 1010, 1050, 10 do c.ah.listings[#c.ah.listings + 1] = listing("Item " .. (id * 10 + 1), id * 10 + 1, id) end
     tabs[1].scripts.OnClick(tabs[1])
-    local forSale = modeTab(c, "For sale")
-    check(forSale and visible(forSale), "a shown sweep toggle")
-    forSale.scripts.OnClick(forSale)
+    panelSweep(c)
     c.advance(0.26)
     check(textShown(c, "Scanning head"), "the status line while scanning")
     local bars = findAll(c, function(w) return w.kind == "Texture" and w.width == 30 and w.height == 4 and visible(w) end)
@@ -2770,22 +2900,28 @@ test("whole: selecting For sale makes one browse and a page request per further 
     equal(#c.ah.sends, 1, "browses")
     equal(#c.ah.more, 2, "requests for more: 3 pages")
     check(textShown(c, "Scanned just now"), "the status line after the scan")
-    check(textShown(c, "Scan again"), "the Scan again button")
-    check(textShown(c, "5 of 370 appearances"), "count text")
+    -- ledger (slice B): the scan control's one label; the count says how
+    -- many are for sale; Show is not fixed and For sale only is ticked
+    check(scanControl(c), "the Scan slot button")
+    check(textShown(c, "5 appearances, 5 for sale"), "count text")
     openMenu(c, funnelOf(c))
-    local fixed = c.menuEntries()[3]
-    equal(fixed.text .. tostring(fixed.selected) .. tostring(fixed.enabled), "Not collectedtruefalse",
-        "Show fixed on Not collected and greyed")
+    local show, box = c.menuEntries()[3], c.menuEntries()[5]
+    equal(show.text .. tostring(show.selected) .. tostring(show.enabled), "Not collectedtruetrue", "Show on Not collected")
+    equal(box.text .. tostring(box.selected), "For sale onlytrue", "For sale only ticked")
     funnelOf(c):CloseMenu()
     equal(#findAll(c, function(w) return w.model and w.button and visible(w) end), 5, "tiles shown")
-    -- leaving the tab and coming back in For sale after a finished scan reads nothing
+    -- ledger (slice B): the sweep view's rescan on coming back is Scan when
+    -- shown's, ticked here
+    funnelPick(c, "Scan when shown")
+    equal(TC.BrowserState.View().scanWhenShown, true, "Scan when shown on")
+    -- leaving the tab and coming back after a finished scan reads nothing
     selectBuy()
     tabs[1].frameRef:Hide()
     tabs[1].scripts.OnClick(tabs[1])
     c.advance(30)
     equal(#c.ah.sends, 1, "browses after coming back")
     -- Scan again through the panel
-    local again = find(c, function(w) return w.kind == "Button" and w.text == "Scan again" and visible(w) end)
+    local again = scanControl(c)
     again.scripts.OnClick(again)
     c.advance(0.1)
     -- leaving during it and coming back scans once
@@ -2881,16 +3017,17 @@ test("slots: weapon types come from GetCategoryInfo flags when it answers, else 
     c.advance(1)
     check(learnt, "learnt")
     -- the character's own class (a Warlock) also gets what it can learn
-    -- (testpass F10), named by the client's subclass names; no flag fits
-    -- Ranged, so only the Warlock's wand is there
+    -- (testpass F10), named by the client's subclass names
     local own = "14=Subclass 2.7,16=Daggers,23=Subclass 2.10"
-    for _, case in ipairs({ { 9, own, "12=Subclass 2.19" }, { 1, "16=Daggers", "" }, { "every class", own, "12=Subclass 2.19" } }) do
+    for _, case in ipairs({ { 9, own }, { 1, "16=Daggers" }, { "every class", own } }) do
         local class = case[1]
         local classID, who = tonumber(class), " for " .. class
         equal(text(TC.Appearances.WeaponTypes("offhand", learnt, classID)), "16=Daggers,18=Shields,19=Held In Off-hand",
             "off hand by flags" .. who)
         equal(text(TC.Appearances.WeaponTypes("mainhand", learnt, classID)), case[2], "main hand by flags" .. who)
-        equal(text(TC.Appearances.WeaponTypes("ranged", learnt, classID)), case[3], "ranged by flags" .. who)
+        -- no flag fits Ranged: the fixed split (F4)
+        equal(text(TC.Appearances.WeaponTypes("ranged", learnt, classID)),
+            "12=Subclass 2.19,25=Subclass 2.2,26=Subclass 2.3,27=Subclass 2.18", "ranged by flags" .. who)
     end
     equal(text(TC.Appearances.WeaponTypes("head", learnt)), "", "an armor slot has none")
     c = boot({ noCategoryInfo = true })
@@ -3027,16 +3164,19 @@ test("state: a slot click in All goes to page 1, closes the list, keeps the Filt
     equal(v.page, 1, "page")
     equal(v.list, nil, "item list closed")
     equal(v.filter, "All", "Filter kept")
-    equal(v.mode, "All", "mode kept")
-    equal(v.status, "Click an appearance to check the auction house.", "status line")
+    -- ledger (slice B): no mode; For sale only and the sort kept; the
+    -- status line's not-scanned text
+    equal(v.forSaleOnly, false, "For sale only kept")
+    equal(v.status, "Not scanned yet", "status line")
     c.advance(30)
     equal(#c.ah.sends, sends, "browses after the slot click")
 end)
 
-test("state: in For sale a slot click scans once; back on a scanned slot its kept result shows and nothing is sent", function()
+test("state: with Scan when shown a slot click scans once; back on a scanned slot its kept result shows and nothing is sent", function()
     local c = slotState()
     c.ah.listings = { listing("Item 10101", 10101, 500), listing("Item 20011", 20011, 300) }
-    state().SelectMode("For sale")
+    shownScanning()
+    sweep()
     c.advance(10)
     equal(#c.ah.sends, 1, "browses for head")
     equal(tileIDs(state().View()), "1010", "head's tile")
@@ -3082,7 +3222,7 @@ test("state: the weapon type dropdown is answered on weapon slots only, starts o
     for _, tile in ipairs(v.tiles) do equal(tile.appearance.category, CAT.Dagger, "every tile a dagger") end
     equal(v.tiles[1].weapon, true, "a weapon tile")
     -- For sale narrows by it without a new scan
-    state().SelectMode("For sale")
+    sweep()
     c.advance(10)
     equal(#c.ah.sends, 1, "one scan of main hand")
     equal(tileIDs(state().View()), "3001", "the dagger for sale only")
@@ -3097,11 +3237,12 @@ test("state: the weapon type dropdown is answered on weapon slots only, starts o
     state().SelectSlot("mainhand")
     equal(state().View().weaponTypes.text, "All weapon types", "main hand starts again on All weapon types")
     -- a weapon type with nothing
-    state().SelectMode("All")
+    catalogue()
     state().SelectWeaponType(CAT.Staff)
     state().SelectClass(9)
     v = state().View()
-    equal(v.count, "0 appearances", "count with no staff")
+    -- ledger (slice B): the count says how many are for sale once the slot was scanned
+    equal(v.count, "0 appearances, 0 for sale", "count with no staff")
     equal(v.empty.title, "No matches", "empty title")
     equal(v.empty.text, "No main hand appearances for Warlock.", "empty text")
 end)
@@ -3111,7 +3252,8 @@ test("state: a slot change during a scan leaves at most one scan in flight and n
     c.ah.pageSize = 1
     for i = 1, 4 do c.ah.listings[i] = listing("Item " .. (10001 + i * 10), 10001 + i * 10, i * 100) end
     c.ah.listings[5] = listing("Item 20011", 20011, 50)
-    state().SelectMode("For sale")
+    shownScanning()
+    sweep()
     c.advance(0.26)
     -- head's scan has its first page; legs needs a scan: head's is stopped
     state().SelectSlot("legs")
@@ -3126,9 +3268,11 @@ test("state: a slot change during a scan leaves at most one scan in flight and n
     state().SelectSlot("head")
     equal(#c.ah.sends, 3, "head was not kept and scans again")
     equal(state().View().status, "Scanning head", "head scanning")
-    -- a slot change in All during a scan: it finishes and is kept under its slot
+    -- a slot change in All during a scan: it finishes and is kept under its
+    -- slot (ledger, slice B: All is Scan when shown off and the catalogue)
     c.advance(60)
-    state().SelectMode("All")
+    catalogue()
+    state().SetScanWhenShown(false)
     state().ScanAgain()
     c.advance(0.26)
     state().SelectSlot("legs")
@@ -3151,12 +3295,13 @@ test("state: titles, status texts and empty states carry the slot's name; a chec
     local v = state().View()
     equal(chosenSlot(v), "Shirt", "title")
     equal(v.empty.text, "Every shirt appearance for Warlock is collected.", "empty state")
-    state().SelectMode("For sale")
+    sweep()
     equal(state().View().status, "Scanning shirt", "status while scanning")
     c.advance(10)
-    equal(state().View().empty.text, "No shirt appearance you have not collected is on the auction house right now.",
-        "For sale empty state")
-    state().SelectMode("All")
+    -- ledger (slice B): Show Not collected is the first filter to leave
+    -- nothing, so its empty state shows (the sweep view had its own)
+    equal(state().View().empty.text, "Every shirt appearance for Warlock is collected.", "For sale empty state")
+    catalogue()
     state().SelectSlot("legs")
     state().ClickTile(state().View().tiles[1].appearance)
     c.advance(10)
@@ -3188,7 +3333,7 @@ end)
 test("state: a list opened from a scan names an item once its data is in, in its quality, and says Scanned until a check", function()
     local c = slotState({ items = { [10101] = { name = "Late Helm", quality = 3, bindType = 2, subType = "Cloth", load = 1 } } })
     c.ah.listings = { listing("Late Helm", 10101, 500) }
-    state().SelectMode("For sale")
+    sweep()
     c.advance(10)
     state().ClickTile(state().View().tiles[1].appearance)
     local row = state().View().list.rows[1]
@@ -3208,15 +3353,17 @@ local function slotButtons(c)
     return findAll(c, function(w) return w.kind == "Button" and w.slot and w.ring end)
 end
 
-test("whole: the slot row's 14 buttons sit at x 136, y 4, 31 wide, 2 apart and 19 between groups, with the ring on the chosen", function()
+-- ledger (slice B): the toggles are gone, so the row starts at the grid's
+-- left edge, x 28 (it was 136)
+test("whole: the slot row's 14 buttons sit at x 28, y 4, 31 wide, 2 apart and 19 between groups, with the ring on the chosen", function()
     local c, tabs = visitTwice({ appearances = manySlots() })
     tabs[1].scripts.OnClick(tabs[1])
     local buttons = slotButtons(c)
     equal(#buttons, 14, "slot buttons")
     local xs = {}
     for i, b in ipairs(buttons) do xs[i] = b.points[1].x end
-    equal(table.concat(xs, ","), "136,169,202,235,268,301,334,384,417,450,483,533,566,599", "x positions")
-    equal(buttons[14].points[1].x + 31 - 136, 494, "the row is 494 wide")
+    equal(table.concat(xs, ","), "28,61,94,127,160,193,226,276,309,342,375,425,458,491", "x positions")
+    equal(buttons[14].points[1].x + 31 - 28, 494, "the row is 494 wide")
     equal(buttons[1].points[1].y, -4, "y")
     check(visible(buttons[1].ring) and not visible(buttons[2].ring), "the ring on Head only")
     buttons[2].scripts.OnEnter(buttons[2])
@@ -3226,7 +3373,9 @@ test("whole: the slot row's 14 buttons sit at x 136, y 4, 31 wide, 2 apart and 1
     check(not textShown(c, "Legs"), "no slot title")
 end)
 
-test("whole: clicking through all 14 slots in All sends nothing; in For sale exactly 14 browses", function()
+-- ledger (slice B): All is Scan when shown off; the sweep's scan per slot
+-- is Scan when shown on, ticked in the funnel, after the head's scan
+test("whole: clicking through all 14 slots with Scan when shown off sends nothing; with it on exactly 14 browses", function()
     local c, tabs = visitTwice({ appearances = manySlots() })
     tabs[1].scripts.OnClick(tabs[1])
     local buttons = slotButtons(c)
@@ -3235,8 +3384,8 @@ test("whole: clicking through all 14 slots in All sends nothing; in For sale exa
     equal(#c.ah.sends, 0, "browses in All")
     equal(#c.auctionTouches, 0, "C_AuctionHouse accesses in All")
     buttons[1].scripts.OnClick(buttons[1])
-    local forSale = modeTab(c, "For sale")
-    forSale.scripts.OnClick(forSale)
+    funnelPick(c, "Scan when shown")
+    panelSweep(c)
     c.advance(10)
     for i = 2, 14 do buttons[i].scripts.OnClick(buttons[i]); c.advance(10) end
     -- and back through them all: every result is kept
@@ -3400,7 +3549,7 @@ test("F3: an appearance listed in two weapon categories shows under each, once u
     end
     state().SelectWeaponType(nil)
     c.ah.listings = { listing("Item 30011", 30011, 500), listing("Item 30021", 30021, 300) }
-    state().SelectMode("For sale")
+    sweep()
     c.advance(10)
     equal(shownIDs(), "3002,3001", "for sale, all weapon types, 3001 once")
     state().SelectWeaponType(CAT.OneHSword)
@@ -3411,15 +3560,14 @@ end)
 
 test("F4: flags that fit nothing for a weapon slot leave it the fixed split", function()
     local info = { [16] = { "Daggers", true, false, true, false, false } }
-    -- a Paladin, whose class learns no ranged weapon (testpass F10)
-    local paladin = { "Paladin", "PALADIN", 2 }
-    local c = boot({ categoryInfo = info, playerClass = paladin })
+    local c = boot({ categoryInfo = info })
     local learnt = learnWeapons(c)
     local out = {}
     for i, t in ipairs(TC.Appearances.WeaponTypes("ranged", learnt, 9)) do out[i] = t.category end
     equal(table.concat(out, ","), "12,25,26,27", "ranged by the fixed split")
-    equal(#TC.Appearances.WeaponTypes("mainhand", learnt, 9), 1, "main hand still by flags")
-    c = slotState({ categoryInfo = info, playerClass = paladin })
+    -- daggers by flags, widened for the Warlock's own class (testpass F10)
+    equal(#TC.Appearances.WeaponTypes("mainhand", learnt, 9), 3, "main hand still by flags")
+    c = slotState({ categoryInfo = info })
     state().SelectSlot("ranged")
     c.advance(1)
     equal(#state().View().weaponTypes.entries, 5, "All weapon types and the four ranged types")
@@ -3448,7 +3596,9 @@ test("testpass F10: the character's own class's weapon types include what it can
     equal(cats("mainhand", learnt, 8), "16", "the Mage keeps the client's answer")
     equal(cats("mainhand", learnt, 1), "16", "the Warrior keeps the client's answer")
     equal(cats("mainhand", learnt, nil), "14,16,23", "All classes: the union follows")
-    equal(cats("ranged", learnt, 9) .. " | " .. cats("ranged", learnt, 8), "12 | ", "ranged: the Warlock's wand, none for the Mage")
+    -- no class answered for Ranged: not widened, the fixed split (F4)
+    equal(cats("ranged", learnt, 9) .. " | " .. cats("ranged", learnt, 8), "12,25,26,27 | 12,25,26,27",
+        "ranged: no class answered, the fixed split")
     check(TC.Appearances.WeaponTypes("mainhand", learnt, 9)[1].name, "a widened type no class answered has a name")
     -- a failed pass still falls back to the fixed split
     c = boot({ setClassRaises = true })
@@ -3590,7 +3740,9 @@ test("class: Back, Shirt, Tabard and the weapon slots are not narrowed by armor 
     end
 end)
 
-test("class: the count text's total follows the class", function()
+-- ledger (fix B, F6): the count has no total since slice B; it counts the
+-- chosen class's appearances, 0 for a class with none of the slot
+test("class: the count text counts the chosen class's appearances, and 0 for a class with none", function()
     classState()
     equal(TC.BrowserState.View().count, "3 appearances", "Warlock")
     TC.BrowserState.SelectClass("all")
@@ -3598,8 +3750,22 @@ test("class: the count text's total follows the class", function()
     TC.BrowserState.SelectClass(3)
     TC.BrowserState.SetFilter("Collected")
     local v = TC.BrowserState.View()
-    equal(v.count, "0 of 6 appearances", "Hunter, Filter Collected")
+    equal(v.count, "0 appearances", "Hunter, Filter Collected")
     equal(v.empty.text, "No collected head appearances for Hunter.", "the empty state names the chosen class")
+    -- only the plate helm: Warrior has one, Warlock none
+    local o = classFixture()
+    local list = {}
+    for _, a in ipairs(o.appearances) do if a.id == 104 then list[#list + 1] = a end end
+    o.appearances = list
+    bootState(o)
+    TC.BrowserState.Refresh()
+    TC.BrowserState.SetFilter("All")
+    TC.BrowserState.SelectClass(1)
+    equal(TC.BrowserState.View().count, "1 appearance", "Warrior, one appearance")
+    TC.BrowserState.SelectClass(9)
+    v = TC.BrowserState.View()
+    equal(v.count, "0 appearances", "Warlock, a class with none")
+    equal(v.empty and v.empty.text, "No head appearances for Warlock.", "the class's empty state")
 end)
 
 test("class: a change keeps slot, mode, Filter and search, goes to page 1, closes the list only when its appearance left, sends nothing", function()
@@ -3619,7 +3785,8 @@ test("class: a change keeps slot, mode, Filter and search, goes to page 1, close
     equal(v.page, 1, "page after the change")
     equal(v.list, nil, "the plate appearance's list closed under Rogue")
     equal(chosenSlot(v), "Head", "slot kept")
-    equal(v.mode, "All", "mode kept")
+    -- ledger (slice B): no mode; For sale only kept
+    equal(v.forSaleOnly, false, "For sale only kept")
     equal(v.filter, "All", "Filter kept")
     equal(v.search, "e", "search text kept")
     check(c.changes > changes, "the change notification fired")
@@ -3658,16 +3825,18 @@ test("class: in For sale a class change narrows on the client without a scan", f
         c.ah.listings[#c.ah.listings + 1] = listing(o.items[itemID].name, itemID, itemID)
     end
     TC.BrowserState.SelectClass("all")
-    TC.BrowserState.SelectMode("For sale")
+    sweep()
     c.advance(10)
     equal(shownIDs(), "101,102,104", "for sale under All classes, cheapest first")
     local sends = #c.ah.sends
     TC.BrowserState.SelectClass(5)
     equal(shownIDs(), "101", "for sale under Priest")
-    equal(TC.BrowserState.View().count, "1 of 3 appearances", "count under Priest")
+    -- ledger (slice B): the count says how many are for sale; no mode, For
+    -- sale only kept
+    equal(TC.BrowserState.View().count, "1 appearance, 1 for sale", "count under Priest")
     TC.BrowserState.SelectClass(4)
     equal(shownIDs(), "101,102", "for sale under Rogue")
-    equal(TC.BrowserState.View().mode, "For sale", "mode kept")
+    equal(TC.BrowserState.View().forSaleOnly, true, "For sale only kept")
     c.advance(10)
     equal(#c.ah.sends, sends, "browses for the class changes")
 end)
@@ -3734,7 +3903,7 @@ test("search: case does not matter and any part of a name matches", function()
     equal(shownIDs(), "201,202,203,204", "empty text")
     equal(TC.BrowserState.View().count, "4 appearances", "count without search")
     TC.BrowserState.SetSearch("cap")
-    equal(TC.BrowserState.View().count, "1 of 4 appearances", "count with search")
+    equal(TC.BrowserState.View().count, "1 appearance", "count with search")
 end)
 
 test("search: an appearance of two items matches by either, also by a name that loads later, and the view is told", function()
@@ -3802,7 +3971,7 @@ test("search: For sale also matches the name of an item variant the scan found; 
     local c = scanState(SAMPLE)
     c.ah.listings[#c.ah.listings + 1] = listing("Item 10501", 10501, 900, { itemSuffix = 7 })
     c.ah.keyNames["10501:7"] = "Item 10501 of the Owl"
-    TC.BrowserState.SelectMode("For sale")
+    sweep()
     c.advance(10)
     TC.BrowserState.SetSearch("OWL")
     -- the keystroke asks for the variant's name; it is not known yet
@@ -3815,7 +3984,7 @@ test("search: For sale also matches the name of an item variant the scan found; 
     TC.BrowserState.SetSearch("item 1010")
     equal(shownIDs(), "1010", "an item name matches in For sale")
     TC.BrowserState.SetSearch("owl")
-    TC.BrowserState.SelectMode("All")
+    catalogue()
     equal(shownIDs(), "", "All matches item names only")
 end)
 
@@ -3844,7 +4013,7 @@ test("search: the text is kept across slot, class and mode changes and cleared w
     TC.BrowserState.SetSearch("Item 1")
     TC.BrowserState.SelectSlot("legs")
     TC.BrowserState.SelectClass(1)
-    TC.BrowserState.SelectMode("For sale")
+    sweep()
     TC.BrowserState.SelectSlot("head")
     c.advance(10)
     equal(TC.BrowserState.View().search, "Item 1", "kept")
@@ -3922,7 +4091,8 @@ end
 local function classEntries(c)
     openMenu(c, funnelOf(c))
     for _, e in ipairs(c.menuEntries()) do
-        if e ~= "-" and e.submenu then
+        -- the class submenu (slice B: after the Source submenu)
+        if e ~= "-" and e.submenu and e.text:find("^Class: ") then
             local names = {}
             for _, s in ipairs(e.submenu) do if s ~= "-" then names[#names + 1] = s.text end end
             return names, c.choose, e.text
@@ -3967,7 +4137,7 @@ test("whole: opening the tab, every class entry and typing send nothing and requ
     local box = searchBox(c)
     c.type(box, "cap")
     c.advance(3)
-    check(textShown(c, "2 of 5 appearances"), "count after typing")
+    check(textShown(c, "2 appearances"), "count after typing")
     c.type(box, "")
     c.advance(3)
     equal(#c.ah.sends, 0, "browses")
@@ -4026,8 +4196,8 @@ local function keyRun()
     end
     table.sort(c.ah.listings, function(a, b) return a.minPrice < b.minPrice end)
     tabs[1].scripts.OnClick(tabs[1])
-    local forSale = modeTab(c, "For sale")
-    forSale.scripts.OnClick(forSale)
+    -- ledger (slice B): the sweep toggle is the funnel's sweep choices
+    panelSweep(c)
     c.advance(20)
     return c, tabs, searchBox(c)
 end
@@ -4182,7 +4352,7 @@ end
 
 test("fix2 F1: a scan running with a search text that matches nothing shows placeholders and no empty state; the scan ends: the Search empty state, no tile", function()
     local c = collectedOnly({ [1010] = 50 })
-    TC.BrowserState.SelectMode("For sale")
+    sweep()
     TC.BrowserState.SetSearch("zzz")
     c.advance(0.26)
     local v = TC.BrowserState.View()
@@ -4200,7 +4370,7 @@ end)
 
 test("fix2 F1: without a search text the same scan ends in Nothing for sale, with no tile and no placeholder", function()
     local c = collectedOnly()
-    TC.BrowserState.SelectMode("For sale")
+    sweep()
     c.advance(0.26)
     local v = TC.BrowserState.View()
     equal(v.empty, nil, "no empty state while the scan runs")
@@ -4225,8 +4395,8 @@ test("fix2 F2: every placeholder of a page is framed with the same camera", func
     local distinct = 0
     for _ in pairs(before) do distinct = distinct + 1 end
     check(distinct > 1, "the tiles differ in camera before the scan, got " .. distinct)
-    local forSale = modeTab(c, "For sale")
-    forSale.scripts.OnClick(forSale)
+    -- ledger (slice B): the sweep toggle is the funnel's sweep choices
+    panelSweep(c)
     c.advance(0.26)
     local cameras, n = {}, 0
     for _, frame in ipairs(frames) do
@@ -4302,7 +4472,7 @@ end)
 
 test("buy state: a found row of a scan list can be bought; while a read runs its Buy is off", function()
     local c = scanState(SAMPLE)
-    TC.BrowserState.SelectMode("For sale")
+    sweep()
     c.advance(10)
     local v = TC.BrowserState.View()
     TC.BrowserState.ClickTile(v.tiles[1].appearance)
@@ -4793,7 +4963,8 @@ test("buy safety 7: the tab, lists, scans and checks make no search and no Place
     c.advance(5)
     TC.BrowserState.CheckAgain()
     c.advance(5)
-    c.click(modeTab(c, "For sale"))
+    -- ledger (slice B): the sweep toggle is the funnel's sweep choices
+    panelSweep(c)
     c.advance(10)
     local v = TC.BrowserState.View()
     TC.BrowserState.ClickTile(v.tiles[1].appearance)
@@ -4891,7 +5062,7 @@ test("buy: while the dialog is open the browser starts no read; it does once the
     openDialog(c)
     TC.BrowserState.CheckAgain()
     TC.BrowserState.ClickTile(TC.BrowserState.View().tiles[2].appearance)
-    TC.BrowserState.SelectMode("For sale")
+    sweep()
     TC.BrowserState.ScanAgain()
     TC.BrowserState.BuyRow(1)
     c.advance(10)
@@ -5826,7 +5997,8 @@ test("styles: nothing of the browser, no dropdown and no menu, is made before th
     local c = visitTwice({ appearances = manySlots() })
     equal(#findAll(c, function(w) return w.kind == "DropdownButton" end), 0, "dropdowns before the tab")
     equal(c.menuOpens, 0, "menus opened")
-    equal(modeTab(c, "All"), nil, "the catalogue toggle")
+    -- ledger (slice B): the toggles are gone; no button of the browser yet
+    equal(find(c, function(w) return w.kind == "Button" and (w.slot or w.mode) end), nil, "no slot button or toggle")
     local tabs = tabsOf(c)
     tabs[1].scripts.OnClick(tabs[1])
     equal(#findAll(c, function(w) return w.kind == "DropdownButton" end), 2,
@@ -5865,7 +6037,8 @@ test("styles: the funnel's class submenu lists All classes, a line, the classes 
     tabs[1].scripts.OnClick(tabs[1])
     local function submenu()
         openMenu(c, funnelOf(c))
-        for _, e in ipairs(c.menuEntries()) do if e ~= "-" and e.submenu then return e end end
+        -- the class submenu (slice B: after the Source submenu)
+        for _, e in ipairs(c.menuEntries()) do if e ~= "-" and e.submenu and e.text:find("^Class: ") then return e end end
     end
     local function texts(e)
         local out, marked = {}, {}
@@ -5939,29 +6112,36 @@ test("styles: the weapon type menu lists the slot's types, the chosen marked; a 
     noErrors(c, "weapon type")
 end)
 
-test("styles: the funnel lists All, Collected, Not collected with the chosen marked; in For sale they are greyed and the class still works", function()
+-- ledger (slice B): the funnel's entries are slice B's; Reset filters shows
+-- at the start too, the old saved Show (Not collected) not being the
+-- default; with the sweep's choices Show is not greyed and combines (it
+-- was fixed), and the class still works
+test("styles: the funnel lists Show, For sale only, Source, Class, the sort, Scan when shown, the chosen marked; Show combines with For sale only", function()
     local c, tabs = visitTwice()
     tabs[1].scripts.OnClick(tabs[1])
     local funnel = funnelOf(c)
     local texts = openMenu(c, funnel)
-    equal(table.concat(texts, "|"), "All|Collected|Not collected|-|Class: |cffWARLOCKWarlock|r", "entries at the start")
-    equal(selectedTexts(c), "Not collected", "Not collected marked")
+    equal(table.concat(texts, "|"), "All|Collected|Not collected|-|For sale only|Source|Class: |cffWARLOCKWarlock|r|-|Sort"
+        .. "|Default|Price: low to high|Price: high to low|-|Scan when shown|-|Reset filters", "entries at the start")
+    equal(selectedTexts(c), "Not collected|Default", "Not collected and Default marked")
     check(c.choose("Collected"), "a Collected entry")
-    check(textShown(c, "5 of 370 appearances"), "count after Collected")
+    check(textShown(c, "5 appearances"), "count after Collected")
     texts = openMenu(c, funnel)
-    equal(selectedTexts(c), "Collected", "Collected marked")
-    equal(texts[#texts], "Reset filters", "Reset filters once a choice differs")
+    equal(selectedTexts(c), "Collected|Default", "Collected marked")
+    equal(texts[#texts], "Reset filters", "Reset filters while a choice differs")
     funnel:CloseMenu()
-    TC.BrowserState.SelectMode("For sale")
+    sweep()
     c.advance(10)
     openMenu(c, funnel)
     local entries = c.menuEntries()
-    for i = 1, 3 do equal(entries[i].enabled, false, entries[i].text .. " greyed in For sale") end
-    equal(selectedTexts(c), "Not collected", "fixed on Not collected")
-    equal(c.choose("All"), false, "a greyed entry takes no pick")
+    for i = 1, 3 do equal(entries[i].enabled, true, entries[i].text .. " not greyed with For sale only") end
+    equal(selectedTexts(c), "Not collected|For sale only|Price: low to high", "the sweep's choices marked")
+    check(c.choose("All"), "Show takes a pick")
+    equal(TC.BrowserState.View().forSaleOnly, true, "For sale only stays with Show All")
+    openMenu(c, funnel)
     check(c.choose("|cffMAGEMage|r"), "the class still works")
     equal(TC.BrowserState.View().classes.text, "Mage", "Mage chosen in For sale")
-    equal(#c.ah.sends, 1, "browses: only the sweep toggle's scan")
+    equal(#c.ah.sends, 1, "browses: only the sweep's scan")
     noErrors(c, "funnel")
 end)
 
@@ -6023,14 +6203,19 @@ test("styles: without the menu templates, or without the menu API, the funnel an
         end
         equal(funnel.points[1].x .. "," .. funnel.points[1].y, "757,-4", what .. ": funnel position")
         equal(weapon.height, 22, what .. ": the fallback weapon type button keeps its own height")
+        -- ledger (slice B): the list holds slice B's entries, each checkbox
+        -- marked by its text; Show is not greyed with For sale only (it was)
         local texts = openMenu(c, funnel)
-        equal(texts[1] .. "|" .. texts[4], "All|All classes", what .. ": Show, then the classes")
+        equal(table.concat({ texts[1], texts[4], texts[5], texts[11], texts[12], texts[22], texts[25], #texts }, "|"),
+            "All|[ ] For sale only|[x] Source: Boss Drop|[x] Source: Other|All classes|Sort: Default|[ ] Scan when shown|25",
+            what .. ": Show, For sale only, Source, the classes, the sort, Scan when shown")
         funnel.close()
         sentNothing(c, what)
-        TC.BrowserState.SelectMode("For sale")
+        sweep()
         openMenu(c, funnel)
         local show = findAll(c, function(w) return w.kind == "Button" and w.parent == funnel.menu and visible(w) end)
-        equal(show[1].enabled, false, what .. ": Show greyed in For sale")
+        equal(show[1].enabled, true, what .. ": Show not greyed with For sale only")
+        equal(show[4].text, "[x] For sale only", what .. ": For sale only ticked")
         noErrors(c, what)
     end
 end)
@@ -6143,13 +6328,16 @@ test("B state: a page turn by arrow or wheel, a slot change and a toggle change 
     equal(TC.BrowserState.View().page, 1, "the wheel up turns back")
     equal(openID(), nil, "closed by the wheel up")
     reopen()
-    TC.BrowserState.SelectMode("For sale")
+    -- ledger (slice B): the toggles are filters now, which close the flyout
+    -- when its tile leaves the page (next test); here the tile, not for
+    -- sale, leaves it both times
+    sweep()
     equal(openID(), nil, "closed by the sweep toggle")
     c.advance(10)
-    TC.BrowserState.SelectMode("All")
+    catalogue()
     reopen()
-    TC.BrowserState.SelectMode("For sale")
-    TC.BrowserState.SelectMode("All")
+    sweep()
+    catalogue()
     equal(openID(), nil, "closed by the catalogue toggle")
     reopen()
     TC.BrowserState.SelectSlot("legs")
@@ -6193,71 +6381,81 @@ test("B state: arrows and the wheel turn pages and read nothing; the view carrie
     equal(#c.ah.sends, 0, "paging reads nothing")
 end)
 
+-- ledger (slice B): run on the new default Show (All) with nothing else
+-- saved but Scan when shown off: the start is no mark; Not collected is a
+-- change; Reset goes back to All. The sweep's choices are filters now, so
+-- they show the mark (the sweep view's fixed Show was none), and Reset
+-- clears them; filterFixed is gone.
 test("B state: the funnel's Show and class choices, the changed mark and Reset filters; nothing is read", function()
-    local c = checkState()
+    local c = checkState(nil, { saved = { scanWhenShown = false } })
     local v = TC.BrowserState.View()
     equal(v.filtersChanged, false, "at the start nothing differs")
     local names = {}
     for i, e in ipairs(v.filters) do names[i] = e.name .. (e.selected and "*" or "") end
-    equal(table.concat(names, "|"), "All|Collected|Not collected*", "the Show entries, the chosen marked")
-    equal(v.filterFixed, false, "Show is free in the catalogue")
+    equal(table.concat(names, "|"), "All*|Collected|Not collected", "the Show entries, the chosen marked")
+    equal(v.filterFixed, nil, "Show is never fixed")
     TC.BrowserState.SelectClass("all")
     equal(TC.BrowserState.View().filtersChanged, true, "All classes differs from the start")
     TC.BrowserState.SelectClass(9)
     equal(TC.BrowserState.View().filtersChanged, false, "the own class chosen again is the start")
-    TC.BrowserState.SetFilter("All")
+    TC.BrowserState.SetFilter("Not collected")
     v = TC.BrowserState.View()
-    equal(v.filtersChanged, true, "Show All differs from the start")
+    equal(v.filtersChanged, true, "Show Not collected differs from the start")
     TC.BrowserState.SelectClass(1)
     TC.BrowserState.NextPage()
     TC.BrowserState.ResetFilters()
     v = TC.BrowserState.View()
-    equal(v.filter, "Not collected", "Show back on Not collected")
+    equal(v.filter, "All", "Show back on All")
     equal(v.classes.text, "Warlock", "the class back on the character's")
     equal(v.page, 1, "page 1 after the reset")
     equal(v.filtersChanged, false, "nothing differs after the reset")
-    TC.BrowserState.SelectMode("For sale")
+    sweep()
     c.advance(10)
     v = TC.BrowserState.View()
-    equal(v.filterFixed, true, "Show fixed in the sweep view")
-    equal(v.filter, "Not collected", "fixed on Not collected")
-    equal(v.filtersChanged, false, "the fixed Show is not a change")
-    TC.BrowserState.SelectMode("All")
-    TC.BrowserState.SetFilter("All")
-    TC.BrowserState.SelectMode("For sale")
-    equal(TC.BrowserState.View().filtersChanged, false, "Show All set in the catalogue is no mark in the sweep view")
-    TC.BrowserState.SelectClass(1)
-    equal(TC.BrowserState.View().filtersChanged, true, "another class is the mark in the sweep view")
-    equal(#c.ah.sends, 1, "only the sweep toggle's scan was read")
+    equal(v.filter, "Not collected", "the sweep's Show")
+    equal(v.filtersChanged, true, "the sweep's choices are a change")
+    TC.BrowserState.ResetFilters()
+    v = TC.BrowserState.View()
+    equal(tostring(v.forSaleOnly) .. "/" .. v.filter .. "/" .. tostring(v.filtersChanged), "false/All/false",
+        "Reset ends For sale only and the sort too")
+    for _, e in ipairs(v.sorts) do if e.selected then equal(e.name, "Default", "the sort back on Default") end end
+    equal(#c.ah.sends, 1, "only the sweep's scan was read")
 end)
 
-test("B state: Price this slot starts one scan from the catalogue; then every tile has a price or Not for sale", function()
+-- ledger (slice B): the scan control is "Scan slot" in every state (it was
+-- Price this slot, then Scan again), off while its scan runs (hidden
+-- before); its sub-line says Not scanned yet (the hint before); with the
+-- sweep's choices a slot not scanned offers it too (the sweep view
+-- scanned it at once)
+test("B state: the scan control starts one scan from the catalogue; then every tile has a price or Not for sale", function()
     local c = bootState()
     TC.BrowserState.Refresh()
     local tiles = TC.BrowserState.View().tiles
     c.ah.listings = { listing("Item " .. (tiles[3].appearance.id * 10 + 1), tiles[3].appearance.id * 10 + 1, 700) }
     local v = TC.BrowserState.View()
-    equal(v.statusButton, "Price this slot", "offered in the catalogue")
-    equal(v.status, "Click an appearance to check the auction house.", "the hint beside it")
+    equal(v.statusButton, "Scan slot", "offered in the catalogue")
+    equal(v.status, "Not scanned yet", "the sub-line beside it")
     equal(#c.ah.sends, 0, "being shown reads nothing")
     v.statusAction()
     equal(#c.ah.sends, 1, "one scan")
     equal(TC.BrowserState.View().status, "Scanning head", "the status while it runs")
-    equal(TC.BrowserState.View().statusButton, nil, "no offer while it runs")
+    equal(TC.BrowserState.View().statusEnabled, false, "off while it runs")
     c.advance(10)
     v = TC.BrowserState.View()
-    equal(v.mode, "All", "still the catalogue")
+    equal(v.forSaleOnly, false, "still the catalogue")
     for i, tile in ipairs(v.tiles) do
         check(tile.strip == "price" or tile.strip == "not for sale", "tile " .. i .. " priced, got " .. tile.strip)
     end
     equal(v.tiles[3].price, "7s", "the listed tile's price")
     equal(v.status, "Scanned just now", "the age")
-    equal(v.statusButton, "Scan again", "Scan again once scanned")
+    equal(v.statusButton, "Scan slot", "Scan slot once scanned")
     equal(#c.ah.sends, 1, "browses")
-    TC.BrowserState.SelectMode("For sale")
-    equal(TC.BrowserState.View().statusButton, "Scan again", "the sweep view of a scanned slot")
+    sweep()
+    equal(TC.BrowserState.View().statusButton, "Scan slot", "the sweep's choices on a scanned slot")
     TC.BrowserState.SelectSlot("legs")
-    equal(TC.BrowserState.View().statusButton, nil, "never offered in the sweep view")
+    v = TC.BrowserState.View()
+    equal(v.statusButton .. "/" .. v.status, "Scan slot/Not scanned yet", "offered on a slot not scanned")
+    equal(#c.ah.sends, 1, "browses: Scan when shown is off")
 end)
 
 test("B state: the flyout's head and body states keep their texts; a found row carries its Buy", function()
@@ -6315,27 +6513,14 @@ local function wheelArts(c)
     return findAll(c, function(w) return w.kind == "Texture" and w.parent == mark end)
 end
 
-test("B whole: the header row: two glyph toggles at x 60 and 94, the slot row, Search, the funnel; the count in the band", function()
+-- ledger (slice B): the two glyph toggles and their assertions (place,
+-- size, art, tooltip, ring) are gone with the toggles; the header keeps the
+-- slot row, now at x 28, Search and the funnel; the count in the band
+test("B whole: the header row: the slot row at the grid's left edge, Search, the funnel; no toggle; the count in the band", function()
     local c, tabs = visitTwice({ appearances = manySlots() })
     tabs[1].scripts.OnClick(tabs[1])
-    local all, sale = modeTab(c, "All"), modeTab(c, "For sale")
-    -- round plates of the slot buttons' 31, centred (both ways) where the 30 square toggles were
-    for _, t in ipairs({ { all, "59.5,-3.5", "catalogue", "All appearances", "lootroll-icon-transmog", 60 },
-        { sale, "93.5,-3.5", "sweep", "For sale, cheapest first", "Interface\\Icons\\INV_Misc_Coin_01", 94 } }) do
-        local b = t[1]
-        local p = b.points[1]
-        equal((p.x + b.width / 2) .. "," .. (p.y - b.height / 2), (t[6] + 15) .. ",-19", t[3] .. " centre: x 15 and y 19 from the old square's corner")
-        equal(b.template, nil, t[3] .. ": a plain button, no square template")
-        equal(b.width .. "x" .. b.height, "31x31", t[3] .. " size")
-        equal(point(b), t[2], t[3] .. " position")
-        equal(texturePath(b.Icon) or b.Icon.calls.SetAtlas[1], t[5], t[3] .. " art: the owner's choice")
-        equal(b.Icon.width .. "x" .. b.Icon.height, "25x25", t[3] .. " glyph size, masked round")
-        local title, line = hover(b)
-        equal(title, t[4], t[3] .. " tooltip names it")
-        check(line, t[3] .. " tooltip line")
-    end
-    check(all.ring and visible(all.ring) and not visible(sale.ring), "the catalogue ringed at the start")
-    equal(point(slotButtons(c)[1]), "136,-4", "the slot row at x 136, y 4")
+    equal(find(c, function(w) return w.kind == "Button" and w.mode end), nil, "no catalogue or sweep toggle")
+    equal(point(slotButtons(c)[1]), "28,-4", "the slot row at x 28, y 4")
     local count = countShown(c)
     equal(point(count), "28,-42", "the count at x 28, y 42")
     equal(point(funnelOf(c)), "757,-4", "the funnel at x 757, y 4")
@@ -6348,36 +6533,36 @@ test("B whole: the header row: two glyph toggles at x 60 and 94, the slot row, S
     noErrors(c, "header")
 end)
 
-test("B whole: the toggles select the views and send what All and For sale sent: nothing, or one scan", function()
+-- ledger (slice B): the toggles became the funnel's choices; what they
+-- sent is kept: the catalogue's choices nothing, the sweep's one scan (by
+-- the scan control on a slot not scanned), both again on a scanned slot
+-- nothing more; the ring and glyph assertions went with the toggles
+test("B whole: the catalogue's and the sweep's choices send what All and For sale sent: nothing, or one scan", function()
     local c, tabs = visitTwice()
     for id = 1010, 1030, 10 do c.ah.listings[#c.ah.listings + 1] = listing("Item " .. (id * 10 + 1), id * 10 + 1, id) end
     tabs[1].scripts.OnClick(tabs[1])
-    local all, sale = modeTab(c, "All"), modeTab(c, "For sale")
-    check(c.click(all), "the catalogue toggle clicked")
+    panelCatalogue(c)
     c.advance(10)
-    equal(#c.ah.sends, 0, "the catalogue toggle on the catalogue sends nothing")
-    check(c.click(sale), "the sweep toggle clicked")
+    equal(#c.ah.sends, 0, "the catalogue's choices send nothing")
+    panelSweep(c)
     c.advance(10)
-    equal(#c.ah.sends, 1, "the sweep toggle on a slot not scanned: one scan")
-    check(visible(sale.ring) and not visible(all.ring), "the sweep toggle ringed, the catalogue not")
-    check(sale.Icon.calls.SetAlpha[1] == 1 and all.Icon.calls.SetAlpha[1] < 1, "the catalogue glyph dimmed")
-    equal(sale.Icon.calls.SetDesaturated[1], false, "the selected glyph in colour")
-    equal(all.Icon.calls.SetDesaturated[1], true, "the other glyph desaturated")
-    equal(sale.ring.calls.SetAtlas[1], "transmog-nav-slot-selected", "the slot row's ring art")
-    check(not sale.highlightLocked, "the ring replaces the lit highlight")
-    check(textShown(c, "3 of 370 appearances"), "the sweep view's count")
-    c.click(all)
-    c.click(sale)
-    c.click(all)
+    equal(#c.ah.sends, 1, "the sweep's choices on a slot not scanned: one scan")
+    check(textShown(c, "3 appearances, 3 for sale"), "the sweep's count")
+    panelCatalogue(c)
+    panelSweep(c)
+    panelCatalogue(c)
     c.advance(10)
-    equal(#c.ah.sends, 1, "both toggles on a scanned slot: nothing more")
-    check(visible(all.ring) and not visible(sale.ring), "the catalogue ringed again, exactly one ring")
-    check(all.Icon.calls.SetAlpha[1] == 1 and sale.Icon.calls.SetAlpha[1] < 1, "the sweep glyph dimmed")
+    equal(#c.ah.sends, 1, "both on a scanned slot: nothing more")
+    check(textShown(c, "365 appearances, 3 for sale"), "the catalogue's count after a scan")
     noErrors(c, "toggles")
 end)
 
+-- ledger (slice B): saved Show is the new default (All), so the start has
+-- no mark; Show Not collected sets it and Reset brings back All
 test("B whole: the funnel's mark shows while a choice differs; the mark and Reset filters reset; nothing is sent", function()
-    local c, tabs = visitTwice(classFixture(0))
+    local fixture = classFixture(0)
+    fixture.saved = { scanWhenShown = false }
+    local c, tabs = visitTwice(fixture)
     tabs[1].scripts.OnClick(tabs[1])
     local mark = markOf(c)
     local funnel = funnelOf(c)
@@ -6402,16 +6587,16 @@ test("B whole: the funnel's mark shows while a choice differs; the mark and Rese
     check(not funnel.highlightLocked, "the funnel's highlight released after the reset")
     check(textShown(c, "3 appearances"), "count back on Warlock")
     local _, pick = openMenu(c, funnelOf(c))
-    pick("All")
-    check(visible(mark), "the mark after Show All")
-    check(funnel.highlightLocked, "the highlight held after Show All")
+    pick("Not collected")
+    check(visible(mark), "the mark after Show Not collected")
+    check(funnel.highlightLocked, "the highlight held after Show Not collected")
     local texts
     texts, pick = openMenu(c, funnelOf(c))
     equal(texts[#texts], "Reset filters", "the menu's last entry")
     check(pick("Reset filters"), "Reset filters chosen")
     check(not visible(mark), "no mark after Reset filters")
     check(not funnel.highlightLocked, "the highlight released after Reset filters")
-    equal(markedShow(c), "Not collected", "Show back on Not collected")
+    equal(markedShow(c), "All", "Show back on All")
     c.advance(5)
     sentNothing(c, "funnel")
     noErrors(c, "funnel")
@@ -6662,34 +6847,41 @@ test("B whole: the wheel mark before the page text with its tooltip, the arrows'
     noErrors(c, "wheel")
 end)
 
-test("B whole: Price this slot at x 28 starts one scan from the catalogue; every tile then has a price or Not for sale", function()
+-- ledger (slice B): the scan control is "Scan slot" (was Price this slot,
+-- then Scan again) and stays offered once scanned; its sub-line is "Not
+-- scanned yet" (the hint before); "still the catalogue" is For sale only off
+test("B whole: Scan slot at x 28 starts one scan from the catalogue; every tile then has a price or Not for sale", function()
     local c, tabs = visitTwice()
     for id = 1010, 1030, 10 do c.ah.listings[#c.ah.listings + 1] = listing("Item " .. (id * 10 + 1), id * 10 + 1, id) end
     tabs[1].scripts.OnClick(tabs[1])
     TC.BrowserState.SetFilter("All")
     c.advance(5)
     equal(#c.ah.sends, 0, "shown, it sends nothing")
-    local offer = find(c, function(w) return w.kind == "Button" and w.text == "Price this slot" and visible(w) end)
-    check(offer, "Price this slot shown")
+    local offer = scanControl(c)
+    check(offer, "Scan slot shown")
     equal(offer.width .. "x" .. offer.height, "110x20", "its size")
     equal(point(offer), "28,-443", "at the grid's left edge on the status line")
-    local hint = find(c, function(w) return w.text == "Click an appearance to check the auction house." end)
-    equal(point(hint), "144,-441", "the hint after it")
+    local hint = find(c, function(w) return w.text == "Not scanned yet" end)
+    equal(point(hint), "144,-441", "the sub-line after it")
+    equal((hover(offer)), "Scans this slot's items on the auction house now.", "its tooltip, the same in every state")
     check(c.click(offer), "clicked")
     c.advance(30)
     equal(#c.ah.sends, 1, "one scan")
-    check(visible(modeTab(c, "All").ring), "still the catalogue")
+    equal(TC.BrowserState.View().forSaleOnly, false, "still the catalogue")
     for i, f in ipairs(tileFrames(c)) do
         if visible(f) then
             check((f.price.text or "") ~= "" or f.notForSale.text == "Not for sale", "tile " .. i .. " priced")
         end
     end
-    check(not textShown(c, "Price this slot"), "not offered once scanned")
-    check(textShown(c, "Scanned just now") and textShown(c, "Scan again"), "the age and Scan again")
+    check(textShown(c, "Scanned just now") and scanControl(c), "the age and Scan slot")
     equal(point(find(c, function(w) return w.text == "Scanned just now" end)), "144,-441", "the age after the button")
-    noErrors(c, "price this slot")
+    noErrors(c, "scan slot")
 end)
 
+-- ledger (slice B): one button, Scan slot, in every state, also while a
+-- scan runs (off then; it was hidden and the text moved to the grid's
+-- edge); the sweep view is the funnel's sweep choices; the scan on a slot
+-- change is Scan when shown's
 test("C1: the status row: its button on the grid's left edge, in one place and one width in every state; the text after it", function()
     local c, tabs = visitTwice()
     for id = 1010, 1030, 10 do c.ah.listings[#c.ah.listings + 1] = listing("Item " .. (id * 10 + 1), id * 10 + 1, id) end
@@ -6700,29 +6892,29 @@ test("C1: the status row: its button on the grid's left edge, in one place and o
         local w = find(c, function(w) return w.kind == "FontString" and w.text == text end)
         return w and w.points[1].x
     end
-    local function buttonNamed(text)
-        return find(c, function(w) return w.kind == "Button" and w.text == text and visible(w) end)
-    end
-    local offer = buttonNamed("Price this slot")
+    local offer = scanControl(c)
     local where, width = point(offer), offer.width
     equal(offer.points[1].x, gridX, "before a scan: the button at the grid's left edge")
     equal(point(countShown(c)), gridX .. ",-42", "the count text at the same x")
-    equal(textAt("Click an appearance to check the auction house."), gridX + width + 6, "before a scan: the text after the button")
+    equal(textAt("Not scanned yet"), gridX + width + 6, "before a scan: the text after the button")
     c.click(offer)
     c.advance(30)
-    local again = buttonNamed("Scan again")
+    local again = scanControl(c)
     equal(point(again), where, "after a scan: the same place")
     equal(again.width, width, "after a scan: the same width")
     check(textAt("Scanned just now") > gridX + width, "after a scan: the text after the button")
-    c.click(modeTab(c, "For sale"))
-    again = buttonNamed("Scan again")
+    panelSweep(c)
+    again = scanControl(c)
     equal(point(again), where, "in the sweep view after a scan: the same place")
     equal(again.width, width, "in the sweep view after a scan: the same width")
     check(textAt("Scanned just now") > gridX + width, "in the sweep view: the text after the button")
-    -- a state without a button: the text starts at the grid's left edge
+    -- while a scan runs: the same button, off, the text after it
+    funnelPick(c, "Scan when shown")
     TC.BrowserState.SelectSlot("legs")
-    check(not buttonNamed("Scan again") and not buttonNamed("Price this slot"), "no button while the scan runs")
-    equal(textAt("Scanning legs"), gridX, "without a button the text starts at the grid's left edge")
+    again = scanControl(c)
+    equal(point(again), where, "while the scan runs: the same place")
+    equal(again.enabled, false, "while the scan runs: off")
+    equal(textAt("Scanning legs"), gridX + width + 6, "while the scan runs: the text after the button")
     noErrors(c, "status row")
 end)
 
@@ -6744,14 +6936,15 @@ test("testpass F3, F4: room between the band and the grid; the bottom row clear 
     check(insetTop >= bandBottom and gridTop - insetTop >= 12, "the inset's edge between the band and the grid, 12 above the tiles")
     equal(count.width, nil, "the count has no width of its own: it is as wide as its text")
     -- the bottom row: the scan control and the arrows on one line, both clear of the bottom
-    local offer = find(c, function(w) return w.kind == "Button" and w.text == "Price this slot" end)
+    -- ledger (slice B): the scan control's one label and its sub-line
+    local offer = find(c, function(w) return w.kind == "Button" and w.text == "Scan slot" end)
     local paging = find(c, function(w) return w.kind == "Frame" and w.width == 200 and w.height == 24 end)
     local offerTop, pagingTop = -offer.points[1].y, -paging.points[1].y
     local arrow = arrowsOf(c)[2]
     equal(offerTop + offer.height / 2, pagingTop + paging.height / 2, "the scan control and the arrows on one centre line")
     check(PANEL_HEIGHT - (offerTop + offer.height) >= 6, "the scan control at least 6 above the panel's bottom")
     check(PANEL_HEIGHT - (pagingTop + paging.height / 2 + arrow.height / 2) >= 5, "the arrows at least 5 above the panel's bottom")
-    local hint = find(c, function(w) return w.text == "Click an appearance to check the auction house." end)
+    local hint = find(c, function(w) return w.text == "Not scanned yet" end)
     check(-hint.points[1].y >= gridBottom and -hint.points[1].y + hint.height <= PANEL_HEIGHT - 4, "the hint inside the bottom row")
     check(offerTop >= gridBottom + 3, "the bottom row under the grid")
     noErrors(c, "layout")
@@ -6797,7 +6990,8 @@ test("C3: the paging group ends at the grid's right edge, in the catalogue and i
             what .. ": its right edge on the group's")
     end
     ends("catalogue")
-    c.click(modeTab(c, "For sale"))
+    -- ledger (slice B): the sweep view is the funnel's sweep choices
+    panelSweep(c)
     c.advance(10)
     ends("sweep view")
     noErrors(c, "paging edge")
@@ -6861,12 +7055,13 @@ test("B whole: the tab, both toggles on a scanned slot, the funnel, paging and f
     local frames = tileFrames(c)
     c.click(frames[1].button)
     c.advance(10)
-    c.click(modeTab(c, "For sale"))
+    -- ledger (slice B): the toggles are the funnel's sweep and catalogue choices
+    panelSweep(c)
     c.advance(10)
     local sends, searches, more = #c.ah.sends, #c.ah.searches, #c.ah.more
-    c.click(modeTab(c, "All"))
-    c.click(modeTab(c, "For sale"))
-    c.click(modeTab(c, "All"))
+    panelCatalogue(c)
+    panelSweep(c)
+    panelCatalogue(c)
     local _, choose = openMenu(c, funnelOf(c))
     choose("All")
     local names
@@ -6894,18 +7089,14 @@ test("B whole: without the icon and menu templates and the atlases every control
     local c, tabs = visitTwice({ appearances = manySlots(), noMenuTemplates = true, noAtlases = true,
         noTemplates = { UIPanelCloseButton = true, SpinnerTemplate = true } })
     tabs[1].scripts.OnClick(tabs[1])
-    local all, sale = modeTab(c, "All"), modeTab(c, "For sale")
-    check(all and sale and visible(all) and visible(sale), "both toggles")
-    equal(all.template, nil, "a bare catalogue toggle")
-    check(not all.ring and not sale.ring, "no atlas: no ring")
-    check(all.highlightLocked and not sale.highlightLocked, "no ring art: the catalogue toggle lit by its highlight")
-    equal(texturePath(all.Icon), "Interface\\AddOns\\TransmogChecker\\Media\\catalogue", "its glyph")
-    equal((hover(sale)), "For sale, cheapest first", "its tooltip")
+    -- ledger (slice B): the toggles' fallbacks went with the toggles; the
+    -- sweep toggle's scan is the scan control's
     local funnel = funnelOf(c)
     check(funnel and visible(funnel), "the funnel")
     equal(funnel.text, "Filter", "without the art it reads Filter")
     local _, choose = openMenu(c, funnel)
-    check(choose("All"), "Show All through the list")
+    -- ledger (slice B): All is the default Show now, so Collected sets the mark
+    check(choose("Collected"), "Show Collected through the list")
     local mark = markOf(c)
     check(visible(mark), "the mark")
     c.click(mark)
@@ -6919,10 +7110,9 @@ test("B whole: without the icon and menu templates and the atlases every control
     check(not visible(fly), "its bare close mark closes it")
     c.advance(10)
     local sends = #c.ah.sends
-    c.click(sale)
+    c.click(scanControl(c))
     c.advance(10)
-    equal(#c.ah.sends, sends + 1, "the sweep toggle scans")
-    check(sale.highlightLocked and not all.highlightLocked, "no ring art: the sweep toggle lit, the catalogue not")
+    equal(#c.ah.sends, sends + 1, "the scan control scans")
     noErrors(c, "fallbacks")
 end)
 
@@ -7109,7 +7299,8 @@ test("TC-36 art: with the templates and atlases each element is built from them"
     end
     local f = tileFrames(c)[1]
     check(f.edge and f.openGlow and f.hoverGlow, "the tile's atlases")
-    local scan = find(c, function(w) return w.kind == "Button" and w.text == "Price this slot" end)
+    -- ledger (slice B): the scan control's one label
+    local scan = find(c, function(w) return w.kind == "Button" and w.text == "Scan slot" end)
     equal(scan.glyph and scan.glyph.calls.SetAtlas[1], "UI-RefreshButton", "the scan glyph")
     equal(scan.width .. "x" .. scan.height .. " " .. point(scan), "110x20 28,-443", "the scan button keeps its size and place")
     equal(scan.glyph.width, 14, "the glyph 14 square")
@@ -7149,14 +7340,12 @@ test("TC-36 art: each template and atlas refused in turn: the fallback, nothing 
             local row = rowBuy(c):GetParent()
             row.scripts.OnEnter(row)
             check(visible(row.highlight) and row.highlight.color, "the row highlight in colour") end },
+        -- ledger (slice B): the scan control's one label; the toggles' Media
+        -- fallback case is removed with the toggles
         { noAtlases = { ["UI-RefreshButton"] = true }, see = function(c)
-            local scan = find(c, function(w) return w.kind == "Button" and w.text == "Price this slot" end)
+            local scan = find(c, function(w) return w.kind == "Button" and w.text == "Scan slot" end)
             check(scan.glyph == nil, "text only")
             equal(scan.width .. " " .. point(scan), "110 28,-443", "same size and place") end },
-        { noAtlases = { ["lootroll-icon-transmog"] = true }, fileIDs = {}, see = function(c)
-            equal(texturePath(modeTab(c, "All").Icon), "Interface\\AddOns\\TransmogChecker\\Media\\catalogue", "catalogue: Media")
-            equal(texturePath(modeTab(c, "For sale").Icon), "Interface\\AddOns\\TransmogChecker\\Media\\sweep",
-                "sweep: Media when the client has no file for the coin") end },
         { noAtlases = true, noTemplates = { CollectionsBackgroundTemplate = true }, noSetLight = true, see = function() end },
     }
     for i, case in ipairs(cases) do
@@ -7211,54 +7400,18 @@ test("TC-36 whole: nothing before the tab; opening it, hovering every tile of a 
     noErrors(c, "whole")
 end)
 
-test("chosen art: the toggles' glyphs, the mark at the funnel's top right, and the Media fallbacks", function()
-    local c, tabs = visitTwice({ appearances = manySlots() })
-    tabs[1].scripts.OnClick(tabs[1])
-    local all, sale = modeTab(c, "All"), modeTab(c, "For sale")
-    equal(all.Icon.calls.SetAtlas[1], "lootroll-icon-transmog", "catalogue atlas")
-    equal(texturePath(sale.Icon), "Interface\\Icons\\INV_Misc_Coin_01", "sweep icon")
-    equal(table.concat(sale.Icon.calls.SetTexCoord, ","), "0.08,0.92,0.08,0.92", "the icon's border cropped")
-    check(all.Icon.calls.SetVertexColor == nil, "the game art is not tinted")
-    check(visible(all.ring) and not visible(sale.ring), "the ring on the selected toggle")
-    c.click(sale)
-    c.advance(10)
-    check(visible(sale.ring) and not visible(all.ring), "the ring follows")
-    equal(all.Icon.calls.SetAlpha[1], 0.45, "the other glyph dimmed")
-    local mark = markOf(c)
-    equal(mark.points[1].point .. " " .. mark.points[1].relativePoint .. " " .. point(mark), "CENTER TOPRIGHT -9,-7",
-        "the mark in the top right corner")
-    local d, t = visitTwice({ appearances = manySlots(), noAtlases = true, fileIDs = { ["Interface\\Icons\\INV_Misc_Coin_01"] = 1 } })
-    t[1].scripts.OnClick(t[1])
-    equal(texturePath(modeTab(d, "All").Icon), "Interface\\AddOns\\TransmogChecker\\Media\\catalogue", "no atlas: Media")
-    equal(texturePath(modeTab(d, "For sale").Icon), "Interface\\Icons\\INV_Misc_Coin_01", "the coin file the client has")
-    noErrors(c, "chosen art")
-    noErrors(d, "chosen art fallbacks")
-end)
-
-test("round toggles: plain round plates with the slot row's highlight, a round mask on the glyph, one ring", function()
+-- ledger (slice B): the toggles' glyph, ring, dimming and Media fallback
+-- assertions are removed with the toggles; the mark's place stays. "round
+-- toggles: plain round plates ..." is removed: the toggles no longer exist;
+-- the slot row keeps its own round art ("whole: the slot row's 14 buttons").
+test("chosen art: the mark at the funnel's top right", function()
     local c, tabs = visitTwice({ appearances = manySlots() })
     tabs[1].scripts.OnClick(tabs[1])
     check(not find(c, function(w) return w.template == "SquareIconButtonTemplate" end), "no square template frame")
-    local all, sale = modeTab(c, "All"), modeTab(c, "For sale")
-    for _, b in ipairs({ all, sale }) do
-        local highlight = find(c, function(w) return w.parent == b and w.layer == "HIGHLIGHT" end)
-        equal(highlight and highlight.calls.SetAtlas[1], "bags-roundhighlight", "the slot row's round highlight")
-        check(b.base and visible(b.base) and b.base.masks, "the round base, masked")
-        equal(b.Icon.masks and b.Icon.masks[1].calls.SetTexture[1], "Interface\\CharacterFrame\\TempPortraitAlphaMask",
-            "the glyph masked to a circle")
-    end
-    local function rings() return (visible(all.ring) and 1 or 0) + (visible(sale.ring) and 1 or 0) end
-    equal(rings(), 1, "one ring")
-    c.click(sale)
-    equal(rings(), 1, "one ring after switching")
-    local d, t = visitTwice({ appearances = manySlots(), noMaskAPI = true })
-    t[1].scripts.OnClick(t[1])
-    local coin = modeTab(d, "For sale")
-    equal(coin.Icon.width .. " " .. table.concat(coin.Icon.calls.SetTexCoord, ","), "18 0.08,0.92,0.08,0.92",
-        "without the mask API: cropped and shrunk")
-    check(not visible(coin.base), "no square base without the mask")
-    noErrors(c, "round toggles")
-    noErrors(d, "round toggles without masks")
+    local mark = markOf(c)
+    equal(mark.points[1].point .. " " .. mark.points[1].relativePoint .. " " .. point(mark), "CENTER TOPRIGHT -9,-7",
+        "the mark in the top right corner")
+    noErrors(c, "chosen art")
 end)
 
 test("chosen art: the funnel's settings art with its hover and pressed forms; then Map-Filter-Button; then the text", function()
@@ -7382,7 +7535,7 @@ end)
 test("F3 tooltip: a partial scan result has a price and no age", function()
     local c = scanState({ [1010] = 500, [1020] = 300, [1030] = 700 })
     c.ah.pageSize = 2
-    TC.BrowserState.SelectMode("For sale")
+    sweep()
     c.advance(0.26)
     local first = TC.BrowserState.View().tiles[1]
     local text = stateTip(first.appearance)
@@ -7429,15 +7582,9 @@ test("F4 tooltip: it hides only while it is ours", function()
     noErrors(d, "without GetOwner")
 end)
 
-test("F5 round toggles keep both centres of the 30 square toggles", function()
-    local c, tabs = visitTwice({ appearances = manySlots() })
-    tabs[1].scripts.OnClick(tabs[1])
-    for mode, x in pairs({ All = 60, ["For sale"] = 94 }) do
-        local b = modeTab(c, mode)
-        local p = b.points[1]
-        equal((p.x + b.width / 2) .. "," .. (p.y - b.height / 2), (x + 15) .. ",-19", mode .. " centre")
-    end
-end)
+-- ledger (slice B): "F5 round toggles keep both centres of the 30 square
+-- toggles" is removed: the toggles no longer exist (no toggle: "B whole: the
+-- header row").
 
 test("F6 funnel: the open form while its menu is open, the normal form after; pressed forms follow the mouse", function()
     local ART = "common-dropdown-a-button-settings-"
@@ -7489,7 +7636,9 @@ test("F8 tooltip: it hides when the tab is left, the auction window closes, the 
         { "the tab is left", function(c, tabs) tabs[1].frameRef:Hide() end },
         { "the auction window closes", function(c) c.closeAuction() end },
         { "the slot changes", function(c) local b = slotButtons(c)[12] b.scripts.OnClick(b) end },
-        { "the toggle changes", function(c) c.click(modeTab(c, "For sale")) end },
+        -- ledger (slice B): the toggle is gone; a filter that takes the
+        -- tile off the grid does the same
+        { "a filter takes the tile away", function(c) funnelPick(c, "For sale only") end },
     }
     for _, way in ipairs(ways) do
         local c, tabs = visitTwice({ appearances = manySlots() })
@@ -7629,7 +7778,7 @@ test("TC-38: Paladin on Ranged shows the slot's empty state for the class and no
         state().SetFilter("All")
         local ok, err = pcall(function()
             state().SelectClass(2)
-            state().SelectMode(mode)
+            if mode == "For sale" then sweep() end
             state().SelectSlot("ranged")
             c.advance(10)
         end)
@@ -7688,7 +7837,7 @@ test("TC-38: after a scan a class change narrows without a new scan; a sword for
     c.ah.listings = { listing("Item 14011", 14011, 300), listing("Item 16021", 16021, 500) }
     state().SelectClass("all")
     state().SelectSlot("mainhand")
-    state().SelectMode("For sale")
+    sweep()
     c.advance(10)
     equal(#c.ah.sends, 1, "one scan")
     equal(tileIDs(state().View()), "1401,1602", "a sword and a dagger for sale under All classes")
@@ -8356,18 +8505,27 @@ test("TC-39 bags: an item in the bags whose appearance is not collected makes it
     sentNothing(c, "bags")
 end)
 
-test("TC-39 sweep: a pending appearance is absent from For sale, the count follows, and it returns when its bag item goes", function()
+-- ledger (slice B): the sweep view left pending looks out; with its
+-- filters in the one view a pending look is not collected and stays, with
+-- its bag mark (Bought, not collected narrows to it), and the mark goes
+-- when its bag item goes; the count counts it
+test("TC-39 sweep: a pending appearance stays under the sweep's filters with its mark, which goes with its bag item", function()
     local c = scanState(SAMPLE, { bags = { [0] = { 10201, 10011 } } })
     TC.BrowserState.SetBags(TC.Appearances.ReadBags())
-    TC.BrowserState.SelectMode("For sale")
+    sweep()
     c.advance(10)
     local v = TC.BrowserState.View()
-    equal(tileIDs(v), "1030,1010", "tiles without the pending 1020")
-    equal(v.count, "2 of 370 appearances", "count text")
+    equal(tileIDs(v), "1020,1030,1010", "tiles with the pending 1020")
+    equal(v.tiles[1].pending, true, "1020 carries the mark")
+    equal(v.count, "3 appearances, 3 for sale", "count text")
+    TC.BrowserState.SetFilter("Bought, not collected")
+    equal(tileIDs(TC.BrowserState.View()), "1020", "Bought, not collected with For sale only")
+    TC.BrowserState.SetFilter("Not collected")
     bagsChanged(c, { 10011 })
     v = TC.BrowserState.View()
-    equal(tileIDs(v), "1020,1030,1010", "1020 back once its item left the bags, not collected")
-    equal(v.count, "3 of 370 appearances", "count text after")
+    equal(tileIDs(v), "1020,1030,1010", "1020 once its item left the bags, not collected")
+    equal(v.tiles[1].pending, nil, "no mark")
+    equal(v.count, "3 appearances, 3 for sale", "count text after")
     noErrors(c, "sweep")
 end)
 
@@ -8484,24 +8642,28 @@ test("TC-39 Show: Bought, not collected is offered only while something is pendi
     S.SetFilter(PENDING_SHOW)
     local v = S.View()
     equal(tileIDs(v), "", "no head appearance pending")
-    equal(v.count, "0 of 370 appearances", "count")
+    equal(v.count, "0 appearances", "count")
     check(v.empty and v.empty.text == "No head appearance for Warlock is bought and not collected.", "empty state, got "
         .. tostring(v.empty and v.empty.text))
     bagsChanged(c, { 20051, 10201, 10101, 10011 })
     v = S.View()
     equal(tileIDs(v), "1010,1020", "the pending head appearances, in the list's order; collected 1001 not")
-    equal(v.count, "2 of 370 appearances", "count")
+    equal(v.count, "2 appearances", "count")
     equal(v.filter, PENDING_SHOW, "the filter")
     check(v.filters[4].selected, "the choice marked")
     equal(v.filtersChanged, true, "a choice differs from the start")
     S.SelectSlot("legs")
     equal(tileIDs(S.View()), "2005", "legs: the pending legs appearance")
-    S.SelectMode("For sale")
-    equal(showNames(S.View()), "All,Collected,Not collected", "not offered in For sale")
-    S.SelectMode("All")
+    -- ledger (slice B): offered with For sale only too and combines with it
+    -- (it was not offered in the sweep view); Reset returns to the default
+    -- Show, All
+    S.SetForSaleOnly(true)
+    equal(showNames(S.View()), "All,Collected,Not collected," .. PENDING_SHOW, "offered with For sale only")
+    equal(S.View().filter, PENDING_SHOW, "and kept with it")
     S.ResetFilters()
     v = S.View()
-    equal(v.filter, "Not collected", "Reset filters returns to the start")
+    equal(v.filter, "All", "Reset filters returns to the default")
+    equal(v.forSaleOnly, false, "and For sale only off")
     equal(v.filtersChanged, false, "at the start")
     noErrors(c, "show")
 end)
@@ -8562,7 +8724,8 @@ test("TC-39 whole: a pending tile carries the bag mark at its top right; the fly
     check(not textShown(c, "Collected"), "not Collected")
     local _, choose = openMenu(c, funnelOf(c))
     check(choose(PENDING_SHOW), "the Bought choice in the funnel's menu")
-    check(textShown(c, "1 of 2 appearances"), "the count after choosing it")
+    -- ledger (slice B): the count says how many are for sale
+    check(textShown(c, "1 appearance, 1 for sale"), "the count after choosing it")
     -- the bag event: the item reached the bags
     c.bags[0] = { 501 }
     c.fire("BAG_UPDATE_DELAYED")
@@ -8647,28 +8810,39 @@ test("TC-39 F1 flyout head: without GetStringHeight the head has room for four l
     noErrors(c, "no GetStringHeight")
 end)
 
-test("TC-39 F2 bought, seen in the bags, then gone: no longer pending and back in the sweep view", function()
+-- ledger (slice B): pending is read from the tile's mark and from Bought,
+-- not collected with For sale only, as the sweep's filters keep pending
+-- looks now (the sweep view left them out)
+test("TC-39 F2 bought, seen in the bags, then gone: no longer pending, its mark gone", function()
     local c = scanState(SAMPLE, { bags = { [0] = {} } })
     local S = TC.BrowserState
     S.SetBags(TC.Appearances.ReadBags())
-    S.SelectMode("For sale")
+    sweep()
     c.advance(10)
     local a = { id = 1020 }
+    local function pendingIDs()
+        S.SetFilter("Bought, not collected")
+        local ids = tileIDs(S.View())
+        S.SetFilter("Not collected")
+        return ids
+    end
     S.BuyFinished("completed", { appearance = a })
-    equal(tileIDs(S.View()), "1030,1010", "pending from the purchase: out of the sweep view")
+    equal(pendingIDs(), "1020", "pending from the purchase")
+    equal(tileOf(1020).pending, true, "its mark")
     check(stateTip(a):find(BOUGHT, 1, true), "the mailbox sentence")
     bagsChanged(c, { 10201 })
-    equal(tileIDs(S.View()), "1030,1010", "in the bags: still out")
+    equal(pendingIDs(), "1020", "in the bags: still pending")
     check(stateTip(a):find(IN_BAGS, 1, true), "the bag sentence")
     bagsChanged(c, { 10011 })
-    equal(tileIDs(S.View()), "1020,1030,1010", "gone from the bags, not collected: back in the sweep view")
+    equal(pendingIDs(), "", "gone from the bags, not collected: not pending")
+    equal(tileOf(1020).pending, nil, "no mark")
     local tip = stateTip(a)
     check(not tip:find(BOUGHT, 1, true) and not tip:find(IN_BAGS, 1, true), "no sentence, got\n" .. tip)
     bagsChanged(c, {})
-    equal(tileIDs(S.View()), "1020,1030,1010", "later reads change nothing")
+    equal(tileOf(1020).pending, nil, "later reads change nothing")
     -- bought again: pending again
     S.BuyFinished("completed", { appearance = a })
-    equal(tileIDs(S.View()), "1030,1010", "a second purchase counts")
+    equal(tileOf(1020).pending, true, "a second purchase counts")
     noErrors(c, "seen then gone")
 end)
 
@@ -8702,21 +8876,25 @@ test("TC-39 F3 a collected check that raises leaves the pending state as it was,
     equal(#c.errors, 1, "no further report")
 end)
 
-test("TC-39 F4 sweep view: when every look for sale is pending the empty text says so", function()
+-- ledger (slice B): the sweep view's "Nothing left to buy" empty state is
+-- removed with the sweep view (spec 1): its looks stay in the list, each
+-- with its bag mark, so nothing is empty; Bought, not collected with For
+-- sale only lists them all
+test("TC-39 F4 every look for sale pending: they stay under the sweep's filters, each marked", function()
     local c = scanState(SAMPLE, { bags = { [0] = { 10101, 10201, 10301 } } })
     local S = TC.BrowserState
     S.SetBags(TC.Appearances.ReadBags())
-    S.SelectMode("For sale")
+    sweep()
     c.advance(10)
     local v = S.View()
-    equal(tileIDs(v), "", "no tiles")
-    check(v.empty, "an empty state")
-    equal(v.empty.title, "Nothing left to buy", "title")
-    equal(v.empty.text, "Every head appearance for sale here is one you bought and have not collected yet.", "text")
-    equal(v.empty.button, "Show all appearances", "the button back to the catalogue")
+    equal(tileIDs(v), "1020,1030,1010", "the pending looks for sale")
+    for _, tile in ipairs(v.tiles) do equal(tile.pending, true, tile.appearance.id .. " marked") end
+    equal(v.empty, nil, "no empty state")
+    S.SetFilter("Bought, not collected")
+    equal(tileIDs(S.View()), "1020,1030,1010", "Bought, not collected with For sale only")
     bagsChanged(c, {})
     v = S.View()
-    check(not v.empty, "no empty state once they are not pending")
+    equal(v.empty and v.empty.title, "No matches", "none pending: the Show empty state")
     noErrors(c, "all pending")
 end)
 
@@ -9169,6 +9347,666 @@ test("TC-15 F5 /tc blizz hides Blizzard's line only while on and only when the l
     for _, line in ipairs(GameTooltip.lines) do check(not line.hidden, "no line hidden") end
     TRANSMOGRIFY_TOOLTIP_APPEARANCE_UNKNOWN = nil
     tipNoErrors(c, "blizz")
+end)
+
+---------------------------------------------------------------- Slice B: one view, filters, sort, Scan when shown, saved choices
+
+-- Six Head appearances, 1001 collected, in the game's order 1001 to 1006,
+-- each with three items whose sources are of these types: 1001 boss drops,
+-- 1002 quests, 1003 professions, 1004 a boss drop, a quest and a world
+-- drop, 1005 a type the client does not name (9), 1006 vendors. prices:
+-- one listing per appearance id of its first item, put up for the scan and
+-- the checks. saved: the saved browser table (default: none but Scan when
+-- shown off, so nothing is read unless the test says).
+local SB_TYPES = { [1001] = { 1, 1, 1 }, [1002] = { 2, 2, 2 }, [1003] = { 6, 6, 6 }, [1004] = { 1, 2, 4 },
+    [1005] = { 9, 9, 9 }, [1006] = { 3, 3, 3 } }
+local SB_PRICES = { [1001] = 50, [1002] = 300, [1004] = 100, [1005] = 300 }
+local function sbState(prices, opts)
+    opts = opts or {}
+    local list = Fake.appearances(6, 1)
+    for _, a in ipairs(list) do a.sourceTypes = SB_TYPES[a.id] end
+    opts.appearances = opts.appearances or list
+    if opts.saved == nil then opts.saved = { scanWhenShown = false } end
+    local c = bootState(opts)
+    TC.BrowserState.Refresh()
+    for id, price in pairs(prices or {}) do
+        c.ah.listings[#c.ah.listings + 1] = listing("Item " .. (id * 10 + 1), id * 10 + 1, price)
+    end
+    table.sort(c.ah.listings, function(a, b) return a.minPrice < b.minPrice end)
+    return c
+end
+local function scanned(c)
+    TC.BrowserState.ScanAgain()
+    c.advance(10)
+end
+-- Unticks every Source entry but those named (keys: source types or "other").
+local function onlySources(keep)
+    local S = TC.BrowserState
+    for _, e in ipairs(S.View().sources) do S.SetSource(e.value, keep[e.value] == true) end
+end
+
+test("slice B order: the one view lists the slot in the game's order, Default sort, Show All, For sale only off", function()
+    local c = sbState(nil, { saved = {} })
+    local v = TC.BrowserState.View()
+    equal(tileIDs(v), "1001,1002,1003,1004,1005,1006", "the game's order")
+    equal(v.filter .. "/" .. tostring(v.forSaleOnly), "All/false", "Show All, For sale only off")
+    equal(v.mode, nil, "no mode")
+    equal(v.count, "6 appearances", "the count with no price known")
+    noErrors(c, "order")
+end)
+
+test("slice B For sale only from a scan: the appearances with a known price, in the sort's order; the count", function()
+    local c = sbState(SB_PRICES)
+    scanned(c)
+    TC.BrowserState.SetForSaleOnly(true)
+    local v = TC.BrowserState.View()
+    equal(tileIDs(v), "1001,1002,1004,1005", "priced, in the game's order")
+    equal(v.count, "4 appearances, 4 for sale", "count")
+    TC.BrowserState.SetForSaleOnly(false)
+    equal(TC.BrowserState.View().count, "6 appearances, 4 for sale", "count with For sale only off")
+    equal(#c.ah.sends, 1, "the scan only")
+end)
+
+test("slice B For sale only from a single tile check of this visit; a not-for-sale check does not pass", function()
+    local c = sbState({ [1003] = 700 })
+    TC.BrowserState.ClickTile(tileOf(1003).appearance)
+    TC.BrowserState.ClickTile(tileOf(1006).appearance)
+    c.advance(20)
+    equal(TC.BrowserState.View().count, "6 appearances, 1 for sale", "count after the checks")
+    TC.BrowserState.SetForSaleOnly(true)
+    local v = TC.BrowserState.View()
+    equal(tileIDs(v), "1003", "the checked appearance for sale only")
+    equal(v.tiles[1].price, "7s", "its price")
+    equal(v.empty, nil, "no empty state")
+end)
+
+test("slice B For sale only with no scan says to scan the slot; the button scans; tiles arrive as prices do", function()
+    local c = sbState(SB_PRICES)
+    c.ah.pageSize = 1
+    TC.BrowserState.SetForSaleOnly(true)
+    local v = TC.BrowserState.View()
+    equal(#v.tiles, 0, "no tiles")
+    equal(v.empty and v.empty.title, "Not scanned yet", "the empty state's title")
+    equal(v.empty.text, "Scan the head slot to see which appearances are for sale.", "its text")
+    equal(v.empty.button, "Scan slot", "its button")
+    equal(#c.ah.sends, 0, "nothing read by the filter")
+    v.empty.action()
+    equal(#c.ah.sends, 1, "the button scans")
+    c.advance(0.26)
+    v = TC.BrowserState.View()
+    equal(tileIDs(v):sub(1, 16), "1001,placeholder", "the first price's tile, then placeholders")
+    equal(v.empty, nil, "no empty state while it runs")
+    c.advance(30)
+    equal(tileIDs(TC.BrowserState.View()), "1001,1002,1004,1005", "every priced tile after the scan")
+end)
+
+test("slice B Source: one type, several, Other, an appearance of two types, and All sources", function()
+    local c = sbState()
+    local S = TC.BrowserState
+    local names = {}
+    for i, e in ipairs(S.View().sources) do names[i] = e.name .. (e.selected and "*" or "") end
+    equal(table.concat(names, "|"), "Boss Drop*|Quest*|Vendor*|World Drop*|Achievement*|Profession*|Other*",
+        "the client's source types, then Other, all ticked")
+    onlySources({ [2] = true })
+    equal(tileIDs(S.View()), "1002,1004", "Quest: the quest appearance and the one with a quest among its items")
+    onlySources({ [2] = true, [6] = true })
+    equal(tileIDs(S.View()), "1002,1003,1004", "Quest and Profession")
+    onlySources({ other = true })
+    equal(tileIDs(S.View()), "1005", "Other: the type the client does not name")
+    onlySources({ [4] = true })
+    equal(tileIDs(S.View()), "1004", "World Drop: the appearance of several types passes by any")
+    onlySources({ [5] = true })
+    local v = S.View()
+    equal(v.empty and v.empty.title .. "/" .. v.empty.button, "No matches/All sources", "nothing from Achievement")
+    v.empty.action()
+    equal(tileIDs(S.View()), "1001,1002,1003,1004,1005,1006", "All sources ticks every entry")
+    equal(S.View().filtersChanged, false, "and is the start again")
+    sentNothing(c, "source")
+end)
+
+test("slice B Source: all ticked reads no source; narrowed, each appearance is read once however often it is drawn", function()
+    local c = sbState(SB_PRICES)
+    local S = TC.BrowserState
+    local base = c.sourcesCalls or 0
+    for _ = 1, 5 do S.View() end
+    S.SetSearch("item")
+    S.SetFilter("Not collected")
+    S.SetForSaleOnly(true)
+    S.SetForSaleOnly(false)
+    S.SetFilter("All")
+    S.SetSearch("")
+    equal((c.sourcesCalls or 0) - base, 0, "GetAppearanceSources calls with every entry ticked")
+    S.SetSource(1, false)
+    S.View()
+    local first = (c.sourcesCalls or 0) - base
+    equal(first, 6, "unticking Boss Drop reads each of the six once")
+    for _ = 1, 10 do S.View() end
+    for _, text in ipairs({ "i", "it", "ite", "item", "item 1", "" }) do S.SetSearch(text) end
+    S.SetFilter("Collected")
+    S.SetFilter("All")
+    S.SetSort("priceHigh")
+    S.NextPage()
+    S.SetSource(2, false)
+    S.SetSource(1, true)
+    equal((c.sourcesCalls or 0) - base, first, "no further call: redraws, typing, other choices, other entries")
+    equal(#c.loadRequests, 0, "item data asked for by the filter: none (the search asks for names on its own)")
+    sentNothing(c, "source reads")
+end)
+
+-- fix B, F4 (QA-B experiment E11): sourceType is Nilable before the item's
+-- data is in (AppearanceSourceDocumentation.lua:21)
+test("slice B Source: a type read before its item data is not remembered as Other; read again, then once", function()
+    local c = sbState()
+    local S = TC.BrowserState
+    local real = C_TransmogCollection.GetAppearanceSources
+    local unloaded = { [1002] = true, [1004] = 2 }
+    C_TransmogCollection.GetAppearanceSources = function(id, ...)
+        local r = real(id, ...)
+        for i, s in ipairs(r or {}) do
+            if unloaded[id] == true or unloaded[id] == i then s.sourceType = nil end
+        end
+        return r
+    end
+    onlySources({ [2] = true })
+    local v = S.View()
+    equal(tileIDs(v), "", "no Quest appearance known yet: 1002's types all nil, 1004's quest one nil")
+    unloaded = {}
+    c.fire("TRANSMOG_COLLECTION_UPDATED")
+    S.Refresh()
+    equal(tileIDs(S.View()), "1002,1004", "the next refresh reads them again and finds the quests")
+    local base = c.sourcesCalls or 0
+    for _ = 1, 5 do S.View() end
+    S.SetSearch("item")
+    S.SetSearch("")
+    S.SetSource(6, true)
+    equal((c.sourcesCalls or 0) - base, 0, "known types are read once per visit")
+    C_TransmogCollection.GetAppearanceSources = real
+    sentNothing(c, "unloaded source types")
+end)
+
+test("slice B Source: the client's count and validity of source types, its strings, the English fallbacks", function()
+    local c = sbState()
+    local names = {}
+    TRANSMOG_SOURCE_1, TRANSMOG_SOURCE_7 = nil, "Trading Post"
+    C_TransmogCollection.GetNumTransmogSources = function() return 7 end
+    C_TransmogCollection.IsValidTransmogSource = function(n) return n ~= 5 end
+    for i, e in ipairs(TC.BrowserState.View().sources) do names[i] = e.name end
+    equal(table.concat(names, "|"), "Boss Drop|Quest|Vendor|World Drop|Profession|Trading Post|Other",
+        "seven types less the invalid fifth, the English Boss Drop, Trading Post, Other")
+    TRANSMOG_SOURCE_7 = nil
+    noErrors(c, "source names")
+end)
+
+test("slice B sort: by price low and high, equal prices in the game's order, unpriced after in the game's order", function()
+    local c = sbState(SB_PRICES)
+    scanned(c)
+    local S = TC.BrowserState
+    S.SetSort("priceLow")
+    equal(tileIDs(S.View()), "1001,1004,1002,1005,1003,1006", "low to high")
+    S.SetSort("priceHigh")
+    equal(tileIDs(S.View()), "1002,1005,1004,1001,1003,1006", "high to low")
+    S.SetSort("default")
+    equal(tileIDs(S.View()), "1001,1002,1003,1004,1005,1006", "Default: the game's order")
+    S.SetSort("cheapest")
+    equal(tileIDs(S.View()), "1001,1002,1003,1004,1005,1006", "an unknown sort changes nothing")
+    local marked
+    for _, e in ipairs(S.View().sorts) do if e.selected then marked = e.name end end
+    equal(marked, "Default", "Default marked")
+    equal(#c.ah.sends, 1, "the scan only")
+end)
+
+-- fix B, F3: a game's order unlike id order, so a tie broken by id shows
+test("slice B sort: equal prices keep the game's order where it differs from id order, under both price sorts", function()
+    local list = Fake.appearances(6, 1)
+    for _, a in ipairs(list) do
+        a.sourceTypes = SB_TYPES[a.id]
+        -- 1005 (300) first of the not collected in the game's order, before 1002 (300)
+        if a.id == 1005 then a.minIlvl = 0 end
+    end
+    local c = sbState(SB_PRICES, { appearances = list })
+    scanned(c)
+    local S = TC.BrowserState
+    equal(tileIDs(S.View()), "1001,1005,1002,1003,1004,1006", "the game's order: the collected 1001, then 1005")
+    S.SetSort("priceLow")
+    equal(tileIDs(S.View()), "1001,1004,1005,1002,1003,1006", "low to high: 1005 before 1002 at 3s")
+    S.SetSort("priceHigh")
+    equal(tileIDs(S.View()), "1005,1002,1004,1001,1003,1006", "high to low: 1005 before 1002 at 3s")
+    equal(#c.ah.sends, 1, "the scan only")
+end)
+
+test("slice B the sweep's look: not collected, for sale, cheapest first is first under its filters and sort", function()
+    local c = sbState(SB_PRICES)
+    scanned(c)
+    local S = TC.BrowserState
+    S.SetFilter("Not collected")
+    S.SetForSaleOnly(true)
+    S.SetSort("priceLow")
+    local v = S.View()
+    equal(tileIDs(v), "1004,1002,1005", "the cheapest look not collected first; the collected 1001 out")
+    equal(v.tiles[1].price, "1s", "its price")
+    equal(v.count, "3 appearances, 3 for sale", "count")
+end)
+
+test("slice B filters combine: Source with For sale only, Show with Source, class with For sale only", function()
+    local c = sbState(SB_PRICES)
+    scanned(c)
+    local S = TC.BrowserState
+    onlySources({ [2] = true })
+    S.SetForSaleOnly(true)
+    equal(tileIDs(S.View()), "1002,1004", "Quest and for sale")
+    onlySources({ [1] = true })
+    equal(tileIDs(S.View()), "1001,1004", "Boss Drop and for sale")
+    S.SetFilter("Not collected")
+    equal(tileIDs(S.View()), "1004", "Boss Drop, for sale and not collected")
+    S.SetFilter("Collected")
+    S.SetForSaleOnly(false)
+    equal(tileIDs(S.View()), "1001", "Boss Drop and collected")
+    S.ResetFilters()
+    S.SetForSaleOnly(true)
+    S.SetSearch("Item 1005")
+    equal(tileIDs(S.View()), "1005", "search and for sale")
+    equal(#c.ah.sends, 1, "the scan only")
+end)
+
+test("slice B Reset filters: Show, For sale only, Source, class, weapon type, search and the sort back to their defaults", function()
+    local c = slotState({ saved = { scanWhenShown = false } })
+    local S = state()
+    S.SelectSlot("mainhand")
+    c.advance(1)
+    local daggers
+    for _, e in ipairs(S.View().weaponTypes.entries) do if e.name == "Daggers" then daggers = e.value end end
+    S.SetFilter("Collected")
+    S.SetForSaleOnly(true)
+    S.SetSource(1, false)
+    S.SelectClass(8)
+    S.SelectWeaponType(daggers)
+    S.SetSearch("x")
+    S.SetSort("priceHigh")
+    equal(S.View().filtersChanged, true, "changed")
+    S.ResetFilters()
+    local v = S.View()
+    local sort
+    for _, e in ipairs(v.sorts) do if e.selected then sort = e.name end end
+    local ticked = 0
+    for _, e in ipairs(v.sources) do if e.selected then ticked = ticked + 1 end end
+    equal(table.concat({ v.filter, tostring(v.forSaleOnly), ticked, v.classes.text, v.weaponTypes.text, "'" .. v.search .. "'", sort,
+        tostring(v.filtersChanged) }, "/"), "All/false/7/Warlock/All weapon types/''/Default/false", "every default")
+    equal(TransmogCheckerDB.browser.show .. "/" .. tostring(TransmogCheckerDB.browser.forSaleOnly) .. "/" .. TransmogCheckerDB.browser.sort,
+        "All/false/default", "the saved values follow")
+    equal(TransmogCheckerDB.browser.scanWhenShown, false, "Scan when shown is no filter: untouched")
+    sentNothing(c, "reset")
+end)
+
+test("slice B the filter-active mark: each filter and the sort alone set it; back to its default clears it", function()
+    local c = slotState({ saved = {} })
+    local S = state()
+    local function changed() return S.View().filtersChanged end
+    equal(changed(), false, "nothing at the start")
+    for _, way in ipairs({
+        { "Show", function() S.SetFilter("Not collected") end, function() S.SetFilter("All") end },
+        { "For sale only", function() S.SetForSaleOnly(true) end, function() S.SetForSaleOnly(false) end },
+        { "Source", function() S.SetSource("other", false) end, function() S.SetSource("other", true) end },
+        { "class", function() S.SelectClass(8) end, function() S.SelectClass(9) end },
+        { "search", function() S.SetSearch("x") end, function() S.SetSearch("") end },
+        { "sort", function() S.SetSort("priceLow") end, function() S.SetSort("default") end },
+        { "Scan when shown (no filter)", function() S.SetScanWhenShown(false) end, function() S.SetScanWhenShown(true) end },
+    }) do
+        way[2]()
+        equal(changed(), way[1] ~= "Scan when shown (no filter)", way[1] .. ": the mark")
+        way[3]()
+        equal(changed(), false, way[1] .. ": cleared")
+    end
+    S.SelectSlot("mainhand")
+    c.advance(1)
+    S.SelectWeaponType(S.View().weaponTypes.entries[2].value)
+    equal(changed(), true, "weapon type: the mark")
+    S.SelectWeaponType(nil)
+    equal(changed(), false, "weapon type: cleared")
+end)
+
+test("slice B empty states: the Show filter's, For sale only's before and after a scan, the Source filter's, the search's", function()
+    local c = sbState(SB_PRICES)
+    local S = TC.BrowserState
+    S.SetFilter("Collected")
+    S.SetSource(1, false)
+    equal(S.View().empty.text, "No head appearance shown here comes from the sources ticked.", "Source")
+    S.SetSource(1, true)
+    S.SetForSaleOnly(true)
+    equal(S.View().empty.title, "Not scanned yet", "For sale only before a scan")
+    scanned(c)
+    equal(tileIDs(S.View()), "1001", "the collected look for sale")
+    onlySources({ [6] = true })
+    S.SetFilter("All")
+    local v = S.View()
+    equal(v.empty.title .. "/" .. v.empty.button, "Nothing for sale/Show all appearances", "For sale only after a scan")
+    v.empty.action()
+    equal(tileIDs(S.View()), "1003", "the button turns For sale only off")
+    S.SetSearch("zzz")
+    equal(S.View().empty.button, "Clear search", "the search's")
+    S.SetSearch("")
+    S.SetFilter("Bought, not collected")
+    equal(S.View().empty.text, "No head appearance for Warlock is bought and not collected.", "Show's")
+end)
+
+-- fix B, F5: after a failed scan For sale only's empty state says so, as
+-- the status line does, and still offers the scan
+test("slice B empty states: For sale only after a failed scan says the auction house did not answer and offers the scan", function()
+    local c = sbState(SB_PRICES)
+    c.ah.fail = true
+    c.ah.answerDelay = 0
+    scanned(c)
+    local S = TC.BrowserState
+    S.SetForSaleOnly(true)
+    local v = S.View()
+    equal(v.status, "The auction house did not answer.", "the status line")
+    equal(#v.tiles, 0, "no tiles")
+    equal(v.empty and v.empty.title, "The auction house did not answer.", "the empty state's title, as the status line")
+    equal(v.empty.text, "Scan the head slot again to see which appearances are for sale.", "its text")
+    equal(v.empty.button, "Scan slot", "its button")
+    local sends = #c.ah.sends
+    c.ah.fail = false
+    v.empty.action()
+    equal(#c.ah.sends, sends + 1, "the button scans")
+    c.advance(30)
+    equal(tileIDs(S.View()), "1001,1002,1004,1005", "the priced tiles after the scan")
+end)
+
+test("slice B saved: the defaults on a first run, the tooltip's settings beside them untouched", function()
+    local c = boot({ saved = false })
+    equal(TransmogCheckerDB, nil, "nothing saved yet")
+    c.fire("ADDON_LOADED", "TransmogChecker")
+    local b = TransmogCheckerDB.browser
+    equal(table.concat({ tostring(b.scanWhenShown), b.show, tostring(b.forSaleOnly), b.sort }, "/"), "true/All/false/default",
+        "the four defaults")
+    local keys = {}
+    for k in pairs(b) do keys[#keys + 1] = k end
+    table.sort(keys)
+    equal(table.concat(keys, ","), "forSaleOnly,scanWhenShown,show,sort", "the four values only")
+    local v = TC.BrowserState.View()
+    equal(v.filter .. "/" .. tostring(v.forSaleOnly) .. "/" .. tostring(v.scanWhenShown), "All/false/true", "the view")
+    equal(table.concat({ tostring(TC.Config.hideCollectedAlts), tostring(TC.Config.filterBlizzNotCollectedLine),
+        tostring(TC.Config.skipPoorAndCommon), tostring(TC.Config.debug) }, "/"), "true/true/true/false", "the tooltip's defaults")
+    noErrors(c, "first run")
+end)
+
+test("slice B saved: each value is written on change and loaded in the next session; the others are not saved", function()
+    local c = boot({ saved = false })
+    c.fire("ADDON_LOADED", "TransmogChecker")
+    local S = TC.BrowserState
+    S.Refresh()
+    S.SetScanWhenShown(false)
+    S.SetFilter("Collected")
+    S.SetForSaleOnly(true)
+    S.SetSort("priceHigh")
+    S.SelectClass(8)
+    S.SetSource(1, false)
+    S.SetSearch("x")
+    local saved = {}
+    for k, v in pairs(TransmogCheckerDB.browser) do saved[k] = v end
+    equal(table.concat({ tostring(saved.scanWhenShown), saved.show, tostring(saved.forSaleOnly), saved.sort }, "/"),
+        "false/Collected/true/priceHigh", "written on change")
+    local n = 0
+    for _ in pairs(saved) do n = n + 1 end
+    equal(n, 4, "class, Source and search are not saved")
+    -- the next session: the saved table as the client loads it
+    local d = boot({ saved = false })
+    TransmogCheckerDB = { browser = saved }
+    d.fire("ADDON_LOADED", "TransmogChecker")
+    S = TC.BrowserState
+    S.Refresh()
+    local v = S.View()
+    local sort
+    for _, e in ipairs(v.sorts) do if e.selected then sort = e.value end end
+    equal(table.concat({ tostring(v.scanWhenShown), v.filter, tostring(v.forSaleOnly), sort, v.classes.text, v.search }, "/"),
+        "false/Collected/true/priceHigh/Warlock/", "loaded; class and search at their start")
+    noErrors(d, "next session")
+end)
+
+test("slice B saved: Bought, not collected loads as All; malformed values and a malformed table load as the defaults", function()
+    for _, case in ipairs({
+        { { show = "Bought, not collected", forSaleOnly = true }, "true/All/true/default" },
+        { { scanWhenShown = "yes", show = 7, forSaleOnly = {}, sort = "cheap" }, "true/All/false/default" },
+        { { scanWhenShown = false, show = "Not collected", sort = "priceLow" }, "false/Not collected/false/priceLow" },
+        { "junk", "true/All/false/default" },
+    }) do
+        local c = boot({ saved = false })
+        TransmogCheckerDB = { browser = case[1], hideCollectedAlts = false, skipPoorAndCommon = false }
+        c.fire("ADDON_LOADED", "TransmogChecker")
+        local b = TransmogCheckerDB.browser
+        local what = type(case[1]) == "table" and tostring(case[1].show) or case[1]
+        equal(table.concat({ tostring(b.scanWhenShown), b.show, tostring(b.forSaleOnly), b.sort }, "/"), case[2], what .. ": saved")
+        local v = TC.BrowserState.View()
+        equal(v.filter .. "/" .. tostring(v.forSaleOnly), b.show .. "/" .. tostring(b.forSaleOnly), what .. ": the view")
+        equal(tostring(TC.Config.hideCollectedAlts) .. "/" .. tostring(TC.Config.skipPoorAndCommon), "false/false",
+            what .. ": the tooltip's saved settings kept")
+        SlashCmdList.TC("alts")
+        equal(TC.Config.hideCollectedAlts, true, what .. ": /tc alts still toggles")
+        equal(b.show, TransmogCheckerDB.browser.show, what .. ": and leaves the browser's values")
+        noErrors(c, what)
+    end
+end)
+
+-- The tab opened with the saved browser values given (default: none, so
+-- Scan when shown is on).
+local function sbWhole(saved, opts)
+    opts = opts or {}
+    opts.appearances = opts.appearances or manySlots()
+    opts.saved = saved or false
+    local c, tabs = visitTwice(opts)
+    return c, tabs
+end
+
+test("slice B Scan when shown on: nothing before the tab, a scan on showing it and on a slot change, none for a kept scan", function()
+    local c, tabs = sbWhole()
+    c.advance(10)
+    equal(#c.ah.sends, 0, "nothing before the tab is selected")
+    tabs[1].scripts.OnClick(tabs[1])
+    equal(#c.ah.sends, 1, "the slot scanned on showing the tab")
+    equal(TC.BrowserState.View().status, "Scanning head", "scanning")
+    c.advance(30)
+    slotButtons(c)[10].scripts.OnClick(slotButtons(c)[10])
+    equal(#c.ah.sends, 2, "Legs scanned on selecting it")
+    c.advance(30)
+    slotButtons(c)[1].scripts.OnClick(slotButtons(c)[1])
+    c.advance(30)
+    equal(#c.ah.sends, 2, "Head's kept scan is not repeated")
+    selectBuy()
+    tabs[1].frameRef:Hide()
+    tabs[1].scripts.OnClick(tabs[1])
+    c.advance(30)
+    equal(#c.ah.sends, 2, "showing the tab again with a kept scan reads nothing")
+    noErrors(c, "scan when shown")
+end)
+
+test("slice B Scan when shown on: leaving stops the scan; the stopped slot is scanned again when next shown", function()
+    local c, tabs = sbWhole()
+    c.ah.pageSize = 1
+    for i = 1, 6 do c.ah.listings[i] = listing("Item " .. (10001 + i * 10), 10001 + i * 10, i * 100) end
+    tabs[1].scripts.OnClick(tabs[1])
+    c.advance(0.26)
+    selectBuy()
+    tabs[1].frameRef:Hide()
+    local messages = #c.ah.sends + #c.ah.more
+    c.advance(30)
+    equal(#c.ah.sends + #c.ah.more, messages, "nothing after leaving")
+    tabs[1].scripts.OnClick(tabs[1])
+    equal(#c.ah.sends, 2, "scanned again on coming back")
+    -- a scan stopped by a slot change: scanned again when the slot is shown again
+    slotButtons(c)[10].scripts.OnClick(slotButtons(c)[10])
+    c.advance(1)
+    equal(#c.ah.sends, 3, "Legs: Head's scan stopped for it")
+    c.advance(60)
+    slotButtons(c)[1].scripts.OnClick(slotButtons(c)[1])
+    c.advance(1)
+    equal(#c.ah.sends, 4, "Head scanned again, its scan having been stopped")
+    noErrors(c, "stopped")
+end)
+
+test("slice B Scan when shown on: no filter, sort, class, weapon type or search change reads the auction house", function()
+    local c, tabs = sbWhole()
+    tabs[1].scripts.OnClick(tabs[1])
+    c.advance(30)
+    local S = TC.BrowserState
+    local sends, more, searches = #c.ah.sends, #c.ah.more, #c.ah.searches
+    S.SetFilter("Not collected")
+    S.SetForSaleOnly(true)
+    S.SetSource(1, false)
+    S.SetSort("priceLow")
+    S.SelectClass(8)
+    S.SetSearch("item")
+    S.ResetFilters()
+    c.advance(30)
+    equal(#c.ah.sends .. "/" .. #c.ah.more .. "/" .. #c.ah.searches, sends .. "/" .. more .. "/" .. searches,
+        "browses, page requests and searches for Show, For sale only, Source, sort, class, search and Reset")
+    slotButtons(c)[12].scripts.OnClick(slotButtons(c)[12])
+    c.advance(30)
+    equal(#c.ah.sends, sends + 1, "the slot change's scan")
+    sends, more = #c.ah.sends, #c.ah.more
+    S.SelectWeaponType(S.View().weaponTypes.entries[2].value)
+    S.SetForSaleOnly(true)
+    S.SetSort("priceHigh")
+    c.advance(30)
+    equal(#c.ah.sends .. "/" .. #c.ah.more .. "/" .. #c.ah.searches, sends .. "/" .. more .. "/" .. searches,
+        "browses, page requests and searches for the weapon type and more choices")
+    noErrors(c, "no reads on choices")
+end)
+
+test("slice B Scan when shown on: a weapon slot waits for its weapon types and scans every class's", function()
+    local c, tabs = sbWhole(nil, { appearances = everyWeapon() })
+    tabs[1].scripts.OnClick(tabs[1])
+    c.advance(30)
+    slotButtons(c)[12].scripts.OnClick(slotButtons(c)[12])
+    c.advance(30)
+    equal(#c.ah.sends, 2, "Head, then Main hand once its weapon types are learnt")
+    equal(entriesText(c.ah.sends[2].query), "2.0.-,2.7.-,2.4.-,2.15.-,2.13.-,2.1.-,2.8.-,2.5.-,2.10.-,2.6.-",
+        "every class's main hand types")
+    noErrors(c, "weapon slot")
+end)
+
+-- fix B, F2: the same on a slot with no kept scan (its scan failed), where
+-- the auto-scan would not refuse
+test("slice B Scan when shown on: on a slot whose scan failed no filter, sort, class, weapon type or search change reads", function()
+    local c, tabs = sbWhole(nil, { appearances = everyWeapon() })
+    c.ah.fail = true
+    c.ah.answerDelay = 0
+    tabs[1].scripts.OnClick(tabs[1])
+    c.advance(30)
+    local S = TC.BrowserState
+    equal(S.View().status, "The auction house did not answer.", "Head's scan failed")
+    local function reads() return #c.ah.sends .. "/" .. #c.ah.more .. "/" .. #c.ah.searches end
+    local before = reads()
+    local function none(what)
+        c.advance(5)
+        equal(reads(), before, what .. ": browses/page requests/searches")
+    end
+    S.SetFilter("Not collected"); none("Show")
+    S.SetForSaleOnly(true); none("For sale only on")
+    S.SetForSaleOnly(false); none("For sale only off")
+    for _, e in ipairs(S.View().sources) do
+        S.SetSource(e.value, false); none("Source " .. tostring(e.value) .. " off")
+        S.SetSource(e.value, true); none("Source " .. tostring(e.value) .. " on")
+    end
+    S.SelectClass(8); none("class")
+    S.SetSearch("item"); none("search")
+    S.SetSort("priceLow"); none("sort")
+    S.ResetFilters(); none("Reset")
+    slotButtons(c)[12].scripts.OnClick(slotButtons(c)[12])
+    c.advance(30)
+    equal(S.View().status, "The auction house did not answer.", "Main hand's scan failed")
+    before = reads()
+    S.SelectWeaponType(S.View().weaponTypes.entries[2].value); none("weapon type")
+    S.SelectWeaponType(S.View().weaponTypes.entries[1].value); none("weapon type back")
+    S.SetSort("priceHigh"); none("sort on Main hand")
+    S.ResetFilters(); none("Reset on Main hand")
+    noErrors(c, "no reads on choices after a failure")
+end)
+
+-- fix B, F1 (QA-B experiment E4b): the end of the weapon type pass scans
+-- only the weapon slot that waited for it
+test("slice B Scan when shown on: the weapon type pass's end scans no armor slot, a failed one or after ticking the setting", function()
+    local c, tabs = sbWhole(nil, { appearances = everyWeapon() })
+    tabs[1].scripts.OnClick(tabs[1])
+    c.advance(30)
+    c.ah.fail = true
+    c.ah.answerDelay = 0
+    slotButtons(c)[12].scripts.OnClick(slotButtons(c)[12])
+    equal(#c.ah.sends, 1, "Main hand waits for the pass")
+    slotButtons(c)[1].scripts.OnClick(slotButtons(c)[1])
+    slotButtons(c)[2].scripts.OnClick(slotButtons(c)[2])
+    equal(#c.ah.sends, 2, "Shoulder scanned on selecting it")
+    c.advance(5)
+    equal(TC.BrowserState.View().status, "The auction house did not answer.", "Shoulder's scan failed")
+    equal(#c.ah.sends, 2, "no further browse when the pass ends on the failed Shoulder")
+    noErrors(c, "pass end on a failed armor slot")
+    -- the setting ticked while the pass runs, on an armor slot
+    local d, tabs2 = sbWhole({ scanWhenShown = false }, { appearances = everyWeapon() })
+    tabs2[1].scripts.OnClick(tabs2[1])
+    slotButtons(d)[12].scripts.OnClick(slotButtons(d)[12])
+    slotButtons(d)[1].scripts.OnClick(slotButtons(d)[1])
+    TC.BrowserState.SetScanWhenShown(true)
+    d.advance(5)
+    sentNothing(d, "the pass's end after ticking the setting on Head")
+    noErrors(d, "ticked mid-pass")
+end)
+
+test("slice B Scan when shown off: showing the tab and slot changes send nothing; each deliberate click still reads", function()
+    local c, tabs = sbWhole({ scanWhenShown = false })
+    local id = 1006 * 10 + 1
+    c.ah.listings = { listing("Item " .. id, id, 500) }
+    tabs[1].scripts.OnClick(tabs[1])
+    for _, i in ipairs({ 10, 12, 1 }) do slotButtons(c)[i].scripts.OnClick(slotButtons(c)[i]); c.advance(10) end
+    selectBuy()
+    tabs[1].frameRef:Hide()
+    tabs[1].scripts.OnClick(tabs[1])
+    c.advance(30)
+    sentNothing(c, "setting off")
+    TC.BrowserState.SetFilter("All")
+    local frames = tileFrames(c)
+    c.click(frames[6].button)
+    c.advance(10)
+    local checks = #c.ah.sends
+    check(checks > 0, "a tile click checks")
+    c.click(frames[6].button)
+    TC.BrowserState.CheckAgain()
+    c.advance(10)
+    check(#c.ah.sends > checks, "Check again reads")
+    local before = #c.ah.sends
+    c.click(scanControl(c))
+    c.advance(30)
+    equal(#c.ah.sends, before + 1, "the scan control scans")
+    noErrors(c, "deliberate clicks")
+end)
+
+test("slice B the funnel: For sale only, a Source entry and Scan when shown are checkboxes that keep the menu open; the sort radios", function()
+    local c, tabs = sbWhole({ scanWhenShown = false })
+    tabs[1].scripts.OnClick(tabs[1])
+    local funnel = funnelOf(c)
+    local function entry(text, list)
+        for _, e in ipairs(list or c.menuEntries()) do if e ~= "-" and e.text == text then return e end end
+    end
+    openMenu(c, funnel)
+    check(entry("For sale only").checkbox, "For sale only is a checkbox")
+    equal(entry("For sale only").selected, false, "unticked")
+    check(c.choose("For sale only"), "ticked")
+    check(c.menu ~= nil, "the menu stays open")
+    equal(entry("For sale only").selected, true, "asked again, it reads the state: ticked")
+    equal(TC.BrowserState.View().forSaleOnly, true, "the state")
+    local source = entry("Source")
+    equal(entry("Quest", source.submenu).selected, true, "Quest ticked")
+    check(c.choose("Quest"), "Quest unticked")
+    equal(entry("Quest", entry("Source").submenu).selected, false, "asked again: unticked")
+    check(c.choose("Scan when shown"), "Scan when shown ticked")
+    equal(TransmogCheckerDB.browser.scanWhenShown, true, "saved")
+    equal(#c.ah.sends, 0, "ticking it starts no scan")
+    funnel:CloseMenu()
+    openMenu(c, funnel)
+    check(entry("Sort").title, "Sort is a title")
+    check(c.choose("Price: high to low"), "a sort radio")
+    equal(c.menu, nil, "a radio closes the menu")
+    for _, e in ipairs(TC.BrowserState.View().sorts) do
+        if e.selected then equal(e.name, "Price: high to low", "the sort chosen") end
+    end
+    noErrors(c, "funnel checkboxes")
 end)
 
 test("TC-15 no forbidden collection call was made in the whole run", function()

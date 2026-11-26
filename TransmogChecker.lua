@@ -26,6 +26,11 @@ loader:SetScript("OnEvent", function(self, _, loadedAddon)
     end
 
     TC.Config = TransmogCheckerDB
+
+    -- the appearance browser's four remembered choices, in their own table
+    -- (TC_BrowserState checks each value)
+    if type(TransmogCheckerDB.browser) ~= "table" then TransmogCheckerDB.browser = {} end
+    if TC.BrowserState and TC.BrowserState.Bind then TC.BrowserState.Bind(TransmogCheckerDB.browser) end
 end)
 
 local function statusLabel(flag)
