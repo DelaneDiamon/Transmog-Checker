@@ -4033,7 +4033,7 @@ local function probeStatic()
     probeModel()
     local transmog = db.namespaces.C_TransmogCollection
     local auction = db.namespaces.C_AuctionHouse
-    print(("TCProbe: C_TransmogCollection %s functions, C_AuctionHouse %s functions. Nothing runs by itself: /tcprobe ah records the auction house while its window is open, /tcprobe tiles <slot> [cam|full] shows a page of model tiles, /tcprobe tab adds a test tab to the open auction window, /tcprobe model shows the model frames, /tcprobe collect records what the collection calls say about some 270 items, anywhere, without the auction house, /tcprobe find looks six appearances up by item name while the auction window is open (at most 10 browses and 6 searches)."):format(
+    print(("TCProbe: C_TransmogCollection %s functions, C_AuctionHouse %s functions. Nothing runs by itself: /tcprobe ah records the auction house while its window is open, /tcprobe tiles <slot> [cam|full] shows a page of model tiles, /tcprobe tab adds a test tab to the open auction window, /tcprobe model shows the model frames, /tcprobe collect records what the collection calls say about some 270 items, anywhere, without the auction house, /tcprobe find looks six appearances up by item name while the auction window is open (at most 10 browses and 6 searches), /tcprobe slot <slot> prints what the client and the addon answer for a slot, /tcprobe source <item> prints an item's source."):format(
         transmog and #transmog or "missing", auction and #auction or "missing"))
 end
 
@@ -4145,3 +4145,332 @@ SlashCmdList["TCPROBE"] = function(msg)
         probeStatic()
     end
 end
+
+-- "/tcprobe slot <slot>" and "/tcprobe source <item>" (test pass 1: the Head
+-- slot that showed nothing, and a boss drop shown without its boss). slot
+-- prints, in one run, what the client lists for the slot's categories, the
+-- state of Collections' filters as the client reports it, what the addon's
+-- own modules answer for the slot, and, with the auction house and
+-- Collections closed, the counts again under each filter that is not at its
+-- usual value: set on one frame, read on the next, put back and read back on
+-- the frame after. source prints an item's appearance, source, source type
+-- and boss drops. Neither reaches the auction house; nothing prints a name of
+-- a character or an account. Its own function, for the 200-local limit of
+-- the main chunk: it wraps the command handler above instead of adding a
+-- local.
+;(function()
+local PREFIX = "TCProbe slot: "
+-- Collections' filters the probe changed and has not put back yet, as
+-- { put = function, was = value }; a logout puts them back.
+local unrestored = {}
+
+local function say(text)
+    print(PREFIX .. text)
+    db.slotProbe = db.slotProbe or {}
+    if #db.slotProbe < 400 then db.slotProbe[#db.slotProbe + 1] = text end
+end
+
+local function text(result)
+    return tostring(answer(result))
+end
+
+local function location(slotID)
+    return { slotID = slotID, type = enum("TransmogType", "Appearance", 0),
+        modification = enum("TransmogModification", "Main", 0) }
+end
+
+-- The addon's slot (TC.Slots) for a word: its key or its name without spaces.
+local function slotEntry(word)
+    word = (word or ""):lower():gsub("%s", "")
+    local slots = TC and TC.Slots
+    if type(slots) ~= "table" then return nil end
+    for _, entry in ipairs(slots) do
+        if entry.key == word or (tostring(entry.name):lower():gsub("%s", "")) == word then return entry end
+    end
+end
+
+local function categoriesOf(entry)
+    local out = {}
+    for _, category in ipairs(entry.categories) do
+        out[#out + 1] = enum("TransmogCollectionType", category[1], category[2])
+    end
+    return out
+end
+
+-- The client's raw list for a category, counted.
+local function listText(category, slotID)
+    local result = call(C_TransmogCollection, "GetCategoryAppearances", category, location(slotID))
+    if type(result[1]) ~= "table" then return "no list: " .. text(result) end
+    local n = { entries = 0, hidden = 0, collected = 0, notCollected = 0, noVisual = 0 }
+    for _, info in ipairs(result[1]) do
+        n.entries = n.entries + 1
+        if type(info) ~= "table" or not info.visualID then
+            n.noVisual = n.noVisual + 1
+        elseif info.isHideVisual then
+            n.hidden = n.hidden + 1
+        elseif info.isCollected then
+            n.collected = n.collected + 1
+        else
+            n.notCollected = n.notCollected + 1
+        end
+    end
+    return ("%d entries: %d hidden, %d collected, %d not collected, %d without visualID"):format(
+        n.entries, n.hidden, n.collected, n.notCollected, n.noVisual)
+end
+
+local function countLines(entry, label)
+    local T = C_TransmogCollection
+    for _, category in ipairs(categoriesOf(entry)) do
+        say(("%s category %d: %s; total %s, collected %s, filtered total %s, filtered collected %s"):format(label,
+            category, listText(category, entry.slotID), text(call(T, "GetCategoryTotal", category)),
+            text(call(T, "GetCategoryCollectedCount", category)), text(call(T, "GetFilteredCategoryTotal", category)),
+            text(call(T, "GetFilteredCategoryCollectedCount", category))))
+    end
+end
+
+-- Collections' filters as the client reports them now.
+local function readFilters()
+    local T = C_TransmogCollection
+    local s = { class = call(T, "GetClassFilter"), collected = call(T, "GetCollectedShown"),
+        uncollected = call(T, "GetUncollectedShown"), sources = {} }
+    local num = call(T, "GetNumTransmogSources")[1]
+    for i = 1, type(num) == "number" and math.min(num, 40) or 0 do
+        local valid = call(T, "IsValidTransmogSource", i)[1]
+        s.sources[i] = { valid = valid, checked = call(T, "IsSourceTypeFilterChecked", i) }
+    end
+    return s
+end
+
+local function filterLines(s)
+    local T = C_TransmogCollection
+    local own = UnitClass and select(3, UnitClass("player"))
+    say(("Collections: class filter %s (own class %s), collected shown %s, uncollected shown %s, default filters %s, all source types %s, all collection types %s, all factions %s, all races %s"):format(
+        text(s.class), tostring(own), text(s.collected), text(s.uncollected), text(call(T, "IsUsingDefaultFilters")),
+        text(call(T, "AreAllSourceTypeFiltersChecked")), text(call(T, "AreAllCollectionTypeFiltersChecked")),
+        text(call(T, "GetAllFactionsShown")), text(call(T, "GetAllRacesShown"))))
+    local parts = {}
+    for i, source in ipairs(s.sources) do
+        parts[#parts + 1] = ("%d%s=%s"):format(i, source.valid and "" or "(invalid)", text(source.checked))
+    end
+    say("source type filters (index=checked): " .. (parts[1] and table.concat(parts, " ") or "none read"))
+    local items = enum("TransmogSearchType", "Items", 1)
+    say(("search (items): in progress %s, size %s, progress %s, search data loading %s"):format(
+        text(call(T, "IsSearchInProgress", items)), text(call(T, "SearchSize", items)),
+        text(call(T, "SearchProgress", items)), text(call(T, "IsSearchDBLoading"))))
+    local journal = CollectionsJournal
+    local wardrobe = WardrobeCollectionFrame
+    local box = wardrobe and wardrobe.SearchBox
+    local itemsFrame = wardrobe and wardrobe.ItemsCollectionFrame
+    local typed = box and call(box, "GetText", box)[1]
+    say(("Collections window: loaded %s, shown %s, its search box %s, its active category %s"):format(
+        tostring(journal ~= nil), journal and text(call(journal, "IsShown", journal)) or "-",
+        type(typed) == "string" and ("%q"):format(typed:sub(1, 40)) or "-",
+        itemsFrame and text(call(itemsFrame, "GetActiveCategory", itemsFrame)) or "-"))
+end
+
+-- What the addon's modules answer for the slot, each call under pcall.
+local function moduleLines(entry)
+    local A, S = TC and TC.Appearances, TC and TC.BrowserState
+    local listed = call(A, "List", entry.key)
+    if type(listed[1]) ~= "table" then
+        say("TC.Appearances.List: " .. text(listed))
+    else
+        local list = listed[1]
+        local own = UnitClass and select(3, UnitClass("player"))
+        local n = { collected = 0, notCollected = 0, raised = 0, usable = 0, usableRaised = 0 }
+        local firstError
+        for _, appearance in ipairs(list) do
+            local got = call(A, "IsCollected", appearance)
+            if got.error or got.missing then
+                n.raised, firstError = n.raised + 1, firstError or text(got)
+            elseif got[1] then
+                n.collected = n.collected + 1
+            else
+                n.notCollected = n.notCollected + 1
+            end
+            local usable = call(A, "UsableBy", appearance, own)
+            if usable.error or usable.missing then
+                n.usableRaised, firstError = n.usableRaised + 1, firstError or text(usable)
+            elseif usable[1] then
+                n.usable = n.usable + 1
+            end
+        end
+        say(("TC.Appearances.List: %d appearances; IsCollected %d collected, %d not, %d raised; UsableBy own class %d, %d raised%s"):format(
+            #list, n.collected, n.notCollected, n.raised, n.usable, n.usableRaised,
+            firstError and ("; first error: " .. firstError) or ""))
+        local bags = call(A, "ReadBags")[1]
+        local inBags = 0
+        for _, appearance in ipairs(list) do
+            if type(bags) == "table" and bags[appearance.id] and not call(A, "IsCollected", appearance)[1] then
+                inBags = inBags + 1
+            end
+        end
+        say(("bags: %s of this slot's appearances are in the bags and not collected (pending from the bags)"):format(
+            type(bags) == "table" and tostring(inBags) or "(bags not read)"))
+        for i = 1, math.min(3, #list) do
+            local a = list[i]
+            say(("appearance %d: id %s, category %s, display source %s, items %s"):format(i, tostring(a.id),
+                tostring(a.category), text(call(A, "DisplaySource", a)), tostring(#(call(A, "ItemIDs", a)[1] or {}))))
+        end
+    end
+    say("TC.BrowserState.lastError: " .. tostring(S and S.lastError))
+    local viewed = call(S, "View")
+    local v = viewed[1]
+    if type(v) ~= "table" then return say("TC.BrowserState.View: " .. text(viewed)) end
+    local chosen, strips, pending = "-", 0, 0
+    for _, slot in ipairs(v.slots or {}) do
+        if slot.selected then chosen = tostring(slot.name) end
+    end
+    for _, tile in ipairs(v.tiles or {}) do
+        if tile.strip then strips = strips + 1 end
+        if tile.pending then pending = pending + 1 end
+    end
+    local filters = {}
+    for _, f in ipairs(v.filters or {}) do filters[#filters + 1] = tostring(f.name) end
+    say(("TC.BrowserState.View: slot %s, mode %s, Show %s (%s), class %s, search %d letters, %d tiles (%d with a result strip, %d pending), count %q, page %q, status %q"):format(
+        chosen, tostring(v.mode), tostring(v.filter), table.concat(filters, "/"), tostring(v.classes and v.classes.text),
+        #(v.search or ""), #(v.tiles or {}), strips, pending, tostring(v.count), tostring(v.pageText), tostring(v.status)))
+    say(("empty state: %s"):format(v.empty and (tostring(v.empty.title) .. ": " .. tostring(v.empty.text)) or "none"))
+end
+
+-- The filter changes to measure under: each one not at its usual value.
+local function variants(found)
+    local T = C_TransmogCollection
+    local list = {}
+    local shown = {}
+    if found.collected[1] == false then
+        shown[#shown + 1] = { put = function(v) return call(T, "SetCollectedShown", v) end, was = false, to = true }
+    end
+    if found.uncollected[1] == false then
+        shown[#shown + 1] = { put = function(v) return call(T, "SetUncollectedShown", v) end, was = false, to = true }
+    end
+    if shown[1] then list[#list + 1] = { name = "collected and uncollected shown", writes = shown } end
+    local sources = {}
+    for i, source in ipairs(found.sources) do
+        if source.valid and source.checked[1] == false then
+            sources[#sources + 1] = { put = function(v) return call(T, "SetSourceTypeFilter", i, v) end, was = false, to = true }
+        end
+    end
+    if sources[1] then list[#list + 1] = { name = "every source type checked", writes = sources } end
+    local own = UnitClass and select(3, UnitClass("player"))
+    local class = found.class[1]
+    if type(own) == "number" and type(class) == "number" and class ~= own then
+        list[#list + 1] = { name = "class filter on own class", writes = {
+            { put = function(v) return call(T, "SetClassFilter", v) end, was = class, to = own } } }
+    end
+    return list
+end
+
+local function putBack()
+    for i = #unrestored, 1, -1 do unrestored[i].put(unrestored[i].was) end
+    unrestored = {}
+end
+
+local logout = CreateFrame("Frame")
+logout:RegisterEvent("PLAYER_LOGOUT")
+logout:SetScript("OnEvent", putBack)
+
+-- Each variant: written on one frame, read on the next and put back, read
+-- back on the frame after.
+local function measure(entry, list, index, found)
+    local variant = list[index]
+    if not variant then return say("filter readings done.") end
+    local problems = {}
+    for _, write in ipairs(variant.writes) do
+        local result = write.put(write.to)
+        unrestored[#unrestored + 1] = write
+        if result.error or result.missing then problems[#problems + 1] = text(result) end
+    end
+    C_Timer.After(0, function()
+        countLines(entry, "under " .. variant.name .. (problems[1] and (" (write: " .. problems[1] .. ")") or "") .. ":")
+        putBack()
+        C_Timer.After(0, function()
+            local now = readFilters()
+            local same = text(now.class) == text(found.class) and text(now.collected) == text(found.collected)
+                and text(now.uncollected) == text(found.uncollected)
+            for i, source in ipairs(found.sources) do
+                same = same and text(now.sources[i] and now.sources[i].checked or {}) == text(source.checked)
+            end
+            say(("after %s: filters put back as found: %s"):format(variant.name, same and "yes" or "NO"))
+            measure(entry, list, index + 1, found)
+        end)
+    end)
+end
+
+local function probeSlot(word)
+    local entry = slotEntry(word)
+    if not entry then
+        local keys = {}
+        for _, e in ipairs(TC and TC.Slots or {}) do keys[#keys + 1] = e.key end
+        return print("TCProbe: /tcprobe slot <slot>, one of: " .. (keys[1] and table.concat(keys, " ") or "(TransmogChecker is not loaded)"))
+    end
+    db.slotProbe = {}
+    say(("%s (inventory slot %d), auction house shown %s"):format(entry.key, entry.slotID,
+        tostring(AuctionHouseFrame ~= nil and AuctionHouseFrame:IsShown() == true)))
+    countLines(entry, "as found:")
+    local found = readFilters()
+    filterLines(found)
+    moduleLines(entry)
+    local list = variants(found)
+    if not list[1] then return say("no filter differs from its usual value; nothing written.") end
+    local busy = (AuctionHouseFrame and AuctionHouseFrame:IsShown()) or (CollectionsJournal and CollectionsJournal:IsShown())
+    if busy or not (C_Timer and C_Timer.After) then
+        return say("filter readings skipped: close the auction house and Collections, then run this again.")
+    end
+    measure(entry, list, 1, found)
+end
+
+-- An item id, or the id in a shift-clicked item link.
+local function probeSource(arguments)
+    local itemID = tonumber(arguments:match("item:(%d+)") or arguments:match("^(%d+)"))
+    if not itemID then return print("TCProbe: /tcprobe source <item id or shift-clicked item link>") end
+    local T = C_TransmogCollection
+    local info = call(T, "GetItemInfo", itemID)
+    local appearanceID, sourceID = info[1], info[2]
+    print(("TCProbe source: item %d: appearance %s, source %s%s"):format(itemID, tostring(appearanceID),
+        tostring(sourceID), (info.error or info.missing) and (" " .. text(info)) or ""))
+    if type(sourceID) ~= "number" then return end
+    local si = call(T, "GetSourceInfo", sourceID)[1]
+    local asi = call(T, "GetAppearanceSourceInfo", sourceID)[1]
+    si, asi = type(si) == "table" and si or {}, type(asi) == "table" and asi or {}
+    local category = si.categoryID or asi.category
+    print(("TCProbe source: GetSourceInfo sourceType %s, categoryID %s; GetAppearanceSourceInfo sourceType %s, category %s; TRANSMOG_SOURCE_BOSS_DROP %s"):format(
+        tostring(si.sourceType), tostring(si.categoryID), tostring(asi.sourceType), tostring(asi.category),
+        tostring(TRANSMOG_SOURCE_BOSS_DROP)))
+    local slotID
+    for _, entry in ipairs(TC and TC.Slots or {}) do
+        for _, value in ipairs(categoriesOf(entry)) do
+            if value == category then slotID = slotID or entry.slotID end
+        end
+    end
+    local listed = slotID and call(T, "GetAppearanceSources", appearanceID, category, location(slotID))[1]
+    local row
+    for _, source in ipairs(type(listed) == "table" and listed or {}) do
+        if source.sourceID == sourceID then row = source end
+    end
+    print(("TCProbe source: in GetAppearanceSources for inventory slot %s: %s"):format(tostring(slotID),
+        row and ("sourceType " .. tostring(row.sourceType)) or "not listed"))
+    local said = row and TC and TC.BrowserState and call(TC.BrowserState, "SourceText", row)
+    print("TCProbe source: the addon's short source text: " .. (said and text(said) or "-"))
+    local drops = call(T, "GetAppearanceSourceDrops", sourceID)
+    local list = type(drops[1]) == "table" and drops[1] or {}
+    print(("TCProbe source: GetAppearanceSourceDrops: %s"):format(type(drops[1]) == "table" and (#list .. " entries")
+        or text(drops)))
+    for i = 1, math.min(5, #list) do
+        local d = list[i]
+        local difficulties = type(d) == "table" and type(d.difficulties) == "table" and table.concat(d.difficulties, ", ") or "-"
+        print(("TCProbe source: drop %d: encounter %q, instance %q, instanceType %s, difficulties %s"):format(i,
+            tostring(type(d) == "table" and d.encounter), tostring(type(d) == "table" and d.instance),
+            tostring(type(d) == "table" and d.instanceType), difficulties))
+    end
+end
+
+local base = SlashCmdList["TCPROBE"]
+SlashCmdList["TCPROBE"] = function(msg)
+    local word, rest = (msg or ""):match("^%s*(%S*)%s*(.-)%s*$")
+    word = word:lower()
+    if word == "slot" then return probeSlot(rest) end
+    if word == "source" then return probeSource(rest) end
+    return base(msg)
+end
+end)()
