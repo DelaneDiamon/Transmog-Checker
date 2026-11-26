@@ -168,6 +168,8 @@ function Fake.new(opts)
     function methods:SetWidth(w) self.width = w end
     function methods:SetHeight(h) self.height = h end
     function methods:GetSize() return self.width, self.height end
+    function methods:GetWidth() return self.width end
+    function methods:GetHeight() return self.height end
     -- Visibility as the client keeps it: a frame is visible when it and every
     -- parent is shown, and OnShow / OnHide fire when that changes, for the
     -- frame and for each shown child under it. Children get theirs before
@@ -218,6 +220,8 @@ function Fake.new(opts)
     function methods:ClearFocus() self.focus = false end
     function methods:HasFocus() return self.focus == true end
     function methods:GetText() return self.text end
+    -- a font string's text width: 6 for each character
+    function methods:GetStringWidth() return #(self.text or "") * 6 end
     function methods:GetName() return self.name end
     function methods:SetEnabled(on) self.enabled = on and true or false end
     function methods:Enable() self.enabled = true end
@@ -432,6 +436,8 @@ function Fake.new(opts)
         setmetatable(w, dropdownMeta)
         local selectionText = template == "WowStyle1DropdownTemplate"
         w.intrinsic = "DropdownButton"
+        -- the template's own size (Blizzard_Menu/Mainline/MenuTemplates.xml:4)
+        if selectionText then w.width, w.height = 120, 25 end
         w.Text = w:CreateFontString()
         w.scripts.OnMouseDown = function(self) self:SetMenuOpen(not self:IsMenuOpen()) end
         if opts.noMenuAPI then return w end

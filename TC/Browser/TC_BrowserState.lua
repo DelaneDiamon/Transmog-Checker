@@ -10,9 +10,6 @@ local State = TC.BrowserState
 -- Layout B: 8 columns of 3 rows, 24 tiles a page, whether a flyout is open
 -- or not.
 local PAGE_SIZE = 24
--- The wheel mark glows this long after two arrow clicks in a row (layout B,
--- section 8).
-local GLOW_SECONDS = 2
 local ALL_WEAPON_TYPES = "All weapon types"
 -- From 100 gold up a tile leaves the copper out (spec 2.5).
 local TILE_COPPER_BELOW = 100 * 10000
@@ -46,8 +43,10 @@ local refreshing
 -- active: the running one ({ appearance }). known: { items, all } per
 -- appearance once a check or an item read learnt them, the tradeable items
 -- and all items; reading: item reads in flight. variantNames: item variants'
--- names once the client gave them, by item key.
-local kept, latest, checking, waitingChecks, active, known, reading, variantNames
+-- names once the client gave them, by item key. noAnswer: appearances whose
+-- last check ended as "could not check", which their tile says until the next
+-- click or a result.
+local kept, latest, checking, waitingChecks, active, known, reading, variantNames, noAnswer
 -- The scans of the visit, by slot. scans: the kept result of the slot's last
 -- finished scan ({ results, none, pages, at }). scan: the one scan that runs
 -- ({ slot, results, pages, expected }), or nil. failures: { results } of a
@@ -66,9 +65,6 @@ local keyGen = 0
 local visit = 0
 -- True from Leave until Enter: the tab is not shown, so nothing is asked.
 local away = false
--- The wheel hint: arrow clicks in a row that turned a page, and the time the
--- glow ends, nil without one.
-local arrowClicks, glowUntil = 0, nil
 local KEYS_PER_FRAME = 20
 
 -- The class dropdown's value for "All classes"; a class is its class id.
@@ -92,7 +88,7 @@ end
 view = startView()
 
 local function clearResults()
-    kept, latest, checking, waitingChecks, active, known, reading, variantNames = {}, {}, {}, {}, nil, {}, {}, {}
+    kept, latest, checking, waitingChecks, active, known, reading, variantNames, noAnswer = {}, {}, {}, {}, nil, {}, {}, {}, {}
     scans, scan, failures, stoppedScan = {}, nil, {}, nil
     list, lists, collected, weaponTypes = nil, {}, {}, {}
     keyState, keyOf, keyQueue, keyTicking = {}, {}, {}, false
@@ -488,7 +484,6 @@ function State.Reset()
     stopReads()
     visit = visit + 1
     view = startView()
-    arrowClicks, glowUntil = 0, nil
     clearResults()
     TC.Appearances.ResetLoads()
     if changed then notify() end
@@ -507,8 +502,6 @@ function State.Leave()
     if not next(checking) and not scan then return end
     batch(function()
         stopReads(true)
-        -- a check stopped before its items loaded still gives the head
-        if view.open then learnItems(view.open) end
         notify()
     end)
 end
@@ -728,7 +721,7 @@ local function runNext()
         if active ~= run then return end
         result.at, result.slot = now(), appearance.slot
         latest[id] = result
-        if result.outcome ~= "could not check" then kept[id] = result end
+        if result.outcome ~= "could not check" then kept[id] = result else noAnswer[id] = true end
         if result.error then State.lastError = result.error end
         checking[id], active = nil, nil
         settle()
@@ -745,7 +738,7 @@ local function runNext()
 end
 
 local function startCheck(appearance)
-    checking[appearance.id] = {}
+    checking[appearance.id], noAnswer[appearance.id] = {}, nil
     waitingChecks[#waitingChecks + 1] = appearance
     runNext()
 end
@@ -756,21 +749,23 @@ local function closeList()
     notify()
 end
 
--- A click on a tile opens its flyout and, when nothing is kept about the
--- appearance from a check or a scan and no check of it runs, starts a check.
--- A second click on the open tile closes it (layout B, decision 3). The page
--- never changes.
+-- A click on a tile checks or opens, two different clicks. The open tile's
+-- click closes its flyout. A tile with a kept result (a check or a scan)
+-- opens its flyout, moving an open one. A tile whose check runs or waits
+-- does nothing. Any other tile starts its check, closing an open flyout, and
+-- opens nothing; the result lands on its strip. The page never changes.
 function State.ClickTile(appearance)
     if dialogOpen() then return end
-    if view.open and view.open.id == appearance.id then return closeList() end
+    local id = appearance.id
+    if view.open and view.open.id == id then return closeList() end
+    local result = tileResult(id)
+    if checking[id] and not result then return end
     batch(function()
-        view.open = appearance
-        local id = appearance.id
-        if checking[id] then
-            -- its check runs or waits
-        elseif tileResult(id) then
+        if result then
+            view.open = appearance
             learnItems(appearance)
         else
+            view.open = nil
             startCheck(appearance)
         end
         notify()
@@ -813,34 +808,12 @@ local function turn(step)
     return true
 end
 
--- An arrow click. The second arrow click in a row that turned a page makes
--- the wheel mark glow for GLOW_SECONDS (layout B, section 8); the listener
--- is told when the glow ends.
-local function arrow(step)
-    if not turn(step) then return end
-    arrowClicks = arrowClicks + 1
-    if arrowClicks >= 2 then
-        arrowClicks = 0
-        local ends = now() + GLOW_SECONDS
-        glowUntil = ends
-        if C_Timer and C_Timer.After then
-            C_Timer.After(GLOW_SECONDS, function()
-                if glowUntil == ends then notify() end
-            end)
-        end
-    end
-    notify()
-end
+function State.NextPage() if turn(1) then notify() end end
+function State.PreviousPage() if turn(-1) then notify() end end
 
-function State.NextPage() arrow(1) end
-function State.PreviousPage() arrow(-1) end
-
--- The mouse wheel over the tiles: up is the previous page. A wheel turn ends
--- the glow and the row of arrow clicks.
+-- The mouse wheel over the tiles: up is the previous page.
 function State.Wheel(delta)
-    local glowing = glowUntil ~= nil and now() < glowUntil
-    arrowClicks, glowUntil = 0, nil
-    if turn(delta > 0 and -1 or 1) or glowing then notify() end
+    if turn(delta > 0 and -1 or 1) then notify() end
 end
 
 -- The empty-state buttons' actions.
@@ -1009,7 +982,7 @@ local function statusLine(answer)
     elseif scans[slot] then
         answer.status, answer.statusButton = age(scans[slot].at, "Scanned"), SCAN_AGAIN
     elseif view.mode == "All" then
-        answer.statusButton, answer.statusButtonLeads = PRICE_SLOT, true
+        answer.statusButton = PRICE_SLOT
     end
     if answer.statusButton then answer.statusAction = State.ScanAgain end
 end
@@ -1093,7 +1066,7 @@ function State.View()
         mode = view.mode, filter = filter, page = view.page, slots = slotRow(),
         weaponTypes = slot.weapon and weaponDropdown() or nil, classes = classDropdown(), search = view.search,
         filters = showEntries(filter), filterFixed = forSaleMode, filtersChanged = not filtersAtStart(),
-        status = STATUS_ALL, tiles = {}, count = "", wheelGlow = glowUntil ~= nil and now() < glowUntil,
+        status = STATUS_ALL, tiles = {}, count = "",
         pageText = "", paging = false, previousEnabled = false, nextEnabled = false,
     }
     statusLine(answer)
@@ -1113,6 +1086,10 @@ function State.View()
             tile.price = moneyText(tile.money)
         elseif result then
             tile.strip, tile.price = "not for sale", "Not for sale"
+        elseif checking[appearance.id] then
+            tile.strip = "bar"
+        elseif noAnswer[appearance.id] then
+            tile.strip, tile.price = "no answer", "No answer"
         end
         answer.tiles[#answer.tiles + 1] = tile
     end
@@ -1129,6 +1106,8 @@ function State.View()
     local total = #typed()
     answer.count = countText(#appearances, total)
     answer.pageText = ("Page %d / %d"):format(view.page, math.max(pages, 1))
+    -- the widest form of the page text for this count, so its room never changes
+    answer.pageTextWidest = ("Page %d / %d"):format(math.max(pages, 1), math.max(pages, 1))
     answer.paging = pages > 1
     answer.previousEnabled = view.page > 1
     answer.nextEnabled = view.page < pages

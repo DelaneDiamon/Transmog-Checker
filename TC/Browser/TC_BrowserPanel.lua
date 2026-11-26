@@ -24,13 +24,16 @@ local BORDER_OPEN = { 1, 0.82, 0, 1 }
 local STRIP_EMPTY = { 0.04, 0.04, 0.04, 1 }
 local STRIP_CHECKED = { 0.12, 0.12, 0.12, 1 }
 -- The flyout (layout B, section 6): 232 wide, as high as its parts (head
--- 66, summary 18, rows of 40, foot 28) and at most 300; four rows show, more
--- scroll. It opens right of its tile in columns 1 to 5, left in 6 to 8, 8
+-- 66, which holds the summary line right of the model, rows of 40, foot 28)
+-- and at most 300; four rows show, more scroll. It opens right of its tile in columns 1 to 5, left in 6 to 8, 8
 -- from the tile, its top 28 above the tile's, moved up so it never passes
 -- the grid's bottom (y 440). The notch stays on the tile's middle.
 local FLY_WIDTH, FLY_MAX, FLY_GAP, FLY_ABOVE, GRID_BOTTOM, RIGHT_COLUMNS = 232, 300, 8, 28, 440, 5
-local FLY_HEAD, FLY_SUMMARY, FLY_TEXT, FLY_ROW, FLY_NOTE, FLY_FOOT, FLY_ROWS = 66, 18, 30, 40, 14, 28, 4
+local FLY_HEAD, FLY_TEXT, FLY_ROW, FLY_NOTE, FLY_FOOT, FLY_ROWS = 66, 30, 40, 14, 28, 4
 local FLY_INSIDE = FLY_WIDTH - 20
+-- The head's texts start right of the model (x 62) and stop before the close mark.
+local HEAD_TEXT_X = 62
+local HEAD_TEXT_WIDTH = FLY_WIDTH - HEAD_TEXT_X - 28
 local FLY_EDGE = { 0.54, 0.45, 0.30, 1 }
 local FLY_FILL = { 0.04, 0.035, 0.03, 0.97 }
 local NOTCH_SIZE = 12
@@ -59,6 +62,8 @@ local TOGGLE_Y, TOGGLE_SIZE, GLYPH_SIZE = 4, 30, 16
 local MEDIA = "Interface\\AddOns\\TransmogChecker\\Media\\"
 -- The catalogue glyph is white art tinted, lit and dim (the page's colours).
 local GLYPH_ON, GLYPH_OFF = { 1, 0.914, 0.659, 1 }, { 0.604, 0.569, 0.498, 1 }
+-- The unselected glyph's alpha while the selected toggle carries the ring.
+local GLYPH_DIM_ALPHA = 0.45
 local TOGGLES = {
     { mode = "All", x = 60, art = "catalogue", tint = true, title = "All appearances",
         text = "Every appearance of the slot. A click on a tile checks it." },
@@ -84,14 +89,17 @@ local FUNNEL_ATLAS, RESET_ATLAS = "Map-Filter-Button", "auctionhouse-ui-filter-r
 local FUNNEL_TEXT, FUNNEL_TIP = "Filter", "Filter: show and class"
 local CLASS_TEXT, RESET_TEXT = "Class: %s", "Reset filters"
 -- The band under the header: the count at x 28, y 50, and the weapon type
--- dropdown (Collections' width, Blizzard_Wardrobe.lua:568) at x 598, y 47.
+-- dropdown (Collections' width, Blizzard_Wardrobe.lua:568) at x 598, its
+-- vertical centre at y 58 (a 22 high box from y 47, whatever height the
+-- dropdown template gives it).
 local COUNT_X, COUNT_Y = 28, 50
-local WEAPON_X, WEAPON_Y, WEAPON_WIDTH = 598, 47, 157
--- The status line at x 62, y 445 (x 28 holds a later step's button), and
--- paging at the right, 4 in, with the wheel mark before the page text
--- (layout B, section 8).
-local STATUS_X, STATUS_Y, STATUS_BUTTON, OFFER_BUTTON = 62, 445, 90, 110
-local PAGING_RIGHT, PAGING_Y, WHEEL_WIDTH, WHEEL_HEIGHT = 4, 445, 16, 16
+local WEAPON_X, WEAPON_CENTRE, WEAPON_WIDTH, WEAPON_HEIGHT = 598, 58, 157, 22
+-- The bottom row sits between the grid's edges: the status button, when
+-- there is one, at the grid's left edge, always at one place and one width,
+-- the status text after it; paging ends at the grid's right edge, with the
+-- wheel mark before the page text (layout B, section 8).
+local STATUS_Y, STATUS_BUTTON = 445, 110
+local PAGING_Y, WHEEL_WIDTH, WHEEL_HEIGHT = 445, 16, 16
 local NEXT_TIP, PREVIOUS_TIP = "Next page", "Previous page"
 local WHEEL_TIP, ARROW_HINT = "Mouse wheel over the tiles turns pages", "Mouse wheel over the tiles turns pages too."
 
@@ -339,10 +347,10 @@ local function drawTile(tile, shown)
     local border = shown.open and BORDER_OPEN or shown.collected and BORDER_COLLECTED or BORDER
     tile.border:SetColorTexture(unpack(border))
     tile.check:SetShown(shown.collected == true)
-    tile.strip:SetColorTexture(unpack((shown.strip == "not checked" or shown.strip == "bar") and STRIP_EMPTY
-        or STRIP_CHECKED))
+    tile.strip:SetColorTexture(unpack((shown.strip == "not checked" or shown.strip == "bar" or shown.strip == "no answer")
+        and STRIP_EMPTY or STRIP_CHECKED))
     tile.price:SetText(shown.money and moneyMarkup(shown.money) or "")
-    tile.notForSale:SetText(shown.strip == "not for sale" and shown.price or "")
+    tile.notForSale:SetText((shown.strip == "not for sale" or shown.strip == "no answer") and shown.price or "")
     tile.bar:SetShown(shown.strip == "bar")
     if shown.appearance then
         show(tile, "weaponModel", tile.model, shown.appearance, shown.weapon, function()
@@ -395,7 +403,7 @@ end
 -- How many rows a flyout shows and its height, from its parts (layout B,
 -- section 6).
 local function flyoutSize(list)
-    local fixed = FLY_HEAD + FLY_SUMMARY + FLY_FOOT + (list.text and FLY_TEXT or 0) + (list.foot.note and FLY_NOTE or 0)
+    local fixed = FLY_HEAD + FLY_FOOT + (list.text and FLY_TEXT or 0) + (list.foot.note and FLY_NOTE or 0)
     local rows = math.min(#list.rows, FLY_ROWS, math.floor((FLY_MAX - fixed) / FLY_ROW))
     return rows, fixed + rows * FLY_ROW
 end
@@ -437,8 +445,8 @@ local function newFlyout(panel, level, overTile)
     -- tile's check
     local model = newModel(frame, 10, -8, HEAD_MODEL_WIDTH, HEAD_MODEL_HEIGHT)
     local typeText = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    typeText:SetPoint("TOPLEFT", frame, "TOPLEFT", 62, -10)
-    typeText:SetWidth(FLY_WIDTH - 62 - 28)
+    typeText:SetPoint("TOPLEFT", frame, "TOPLEFT", HEAD_TEXT_X, -10)
+    typeText:SetWidth(HEAD_TEXT_WIDTH)
     typeText:SetJustifyH("LEFT")
     local collectedText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     collectedText:SetPoint("TOPLEFT", typeText, "BOTTOMLEFT", 0, -4)
@@ -459,18 +467,15 @@ local function newFlyout(panel, level, overTile)
     close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -4, -4)
     close:SetScript("OnClick", State.CloseList)
 
-    -- body: the summary line, a text, the rows
+    -- the summary line, under the type (and "Collected"), right of the model
     -- SpinnerTemplate: Blizzard_SharedXML/Spinner.xml:3
     local spinner = templated("Frame", frame, "SpinnerTemplate")
-    if spinner then
-        spinner:SetSize(16, 16)
-        spinner:SetPoint("TOPLEFT", frame, "TOPLEFT", 10, -FLY_HEAD + 1)
-    end
+    if spinner then spinner:SetSize(16, 16) end
     local title = frame:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-    title:SetWidth(FLY_INSIDE)
     title:SetJustifyH("LEFT")
+    -- body: a text, the rows
     local text = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    text:SetPoint("TOPLEFT", frame, "TOPLEFT", 10, -(FLY_HEAD + FLY_SUMMARY))
+    text:SetPoint("TOPLEFT", frame, "TOPLEFT", 10, -FLY_HEAD)
     text:SetWidth(FLY_INSIDE)
     text:SetJustifyH("LEFT")
     -- offset: the rows scrolled past; shown: the rows that fit
@@ -542,10 +547,18 @@ local function newFlyout(panel, level, overTile)
         collectedCheck:SetShown(list.collected)
         local checking = list.state == "checking"
         if spinner then spinner:SetShown(checking) end
-        title:SetPoint("TOPLEFT", frame, "TOPLEFT", (checking and spinner) and 30 or 10, -FLY_HEAD - 2)
+        local above = list.collected and collectedText or typeText
+        local indent = (checking and spinner) and 20 or 0
+        if spinner then
+            spinner:ClearAllPoints()
+            spinner:SetPoint("TOPLEFT", above, "BOTTOMLEFT", 0, -2)
+        end
+        title:ClearAllPoints()
+        title:SetPoint("TOPLEFT", above, "BOTTOMLEFT", indent, -3)
+        title:SetWidth(HEAD_TEXT_WIDTH - indent)
         title:SetText(list.title or "")
         text:SetText(list.text or "")
-        local rowsTop = FLY_HEAD + FLY_SUMMARY + (list.text and FLY_TEXT or 0)
+        local rowsTop = FLY_HEAD + (list.text and FLY_TEXT or 0)
         for i, row in ipairs(rows) do
             local shownRow = i <= shown and list.rows[offset + i]
             row:SetShown(shownRow and true or false)
@@ -625,7 +638,8 @@ end
 -- A dropdown from Blizzard's menu templates (Blizzard_Menu/Mainline/
 -- MenuTemplates.xml:3-39 and :66-117; Classic/MenuTemplates.xml has the same
 -- names), made from Lua as Blizzard_Menu/11_0_0_MenuImplementationGuide.lua:107
--- shows, in the size box of the button it replaces. The client's own menu
+-- shows, in the width of the button it replaces (and its height, unless none is
+-- given: then the template's own). The client's own menu
 -- opens on a press and is filled by fill(root) each time it opens
 -- (DropdownButton.lua:100-131, 237-264). Nil when the client lacks the
 -- template or the menu API (SetupMenu, CloseMenu, the text setter), so the
@@ -642,7 +656,7 @@ local function menuDropdown(parent, template, width, height, setText, fill)
     end
     -- as Collections sets its Filter (Blizzard_Wardrobe.xml:405-412)
     button.resizeToText = false
-    button:SetSize(width, height)
+    if height then button:SetSize(width, height) else button:SetWidth(width) end
     if not pcall(button.SetupMenu, button, function(_, root) fill(root) end) then
         button:Hide()
         return nil
@@ -722,8 +736,14 @@ end
 -- auction house's favourites button, Blizzard_AuctionHouseSearchBar.xml:11;
 -- IconButtonTemplate.xml:40-57), or a bare button with its own icon, holding
 -- the addon's glyph from Media. A texture file cannot be tested for, so the
--- tooltip names it. The selected one is lit (LockHighlight). It forwards the
--- click to the state.
+-- An atlas on a texture, when the client has SetAtlas (read from source).
+local function setAtlas(texture, atlas, useAtlasSize)
+    if texture.SetAtlas then texture:SetAtlas(atlas, useAtlasSize) end
+end
+
+-- tooltip names it. The selected one carries the slot row's gold ring and the
+-- other's glyph is dimmed; without the ring's atlas the selected one is lit
+-- instead (LockHighlight). It forwards the click to the state.
 local function newToggle(panel, toggle)
     local button = templated("Button", panel, "SquareIconButtonTemplate")
     if not (button and button.Icon) then
@@ -739,16 +759,24 @@ local function newToggle(panel, toggle)
     button:SetScript("OnClick", function() State.SelectMode(toggle.mode) end)
     tooltip(button, toggle.title, toggle.text)
     button.mode = toggle.mode
+    if button.CreateTexture and hasAtlas(SLOT_SELECTED) then
+        button.ring = button:CreateTexture(nil, "OVERLAY")
+        button.ring:SetPoint("CENTER")
+        setAtlas(button.ring, SLOT_SELECTED, true)
+    end
     function button.draw(selected)
-        if selected then button:LockHighlight() else button:UnlockHighlight() end
+        if button.ring then
+            button.ring:SetShown(selected)
+            button.Icon:SetAlpha(selected and 1 or GLYPH_DIM_ALPHA)
+            if button.Icon.SetDesaturated then button.Icon:SetDesaturated(not selected) end
+        elseif selected then
+            button:LockHighlight()
+        else
+            button:UnlockHighlight()
+        end
         if toggle.tint then button.Icon:SetVertexColor(unpack(selected and GLYPH_ON or GLYPH_OFF)) end
     end
     return button
-end
-
--- An atlas on a texture, when the client has SetAtlas (read from source).
-local function setAtlas(texture, atlas, useAtlasSize)
-    if texture.SetAtlas then texture:SetAtlas(atlas, useAtlasSize) end
 end
 
 -- The slot row: one round button per slot of TC.Slots, in its groups, with
@@ -805,7 +833,7 @@ end
 -- opens a list under its right edge. It is hidden on armor slots.
 local function newDropdown(panel, width, pick)
     local current
-    local dropdown = menuDropdown(panel, "WowStyle1DropdownTemplate", width, 22, "OverrideText", function(root)
+    local dropdown = menuDropdown(panel, "WowStyle1DropdownTemplate", width, nil, "OverrideText", function(root)
         for i, shown in ipairs(current and current.entries or {}) do
             root:CreateRadio(shown.name, function(entry) return entry ~= nil and entry.selected end,
                 function(entry) if entry then pick(entry.value) end end, shown)
@@ -822,7 +850,7 @@ local function newDropdown(panel, width, pick)
         return dropdown
     end
     local menu
-    local button = newButton(panel, "", width, 22, function() menu:SetShown(not menu:IsShown()) end)
+    local button = newButton(panel, "", width, WEAPON_HEIGHT, function() menu:SetShown(not menu:IsShown()) end)
     menu = listMenu(panel, button, width, "RIGHT")
     function button.draw(answer)
         button:SetShown(answer ~= nil)
@@ -906,6 +934,10 @@ local function newFunnel(panel)
     function funnel.draw(view)
         current = view
         mark:SetShown(view.filtersChanged)
+        -- the button itself looks active while a choice differs from the start
+        if funnel.LockHighlight then
+            if view.filtersChanged then funnel:LockHighlight() else funnel:UnlockHighlight() end
+        end
         if not menu then return end
         local items = {}
         for _, entry in ipairs(view.filters) do
@@ -971,7 +1003,7 @@ local function buildBrowser(panel)
     local count = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     count:SetPoint("TOPLEFT", panel, "TOPLEFT", COUNT_X, -COUNT_Y)
     local weaponType = newDropdown(panel, WEAPON_WIDTH, State.SelectWeaponType)
-    weaponType:SetPoint("TOPLEFT", panel, "TOPLEFT", WEAPON_X, -WEAPON_Y)
+    weaponType:SetPoint("LEFT", panel, "TOPLEFT", WEAPON_X, -WEAPON_CENTRE)
 
     local grid = CreateFrame("Frame", nil, panel)
     grid:SetPoint("TOPLEFT", panel, "TOPLEFT", GRID_X, -GRID_Y)
@@ -1008,14 +1040,17 @@ local function buildBrowser(panel)
     -- and the arrows; hidden with one page
     local paging = CreateFrame("Frame", nil, panel)
     paging:SetSize(200, 24)
-    paging:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -PAGING_RIGHT, -PAGING_Y)
+    paging:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -GRID_X, -PAGING_Y)
     local previous = arrowButton(paging, "Prev", State.PreviousPage, PREVIOUS_TIP)
     local nextPage = arrowButton(paging, "Next", State.NextPage, NEXT_TIP)
     nextPage:SetPoint("RIGHT", paging, "RIGHT", 0, 0)
     previous:SetPoint("RIGHT", nextPage, "LEFT", -TOOLS_GAP, 0)
     local pageText = paging:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     pageText:SetPoint("RIGHT", previous, "LEFT", -TOOLS_GAP - 5, 0)
-    -- the wheel mark, the addon's art; the same art added on top makes it glow
+    pageText:SetJustifyH("RIGHT")
+    -- the widest form of the page text seen, whose width the text keeps
+    local widestPage
+    -- the wheel mark, the addon's art, with its own tooltip
     local wheelMark = CreateFrame("Frame", nil, paging)
     wheelMark:SetSize(WHEEL_WIDTH, WHEEL_HEIGHT)
     wheelMark:SetPoint("RIGHT", pageText, "LEFT", -7, 0)
@@ -1024,13 +1059,9 @@ local function buildBrowser(panel)
     local wheelArt = wheelMark:CreateTexture(nil, "ARTWORK")
     wheelArt:SetAllPoints()
     wheelArt:SetTexture(MEDIA .. "wheel")
-    local wheelGlow = wheelMark:CreateTexture(nil, "OVERLAY")
-    wheelGlow:SetAllPoints()
-    wheelGlow:SetTexture(MEDIA .. "wheel")
-    wheelGlow:SetBlendMode("ADD")
 
-    -- the status line: its text and one button, the button first when it
-    -- leads ("Price this slot"), and a progress bar while a scan runs
+    -- the status line: one button, always first at the grid's left edge, its
+    -- text after it, and a progress bar while a scan runs
     local status = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     status:SetHeight(24)
     status:SetJustifyH("LEFT")
@@ -1038,6 +1069,7 @@ local function buildBrowser(panel)
     local statusButton = newButton(panel, "", STATUS_BUTTON, 20, function()
         if statusAction then statusAction() end
     end)
+    statusButton:SetPoint("TOPLEFT", panel, "TOPLEFT", GRID_X, -STATUS_Y - 2)
     local progress = panel:CreateTexture(nil, "ARTWORK")
     progress:SetSize(PROGRESS_WIDTH, PROGRESS_HEIGHT)
     progress:SetPoint("LEFT", status, "RIGHT", TOOLS_GAP, 0)
@@ -1080,25 +1112,25 @@ local function buildBrowser(panel)
         showAll:SetText(empty and empty.button or "")
         showAll:SetShown(empty ~= nil and empty.button ~= nil)
         emptyAction = empty and empty.action
+        -- the room of the page text is that of its widest form for the page
+        -- count, so nothing left of it moves while the page changes
+        if view.pageTextWidest ~= widestPage and pageText.GetStringWidth then
+            widestPage = view.pageTextWidest
+            pageText:SetText(widestPage)
+            local width = pageText:GetStringWidth()
+            if width and width > 0 then pageText:SetWidth(width) end
+        end
         pageText:SetText(view.pageText)
         previous:SetEnabled(view.previousEnabled)
         nextPage:SetEnabled(view.nextEnabled)
         paging:SetShown(view.paging)
-        wheelGlow:SetShown(view.wheelGlow)
         status:SetText(view.status)
         statusButton:SetText(view.statusButton or "")
         statusButton:SetShown(view.statusButton ~= nil)
-        statusButton:SetWidth(view.statusButtonLeads and OFFER_BUTTON or STATUS_BUTTON)
         statusAction = view.statusAction
         status:ClearAllPoints()
-        statusButton:ClearAllPoints()
-        if view.statusButtonLeads then
-            statusButton:SetPoint("TOPLEFT", panel, "TOPLEFT", STATUS_X, -STATUS_Y - 2)
-            status:SetPoint("LEFT", statusButton, "RIGHT", TOOLS_GAP, 0)
-        else
-            status:SetPoint("TOPLEFT", panel, "TOPLEFT", STATUS_X, -STATUS_Y)
-            statusButton:SetPoint("LEFT", status, "RIGHT", TOOLS_GAP, 0)
-        end
+        status:SetPoint("TOPLEFT", panel, "TOPLEFT", view.statusButton and (GRID_X + STATUS_BUTTON + TOOLS_GAP) or GRID_X,
+            -STATUS_Y)
         progress:SetShown(view.progress ~= nil)
         progressFill:SetShown((view.progress or 0) > 0)
         progressFill:SetWidth(math.max(1, PROGRESS_WIDTH * (view.progress or 0)))
