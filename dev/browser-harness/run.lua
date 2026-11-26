@@ -8082,6 +8082,475 @@ test("TC-35b robustness: a rule that raises leaves only its line out, reported o
     sentNothing(c, "hovering")
 end)
 
+---------------------------------------------------------------- Bought, not collected (TC-39)
+
+-- The default 370 Head appearances (1001 to 1005 collected); item <id>*10+1
+-- carries appearance <id>. bags: the backpack's item ids.
+local function pendingState(bags, opts)
+    opts = opts or {}
+    opts.bags = { [0] = bags or {} }
+    local c = bootState(opts)
+    TC.BrowserState.SetBags(TC.Appearances.ReadBags())
+    TC.BrowserState.Refresh()
+    return c
+end
+local function bagsChanged(c, bags)
+    c.bags[0] = bags
+    TC.BrowserState.SetBags(TC.Appearances.ReadBags())
+end
+-- A tile of the current view by appearance id, on any page.
+local function anyTile(id)
+    local S = TC.BrowserState
+    while S.View().page > 1 do S.PreviousPage() end
+    repeat
+        for _, tile in ipairs(S.View().tiles) do
+            if tile.appearance and tile.appearance.id == id then return tile end
+        end
+        local was = S.View().page
+        S.NextPage()
+    until S.View().page == was
+end
+
+test("TC-39 bags: an item in the bags whose appearance is not collected makes it pending; removing it ends that", function()
+    local c = pendingState({ 10101, false, 10011 })
+    TC.BrowserState.SetFilter("All")
+    equal(anyTile(1010).pending, true, "1010, its item in the bags")
+    equal(anyTile(1001).pending, nil, "1001 is collected: never pending")
+    equal(anyTile(1001).collected, true, "1001 collected")
+    equal(anyTile(1011).pending, nil, "1011, nothing in the bags")
+    bagsChanged(c, { false, false, 10011 })
+    equal(anyTile(1010).pending, nil, "1010 after its item left the bags")
+    noErrors(c, "bags")
+    sentNothing(c, "bags")
+end)
+
+test("TC-39 sweep: a pending appearance is absent from For sale, the count follows, and it returns when its bag item goes", function()
+    local c = scanState(SAMPLE, { bags = { [0] = { 10201, 10011 } } })
+    TC.BrowserState.SetBags(TC.Appearances.ReadBags())
+    TC.BrowserState.SelectMode("For sale")
+    c.advance(10)
+    local v = TC.BrowserState.View()
+    equal(tileIDs(v), "1030,1010", "tiles without the pending 1020")
+    equal(v.count, "2 of 370 appearances", "count text")
+    bagsChanged(c, { 10011 })
+    v = TC.BrowserState.View()
+    equal(tileIDs(v), "1020,1030,1010", "1020 back once its item left the bags, not collected")
+    equal(v.count, "3 of 370 appearances", "count text after")
+    noErrors(c, "sweep")
+end)
+
+-- buyWhole, then the purchase of Willow Boots (appearance 1) completed.
+local function bought(opts)
+    local c = buyWhole(opts)
+    openDialog(c)
+    c.click(dialogOf(c).buyButton)
+    c.advance(0.25)
+    return c
+end
+local function wholeTile(id)
+    for _, tile in ipairs(TC.BrowserState.View().tiles) do
+        if tile.appearance and tile.appearance.id == id then return tile end
+    end
+end
+
+test("TC-39 bought: a completed purchase makes the appearance pending at once, through closing and reopening", function()
+    local c = buyWhole()
+    equal(wholeTile(1).pending, nil, "not pending before the purchase")
+    openDialog(c)
+    c.click(dialogOf(c).buyButton)
+    c.advance(0.25)
+    check(not dialogShown(c), "the purchase completed")
+    equal(wholeTile(1).pending, true, "pending at once")
+    equal(wholeTile(2).pending, nil, "the other appearance")
+    c.closeAuction()
+    c.openAuction()
+    c.tabs[1].scripts.OnClick(c.tabs[1])
+    equal(wholeTile(1).pending, true, "pending after the window closed and opened again")
+    noErrors(c, "bought")
+end)
+
+test("TC-39 bought: the collection event that marks it collected ends pending; collected on receipt leaves no mark", function()
+    local c = bought()
+    equal(wholeTile(1).pending, true, "pending")
+    c.collectedSources[11] = true
+    c.fire("TRANSMOG_COLLECTION_UPDATED")
+    TC.BrowserState.SetFilter("All")
+    equal(wholeTile(1).pending, nil, "not pending once collected")
+    equal(wholeTile(1).collected, true, "collected")
+    -- collected on receipt: the collection event arrives with the purchase
+    c = buyWhole()
+    openDialog(c)
+    c.click(dialogOf(c).buyButton)
+    c.collectedSources[11] = true
+    c.advance(0.25)
+    c.fire("TRANSMOG_COLLECTION_UPDATED")
+    TC.BrowserState.SetFilter("All")
+    equal(wholeTile(1).pending, nil, "no pending mark")
+    equal(wholeTile(1).collected, true, "collected")
+    c.closeAuction()
+    c.openAuction()
+    c.tabs[1].scripts.OnClick(c.tabs[1])
+    TC.BrowserState.SetFilter("All")
+    equal(wholeTile(1).pending, nil, "nor on the next visit")
+    noErrors(c, "collected on receipt")
+end)
+
+local IN_BAGS = "In your bags: equip it or sell it to a vendor to collect."
+local BOUGHT = "Bought: take it from the mailbox, then equip it or sell it to a vendor to collect."
+
+test("TC-39 tooltip and flyout: each sentence, before the price lines and in the head in the place of Collected", function()
+    local c = bought()
+    local appearance = TC.BrowserState.View().list.appearance
+    equal(appearance.id, 1, "the open flyout is the bought appearance")
+    local tip = stateTip(appearance)
+    local at, price = tip:find(BOUGHT, 1, true), tip:find("Lowest price", 1, true)
+    check(at and price and at < price, "the bought sentence before the price lines, got\n" .. tip)
+    equal(TC.BrowserState.View().list.pendingText, BOUGHT, "the flyout's head")
+    equal(TC.BrowserState.View().list.collected, false, "not Collected")
+    -- the item reached the bags: the bag sentence wins
+    c.bags[0] = { 501 }
+    TC.BrowserState.SetBags(TC.Appearances.ReadBags())
+    tip = stateTip(appearance)
+    at, price = tip:find(IN_BAGS, 1, true), tip:find("Lowest price", 1, true)
+    check(at and price and at < price and not tip:find(BOUGHT, 1, true), "the bag sentence, got\n" .. tip)
+    equal(TC.BrowserState.View().list.pendingText, IN_BAGS, "the flyout's head, in the bags")
+    -- not pending: no sentence
+    local other = stateTip(wholeTile(2).appearance)
+    check(not other:find(IN_BAGS, 1, true) and not other:find(BOUGHT, 1, true), "no sentence on another tile")
+    -- a bag item with no result kept: the sentence, then the click hint
+    c = pendingState({ 10101 })
+    tip = stateTip(tileOf(1010).appearance)
+    check(tip:find(IN_BAGS .. "\nClick to check the auction house.", 1, true), "bags without a result, got\n" .. tip)
+    noErrors(c, "tooltip")
+    sentNothing(c, "tooltip")
+end)
+
+test("TC-39 flyout: a pending appearance can be bought again from the catalogue's flyout", function()
+    local c = bought()
+    c.advance(5)
+    local v = TC.BrowserState.View()
+    equal(v.list.appearance.id, 1, "the flyout stays open")
+    equal(v.list.pendingText, BOUGHT, "pending")
+    check(v.list.rows[1] and v.list.rows[1].buy and v.list.rows[1].buy.enabled, "Buy offered again")
+    noErrors(c, "buy again")
+end)
+
+local PENDING_SHOW = "Bought, not collected"
+local function showNames(v)
+    local out = {}
+    for i, e in ipairs(v.filters) do out[i] = e.name end
+    return table.concat(out, ",")
+end
+
+test("TC-39 Show: Bought, not collected is offered only while something is pending, narrows, not in For sale, reset", function()
+    local c = pendingState({}, { appearances = manySlots() })
+    local S = TC.BrowserState
+    equal(showNames(S.View()), "All,Collected,Not collected", "nothing pending: not offered")
+    -- pending in another slot (legs 2005) is enough to offer it
+    bagsChanged(c, { 20051 })
+    equal(showNames(S.View()), "All,Collected,Not collected," .. PENDING_SHOW, "pending in legs: offered on head")
+    S.SetFilter(PENDING_SHOW)
+    local v = S.View()
+    equal(tileIDs(v), "", "no head appearance pending")
+    equal(v.count, "0 of 370 appearances", "count")
+    check(v.empty and v.empty.text == "No head appearance for Warlock is bought and not collected.", "empty state, got "
+        .. tostring(v.empty and v.empty.text))
+    bagsChanged(c, { 20051, 10201, 10101, 10011 })
+    v = S.View()
+    equal(tileIDs(v), "1010,1020", "the pending head appearances, in the list's order; collected 1001 not")
+    equal(v.count, "2 of 370 appearances", "count")
+    equal(v.filter, PENDING_SHOW, "the filter")
+    check(v.filters[4].selected, "the choice marked")
+    equal(v.filtersChanged, true, "a choice differs from the start")
+    S.SelectSlot("legs")
+    equal(tileIDs(S.View()), "2005", "legs: the pending legs appearance")
+    S.SelectMode("For sale")
+    equal(showNames(S.View()), "All,Collected,Not collected", "not offered in For sale")
+    S.SelectMode("All")
+    S.ResetFilters()
+    v = S.View()
+    equal(v.filter, "Not collected", "Reset filters returns to the start")
+    equal(v.filtersChanged, false, "at the start")
+    noErrors(c, "show")
+end)
+
+local PENDING_TEXTURE = "Interface\\PaperDollInfoFrame\\UI-GearManager-ItemIntoBag"
+
+test("TC-39 whole: the bags are read when the tab is shown and once per bag event while shown, never hidden or per frame", function()
+    local c, tabs = visitTwice({ bags = { [0] = { 10101 } } })
+    equal(c.bagReads, 0, "reads before the tab is selected")
+    c.fire("BAG_UPDATE_DELAYED")
+    equal(c.bagReads, 0, "reads for a bag event before the tab is selected")
+    tabs[1].scripts.OnClick(tabs[1])
+    -- one read walks the backpack and the equipped bags 0 to 5
+    equal(c.bagReads, 6, "one read on showing the tab")
+    c.advance(5)
+    equal(c.bagReads, 6, "no read per frame")
+    local requests, itemInfo = #c.loadRequests, c.itemInfoCalls
+    c.bags[0] = { 10201, 10301 }
+    c.fire("BAG_UPDATE_DELAYED")
+    equal(c.bagReads, 12, "one read per bag event")
+    equal(#c.loadRequests, requests, "item data asked by the read")
+    equal(c.itemInfoCalls, itemInfo, "C_Item.GetItemInfo calls by the read")
+    selectBuy()
+    check(not tabs[1].frameRef:IsShown(), "the panel hidden on Buy")
+    c.fire("BAG_UPDATE_DELAYED")
+    equal(c.bagReads, 12, "no read while hidden")
+    tabs[1].scripts.OnClick(tabs[1])
+    equal(c.bagReads, 18, "a read on showing the tab again")
+    c.closeAuction()
+    c.fire("BAG_UPDATE_DELAYED")
+    equal(c.bagReads, 18, "no read once the window closed")
+    noErrors(c, "bag reads")
+    sentNothing(c, "bag reads")
+end)
+
+test("TC-39 whole: a pending tile carries the bag mark at its top right; the flyout head and the funnel say it", function()
+    local c = buyWhole({ client = { bags = { [0] = {} } } })
+    local frames = tileFrames(c)
+    local mark = frames[1].pendingMark
+    check(mark, "the tile has the mark")
+    equal(mark.calls.SetTexture[1], PENDING_TEXTURE, "the owner's texture")
+    equal(mark.width .. "x" .. mark.height, "16x16", "its size")
+    equal(mark.points[1].point .. "/" .. mark.points[1].relativePoint, "TOPRIGHT/TOPRIGHT", "at the top right")
+    equal(mark.points[1].x .. "," .. mark.points[1].y, frames[1].check.points[1].x .. "," .. frames[1].check.points[1].y,
+        "where the collected check sits")
+    check(not visible(mark), "no mark before the purchase")
+    check(not textShown(c, BOUGHT), "no sentence in the head before the purchase")
+    local texts = openMenu(c, funnelOf(c))
+    check(not table.concat(texts, "|"):find(PENDING_SHOW, 1, true), "no Bought choice before the purchase")
+    funnelOf(c):CloseMenu()
+    openDialog(c)
+    c.click(dialogOf(c).buyButton)
+    c.advance(5)
+    check(visible(frames[1].pendingMark), "the mark after the purchase")
+    check(not visible(frames[1].check), "no collected check with it")
+    check(not visible(frames[2].pendingMark), "no mark on the other tile")
+    check(textShown(c, BOUGHT), "the sentence in the flyout's head")
+    check(not textShown(c, "Collected"), "not Collected")
+    local _, choose = openMenu(c, funnelOf(c))
+    check(choose(PENDING_SHOW), "the Bought choice in the funnel's menu")
+    check(textShown(c, "1 of 2 appearances"), "the count after choosing it")
+    -- the bag event: the item reached the bags
+    c.bags[0] = { 501 }
+    c.fire("BAG_UPDATE_DELAYED")
+    check(textShown(c, IN_BAGS), "the bag sentence in the flyout's head")
+    -- collected: the mark goes and the check shows
+    c.collectedSources[11] = true
+    c.fire("TRANSMOG_COLLECTION_UPDATED")
+    TC.BrowserState.SetFilter("All")
+    check(not visible(frames[1].pendingMark) and visible(frames[1].check), "collected: the check, no mark")
+    noErrors(c, "mark")
+end)
+
+test("TC-39 whole: without the container API or the mark's file nothing raises and only the purchase counts", function()
+    local c = buyWhole({ client = { noContainer = true, fileIDs = {} } })
+    c.fire("BAG_UPDATE_DELAYED")
+    equal(tileFrames(c)[1].pendingMark, nil, "no mark made when the file does not load")
+    openDialog(c)
+    c.click(dialogOf(c).buyButton)
+    c.advance(5)
+    equal(TC.BrowserState.View().list.pendingText, BOUGHT, "the purchase still counts")
+    noErrors(c, "no container API")
+    c = buyWhole({ client = { fileIDs = { [PENDING_TEXTURE] = 1 } } })
+    check(tileFrames(c)[1].pendingMark, "a mark made when the file loads")
+    noErrors(c, "with the file")
+end)
+
+---------------------------------------------------------------- TC-39 fixes (F1 to F5)
+
+-- The flyout head's geometry: the pending sentence's bottom, the first row's
+-- top and the flyout's own top and height, all in units below the flyout's top.
+local function headGeometry(c, sentence)
+    local fly = itemListFrame(c)
+    local row = rowBuy(c).parent
+    local function lineHeight(w) return w.GetStringHeight and w:GetStringHeight() or 12 end
+    local geometry = { height = fly.height, rowTop = -row.points[1].y, top = -fly.points[1].y }
+    local s = sentence and find(c, function(w) return w.text == sentence and visible(w) end)
+    if s then
+        local typeText = s.points[1].relativeTo
+        geometry.sentenceTop = -typeText.points[1].y + lineHeight(typeText) - s.points[1].y
+        geometry.sentenceBottom = geometry.sentenceTop + (s.GetStringHeight and s:GetStringHeight() or 48)
+    end
+    return geometry
+end
+
+test("TC-39 F1 flyout head: it follows the pending sentence's height, the rows and foot after it", function()
+    local c = buyWhole()
+    local none = headGeometry(c)
+    equal(none.rowTop, 66, "no line: the head as before")
+    equal(none.height, 66 + 40 + 28, "no line: the flyout as before")
+    openDialog(c)
+    c.click(dialogOf(c).buyButton)
+    c.advance(5)
+    local g = headGeometry(c, BOUGHT)
+    check(g.rowTop > g.sentenceBottom, "the first row (" .. g.rowTop .. ") below the sentence (" .. tostring(g.sentenceBottom) .. ")")
+    equal(g.rowTop - g.sentenceBottom, 66 - 38, "the gap as with one line of Collected")
+    equal(g.height, g.rowTop + 40 + 28, "the rows and the foot follow")
+    check(g.top + g.height <= 440, "it ends at or above the grid's bottom")
+    -- the shorter bag sentence takes fewer lines
+    c.bags[0] = { 501 }
+    c.fire("BAG_UPDATE_DELAYED")
+    local short = headGeometry(c, IN_BAGS)
+    check(short.rowTop < g.rowTop and short.rowTop > short.sentenceBottom, "three lines: a smaller head, still below the text")
+    -- collected: one line, the head as before
+    TC.BrowserState.SetFilter("All")
+    check(TC.BrowserState.View().list, "the flyout stays open")
+    c.collectedSources[11] = true
+    c.fire("TRANSMOG_COLLECTION_UPDATED")
+    local done = headGeometry(c, "Collected")
+    equal(done.rowTop, 66, "Collected: the head as before")
+    equal(done.height, 66 + 40 + 28, "Collected: the flyout as before")
+    noErrors(c, "head")
+end)
+
+test("TC-39 F1 flyout head: without GetStringHeight the head has room for four lines", function()
+    local c = buyWhole({ client = { noStringHeight = true } })
+    openDialog(c)
+    c.click(dialogOf(c).buyButton)
+    c.advance(5)
+    local g = headGeometry(c, BOUGHT)
+    check(g.rowTop > g.sentenceBottom, "the first row below four lines")
+    equal(g.rowTop, 66 + 36, "the fixed allowance")
+    noErrors(c, "no GetStringHeight")
+end)
+
+test("TC-39 F2 bought, seen in the bags, then gone: no longer pending and back in the sweep view", function()
+    local c = scanState(SAMPLE, { bags = { [0] = {} } })
+    local S = TC.BrowserState
+    S.SetBags(TC.Appearances.ReadBags())
+    S.SelectMode("For sale")
+    c.advance(10)
+    local a = { id = 1020 }
+    S.BuyFinished("completed", { appearance = a })
+    equal(tileIDs(S.View()), "1030,1010", "pending from the purchase: out of the sweep view")
+    check(stateTip(a):find(BOUGHT, 1, true), "the mailbox sentence")
+    bagsChanged(c, { 10201 })
+    equal(tileIDs(S.View()), "1030,1010", "in the bags: still out")
+    check(stateTip(a):find(IN_BAGS, 1, true), "the bag sentence")
+    bagsChanged(c, { 10011 })
+    equal(tileIDs(S.View()), "1020,1030,1010", "gone from the bags, not collected: back in the sweep view")
+    local tip = stateTip(a)
+    check(not tip:find(BOUGHT, 1, true) and not tip:find(IN_BAGS, 1, true), "no sentence, got\n" .. tip)
+    bagsChanged(c, {})
+    equal(tileIDs(S.View()), "1020,1030,1010", "later reads change nothing")
+    -- bought again: pending again
+    S.BuyFinished("completed", { appearance = a })
+    equal(tileIDs(S.View()), "1030,1010", "a second purchase counts")
+    noErrors(c, "seen then gone")
+end)
+
+test("TC-39 F2 bought and never in the bags: still pending after several bag reads", function()
+    local c = pendingState({})
+    local S = TC.BrowserState
+    local a = anyTile(1010).appearance
+    S.BuyFinished("completed", { appearance = a })
+    for _, bags in ipairs({ { 10011 }, {}, { 10011, 10021 }, {} }) do bagsChanged(c, bags) end
+    check(stateTip(a):find(BOUGHT, 1, true), "still the mailbox sentence, got\n" .. stateTip(a))
+    equal(anyTile(1010).pending, true, "still pending")
+    noErrors(c, "never in the bags")
+end)
+
+test("TC-39 F3 a collected check that raises leaves the pending state as it was, reported once", function()
+    local c = pendingState({})
+    local S = TC.BrowserState
+    local a = anyTile(1010).appearance
+    c.collectedRaises = true
+    S.BuyFinished("completed", { appearance = a })
+    equal(#c.errors, 1, "reported once")
+    check(c.errors[1]:find("PlayerHasTransmogItemModifiedAppearance", 1, true), "the error: " .. tostring(c.errors[1]))
+    check(S.lastError ~= nil, "kept for a developer")
+    equal(anyTile(1010).pending, nil, "pending as it was: not")
+    bagsChanged(c, { 10101 })
+    equal(#c.errors, 1, "the bag read reports nothing more")
+    equal(anyTile(1010).pending, nil, "still as it was")
+    c.collectedRaises = false
+    bagsChanged(c, { 10101 })
+    equal(anyTile(1010).pending, true, "pending once the check works")
+    equal(#c.errors, 1, "no further report")
+end)
+
+test("TC-39 F4 sweep view: when every look for sale is pending the empty text says so", function()
+    local c = scanState(SAMPLE, { bags = { [0] = { 10101, 10201, 10301 } } })
+    local S = TC.BrowserState
+    S.SetBags(TC.Appearances.ReadBags())
+    S.SelectMode("For sale")
+    c.advance(10)
+    local v = S.View()
+    equal(tileIDs(v), "", "no tiles")
+    check(v.empty, "an empty state")
+    equal(v.empty.title, "Nothing left to buy", "title")
+    equal(v.empty.text, "Every head appearance for sale here is one you bought and have not collected yet.", "text")
+    equal(v.empty.button, "Show all appearances", "the button back to the catalogue")
+    bagsChanged(c, {})
+    v = S.View()
+    check(not v.empty, "no empty state once they are not pending")
+    noErrors(c, "all pending")
+end)
+
+test("TC-39 F5 the Bought, not collected choice goes once the last pending look is collected", function()
+    local c = bought()
+    local S = TC.BrowserState
+    S.SetFilter("All")
+    equal(showNames(S.View()), "All,Collected,Not collected," .. PENDING_SHOW, "offered while pending")
+    c.collectedSources[11] = true
+    c.fire("TRANSMOG_COLLECTION_UPDATED")
+    equal(showNames(S.View()), "All,Collected,Not collected", "not offered after")
+    noErrors(c, "choice gone")
+end)
+
+test("TC-39 F5 the pending mark does not stay on a reused tile frame after a page turn", function()
+    local c, tabs = visitTwice({ bags = { [0] = { 10101 } } })
+    tabs[1].scripts.OnClick(tabs[1])
+    local S = TC.BrowserState
+    S.SetFilter("All")
+    while S.View().page > 1 do S.PreviousPage() end
+    local marked, pages = 0, 0
+    local page
+    repeat
+        pages = pages + 1
+        page = S.View().page
+        local here = 0
+        for _, tile in ipairs(S.View().tiles) do if tile.appearance and tile.appearance.id == 1010 then here = 1 end end
+        local marks = 0
+        for _, frame in ipairs(tileFrames(c)) do
+            if frame.pendingMark and visible(frame.pendingMark) then
+                marks = marks + 1
+                equal(frame.appearance.id, 1010, "a mark only on the pending look")
+            end
+        end
+        equal(marks, here, "page " .. page .. ": the mark follows the look")
+        marked = marked + marks
+        S.NextPage()
+    until S.View().page == page
+    check(pages > 1 and marked == 1, "several pages, the mark on one: " .. pages .. "/" .. marked)
+    noErrors(c, "page turn")
+end)
+
+test("TC-39 F5 the longest tooltip stays within 20 lines, pending lines in, price lines last", function()
+    local appearance1, sourceItems, items = { id = 1, uiOrder = 2, sources = { 11 }, sourceTypes = { 4 }, classes = { [9] = true } },
+        { [11] = 501, [21] = 601 }, { [501] = { name = "Willow Boots", quality = 2, bindType = 2, subType = "Cloth" },
+            [601] = { name = "Ivy Boots", quality = 2, bindType = 2, subType = "Cloth" } }
+    for i = 1, 24 do
+        appearance1.sources[#appearance1.sources + 1], appearance1.sourceTypes[#appearance1.sourceTypes + 1] = 100 + i, 4
+        sourceItems[100 + i], items[700 + i] = 700 + i, { name = "Item " .. i, quality = 2, bindType = 1, subType = "Cloth" }
+    end
+    local c = bought({ client = { appearances = { appearance1,
+        { id = 2, uiOrder = 1, sources = { 21 }, classes = { [9] = true } } }, sourceItems = sourceItems, items = items } })
+    local tip = stateTip(wholeTile(1).appearance)
+    local lines = {}
+    for line in (tip .. "\n"):gmatch("(.-)\n") do lines[#lines + 1] = line end
+    check(#lines <= 20, "at most 20 lines, got " .. #lines .. "\n" .. tip)
+    check(tip:find("more items", 1, true), "the list was cut, got\n" .. tip)
+    local at, price
+    for i, line in ipairs(lines) do
+        if line == BOUGHT then at = i end
+        if line:find("Lowest price", 1, true) then price = i end
+    end
+    check(at and price and at < price and price >= #lines - 2, "the sentence, then the price lines last, got\n" .. tip)
+    noErrors(c, "longest tooltip")
+end)
+
 ---------------------------------------------------------------- run
 
 for _, t in ipairs(tests) do

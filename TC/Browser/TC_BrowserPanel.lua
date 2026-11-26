@@ -71,6 +71,12 @@ local HEAD_MODEL_WIDTH, HEAD_MODEL_HEIGHT = 44, 58
 local BUY_WIDTH, BUY_HEIGHT = 40, 18
 -- Texture paths are inferred from mainline clients, not read for Forever.
 local CHECK_TEXTURE = "Interface\\RaidFrame\\ReadyCheck-Ready"
+-- The mark of a pending appearance (TC-39), the owner's choice in game; this
+-- build's EquipmentFlyout.lua:521 uses the file.
+local PENDING_TEXTURE = "Interface\\PaperDollInfoFrame\\UI-GearManager-ItemIntoBag"
+-- A line of the head's small text; the pending sentence wraps, and the head
+-- grows by what it takes beyond one line (four lines when it cannot be measured).
+local HEAD_LINE, HEAD_LINES_MAX = 12, 4
 local ARROW = "Interface\\Buttons\\UI-SpellbookIcon-%sPage-%s"
 -- Coin atlases of this build's money frame (Blizzard_MoneyFrame/Shared/MoneyFrame.lua:347-354).
 local COIN_ATLAS = { gold = "coin-gold", silver = "coin-silver", copper = "coin-copper" }
@@ -387,7 +393,9 @@ end
 -- Which of the tile's atlases the client has, asked once per panel.
 local function tileArt()
     return { edge = hasAtlas(EDGE_ATLAS) and hasAtlas(EDGE_COLLECTED_ATLAS), open = hasAtlas(OPEN_ATLAS),
-        hover = hasAtlas(HOVER_ATLAS) }
+        hover = hasAtlas(HOVER_ATLAS),
+        -- the pending mark's file, unless GetFileIDFromPath knows it is missing
+        pending = not (GetFileIDFromPath and GetFileIDFromPath(PENDING_TEXTURE) == nil) }
 end
 
 -- An atlas texture of the tile's art on its button, centred, in the atlas's
@@ -402,11 +410,12 @@ local function glow(tile, atlas, sublevel, add)
 end
 
 -- The tile's markers from its state: the collected border and the check,
--- the open glow, the hover glow. Without an atlas its state colours the
--- tile's line instead: open over hover over collected.
+-- the pending mark (TC-39), the open glow, the hover glow. Without an atlas
+-- its state colours the tile's line instead: open over hover over collected.
 local function drawMarkers(tile)
     local art = tile.art
     tile.check:SetShown(tile.collected == true)
+    if tile.pendingMark then tile.pendingMark:SetShown(tile.pending and not tile.collected) end
     if tile.edge then setAtlas(tile.edge, tile.collected and EDGE_COLLECTED_ATLAS or EDGE_ATLAS, true) end
     if tile.openGlow then tile.openGlow:SetShown(tile.isOpen == true) end
     if tile.hoverGlow then tile.hoverGlow:SetShown(tile.hovered == true) end
@@ -474,6 +483,14 @@ local function newTile(grid, index, art, onClick, onWheel, onEnter, onLeave)
     tile.check:SetSize(CHECK_SIZE, CHECK_SIZE)
     tile.check:SetPoint("TOPRIGHT", tile, "TOPRIGHT", -3, -3)
     tile.check:SetTexture(CHECK_TEXTURE)
+    -- the pending mark where the check sits (an appearance is never both)
+    if art.pending then
+        tile.pendingMark = above:CreateTexture(nil, "OVERLAY", nil, 2)
+        tile.pendingMark:SetSize(CHECK_SIZE, CHECK_SIZE)
+        tile.pendingMark:SetPoint("TOPRIGHT", tile, "TOPRIGHT", -3, -3)
+        tile.pendingMark:SetTexture(PENDING_TEXTURE)
+        tile.pendingMark:Hide()
+    end
     return tile
 end
 
@@ -499,7 +516,7 @@ end
 
 local function drawTile(tile, shown)
     tile.appearance = shown.appearance
-    tile.collected, tile.isOpen = shown.collected == true, shown.open == true
+    tile.collected, tile.isOpen, tile.pending = shown.collected == true, shown.open == true, shown.pending == true
     drawMarkers(tile)
     tile.strip:SetShown(shown.strip ~= nil)
     tile.stripLine:SetShown(shown.strip ~= nil)
@@ -556,8 +573,8 @@ end
 
 -- How many rows a flyout shows and its height, from its parts (layout B,
 -- section 6).
-local function flyoutSize(list)
-    local fixed = FLY_HEAD + FLY_FOOT + (list.text and FLY_TEXT or 0) + (list.foot.note and FLY_NOTE or 0)
+local function flyoutSize(list, head)
+    local fixed = head + FLY_FOOT + (list.text and FLY_TEXT or 0) + (list.foot.note and FLY_NOTE or 0)
     local rows = math.min(#list.rows, FLY_ROWS, math.floor((FLY_MAX - fixed) / FLY_ROW))
     return rows, fixed + rows * FLY_ROW
 end
@@ -618,7 +635,6 @@ local function newFlyout(panel, level, overTile)
         return line
     end
     local headLine, footLine = hairline(), hairline()
-    headLine:SetPoint("TOPLEFT", frame, "TOPLEFT", 10, -(FLY_HEAD - 1))
     headLine:SetWidth(FLY_INSIDE)
     footLine:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 10, FLY_FOOT)
     footLine:SetWidth(FLY_INSIDE)
@@ -626,11 +642,10 @@ local function newFlyout(panel, level, overTile)
     typeText:SetPoint("TOPLEFT", frame, "TOPLEFT", HEAD_TEXT_X, -10)
     typeText:SetWidth(HEAD_TEXT_WIDTH)
     typeText:SetJustifyH("LEFT")
+    -- "Collected", or in its place the pending sentence (TC-39), which wraps
     local collectedText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     collectedText:SetPoint("TOPLEFT", typeText, "BOTTOMLEFT", 0, -4)
-    collectedText:SetText("Collected")
-    -- GREEN_FONT_COLOR (visual pass, board 8)
-    collectedText:SetTextColor(0.1, 1, 0.1)
+    collectedText:SetJustifyH("LEFT")
     local collectedCheck = frame:CreateTexture(nil, "OVERLAY")
     collectedCheck:SetSize(12, 12)
     collectedCheck:SetPoint("LEFT", collectedText, "RIGHT", 2, 0)
@@ -654,7 +669,6 @@ local function newFlyout(panel, level, overTile)
     title:SetJustifyH("LEFT")
     -- body: a text, the rows
     local text = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    text:SetPoint("TOPLEFT", frame, "TOPLEFT", 10, -FLY_HEAD)
     text:SetWidth(FLY_INSIDE)
     text:SetJustifyH("LEFT")
     -- offset: the rows scrolled past; shown: the rows that fit
@@ -737,8 +751,28 @@ local function newFlyout(panel, level, overTile)
     local function drawList(list, index)
         current, currentIndex = list, index
         if list.appearance.id ~= shownID then offset, shownID = 0, list.appearance.id end
+        -- the head's texts first: the pending sentence's height sizes the head
+        typeText:SetText(list.typeText)
+        local marked = list.collected or list.pendingText ~= nil
+        collectedText:SetShown(marked)
+        if list.collected then
+            collectedText:SetWidth(0)
+            collectedText:SetText("Collected")
+            -- GREEN_FONT_COLOR (visual pass, board 8)
+            collectedText:SetTextColor(0.1, 1, 0.1)
+        elseif marked then
+            collectedText:SetWidth(HEAD_TEXT_WIDTH)
+            collectedText:SetText(list.pendingText)
+            collectedText:SetTextColor(1, 1, 1)
+        end
+        local head = FLY_HEAD
+        if list.pendingText and not list.collected then
+            local lines = collectedText.GetStringHeight and collectedText:GetStringHeight()
+            if type(lines) ~= "number" or lines <= 0 then lines = HEAD_LINES_MAX * HEAD_LINE end
+            head = head + math.max(0, lines - HEAD_LINE)
+        end
         local height
-        shown, height = flyoutSize(list)
+        shown, height = flyoutSize(list, head)
         count = #list.rows
         offset = math.max(0, math.min(offset, count - shown))
         place(index, height)
@@ -746,12 +780,14 @@ local function newFlyout(panel, level, overTile)
             return newWeaponModel(frame, 10, -8, HEAD_MODEL_WIDTH, HEAD_MODEL_HEIGHT)
         end)
         if modelEdge then setAtlas(modelEdge, list.collected and EDGE_COLLECTED_ATLAS or EDGE_ATLAS) end
-        typeText:SetText(list.typeText)
-        collectedText:SetShown(list.collected)
+        headLine:ClearAllPoints()
+        headLine:SetPoint("TOPLEFT", frame, "TOPLEFT", 10, -(head - 1))
+        text:ClearAllPoints()
+        text:SetPoint("TOPLEFT", frame, "TOPLEFT", 10, -head)
         collectedCheck:SetShown(list.collected)
         local checking = list.state == "checking"
         if spinner then spinner:SetShown(checking) end
-        local above = list.collected and collectedText or typeText
+        local above = marked and collectedText or typeText
         local indent = (checking and spinner) and 20 or 0
         if spinner then
             spinner:ClearAllPoints()
@@ -762,7 +798,7 @@ local function newFlyout(panel, level, overTile)
         title:SetWidth(HEAD_TEXT_WIDTH - indent)
         title:SetText(list.title or "")
         text:SetText(list.text or "")
-        local rowsTop = FLY_HEAD + (list.text and FLY_TEXT or 0)
+        local rowsTop = head + (list.text and FLY_TEXT or 0)
         for i, row in ipairs(rows) do
             local shownRow = i <= shown and list.rows[offset + i]
             row:SetShown(shownRow and true or false)
@@ -1556,6 +1592,8 @@ local function buildBrowser(panel)
         funnel.close()
         weaponType.close()
         if search.ClearFocus then search:ClearFocus() end
+        -- the bags are read only while the tab is shown (TC-39)
+        panel:UnregisterEvent("BAG_UPDATE_DELAYED")
         State.Leave()
     end)
     return draw
@@ -1590,6 +1628,11 @@ opener:SetScript("OnEvent", function(self)
     panel:SetScript("OnShow", function()
         local first = not draw
         if first then draw = buildBrowser(panel) end
+        -- the bags' items, read now and on each BAG_UPDATE_DELAYED (once
+        -- after a batch of bag changes, ContainerDocumentation.lua:673-677)
+        -- while the tab is shown (TC-39)
+        panel:RegisterEvent("BAG_UPDATE_DELAYED")
+        State.SetBags(TC.Appearances.ReadBags())
         -- the first draw, also when there is no list to tell of
         if not State.Refresh() and first then draw() end
         -- in For sale, a scan stopped by leaving the tab runs again (A6)
@@ -1621,6 +1664,8 @@ opener:SetScript("OnEvent", function(self)
             -- so it is hidden here.
             self:Hide()
             State.Reset()
+        elseif event == "BAG_UPDATE_DELAYED" then
+            if self:IsShown() then State.SetBags(TC.Appearances.ReadBags()) end
         elseif self:IsShown() then
             State.Refresh()
         end

@@ -24,6 +24,12 @@ local START_FILTER = "Not collected"
 local FIRST_SCAN_PAGES, MAX_PROGRESS = 5, 0.95
 
 State.FILTERS = { "All", "Collected", "Not collected" }
+-- The Show choice offered in All while an appearance is pending (TC-39).
+local PENDING_FILTER = "Bought, not collected"
+local PENDING_TEXT = {
+    bags = "In your bags: equip it or sell it to a vendor to collect.",
+    bought = "Bought: take it from the mailbox, then equip it or sell it to a vendor to collect.",
+}
 
 local view, listener
 -- The current slot's appearances under the class, read once per visit and
@@ -67,6 +73,15 @@ local visit = 0
 -- True from Leave until Enter: the tab is not shown, so nothing is asked.
 local away = false
 local KEYS_PER_FRAME = 20
+-- Bought, not collected (TC-39): an item that binds when equipped is
+-- collected only when it is equipped or sold to a vendor (measured in game).
+-- bought: the appearances of the purchases this addon completed, kept until
+-- the UI is reloaded (no visit's Reset discards them). bags: the appearances
+-- the bags' items carry, as last read (SetBags). pending: of both, those not
+-- collected, each "bags" or "bought" (the bags first).
+-- seen: the bought appearances an item of which a bag read has found; from
+-- then on only the bags decide (selling or mailing the item away ends it).
+local bought, bags, pending, seen = {}, {}, {}, {}
 
 -- The class dropdown's value for "All classes"; a class is its class id.
 local ALL_CLASSES = "all"
@@ -243,12 +258,13 @@ local function typed()
     return out
 end
 
--- For sale (A3): the list narrowed to the appearances that are not collected
--- and are found for sale, lowest price first, equal prices by appearance id.
+-- For sale (A3): the list narrowed to the appearances that are not collected,
+-- not pending (TC-39) and are found for sale, lowest price first, equal
+-- prices by appearance id.
 local function forSale()
     local out, price = {}, {}
     for _, appearance in ipairs(typed()) do
-        local result = not collected[appearance.id] and forSaleResult(appearance.id)
+        local result = not collected[appearance.id] and not pending[appearance.id] and forSaleResult(appearance.id)
         if result and result.rows[1] then
             out[#out + 1] = appearance
             price[appearance] = result.rows[1].minPrice
@@ -259,6 +275,16 @@ local function forSale()
         return a.id < b.id
     end)
     return out
+end
+
+-- Whether the scan found a look for sale that is pending and none that is
+-- not (the sweep view then has nothing left to buy).
+local function allPending()
+    for _, appearance in ipairs(typed()) do
+        local result = pending[appearance.id] and not collected[appearance.id] and forSaleResult(appearance.id)
+        if result and result.rows[1] then return true end
+    end
+    return false
 end
 
 -- Search (TC-32): an appearance stays when the name of one of its items
@@ -290,7 +316,9 @@ local function shown(ignoreSearch)
         out = {}
         for _, appearance in ipairs(typed()) do
             local isCollected = collected[appearance.id]
-            if view.filter == "All" or (view.filter == "Collected") == isCollected then
+            if view.filter == PENDING_FILTER then
+                if pending[appearance.id] and not isCollected then out[#out + 1] = appearance end
+            elseif view.filter == "All" or (view.filter == "Collected") == isCollected then
                 out[#out + 1] = appearance
             end
         end
@@ -426,11 +454,54 @@ local function learnWeaponTypes()
     now = false
 end
 
+-- Works out which appearances are pending: those of the bags and the
+-- purchases that are not collected; a collected one leaves the purchases, and
+-- so does one that was seen in the bags and is not there now. Answers whether
+-- that changed. It changes nothing when the collected check raises.
+local function updatePending()
+    local now, changed = {}, false
+    for _, from in ipairs({ { bags, "bags" }, { bought, "bought" } }) do
+        for id in pairs(from[1]) do
+            local gone = from[2] == "bought" and seen[id] and not bags[id]
+            if not now[id] and not gone and not TC.Appearances.IsCollected({ id = id }) then now[id] = from[2] end
+        end
+    end
+    for id in pairs(bought) do
+        if not now[id] then
+            bought[id], seen[id] = nil, nil
+        elseif bags[id] then
+            seen[id] = true
+        end
+    end
+    for id, source in pairs(now) do
+        if pending[id] ~= source then changed = true end
+    end
+    for id in pairs(pending) do
+        if not now[id] then changed = true end
+    end
+    pending = now
+    return changed
+end
+
+-- updatePending for the callers outside the list read: a raise from the
+-- appearance API leaves the pending state as it was and is reported once.
+local pendingFailed = false
+local function tryPending()
+    local ok, changed = pcall(updatePending)
+    if ok then return changed end
+    State.lastError = tostring(changed)
+    if not pendingFailed then
+        pendingFailed = true
+        report(changed)
+    end
+    return false
+end
+
 -- Reads the list if there is none and whether each appearance is collected;
 -- answers whether anything changed. An empty or failed read keeps no list,
 -- so the next Refresh reads again. A weapon slot waits for its weapon types.
 local function read()
-    local changed = false
+    local changed = updatePending()
     local slot = view.slot
     if TC.Slots[slot].weapon and learnt == nil then
         if not learning then learnWeaponTypes() end
@@ -472,6 +543,18 @@ function State.Refresh()
         return true
     end
     return false
+end
+
+-- The appearances the bags' items carry (TC.Appearances.ReadBags), from the
+-- panel when the tab is shown and once per bag change while it is shown.
+-- With a list, the listener is told when what is pending changed.
+function State.SetBags(found)
+    bags = found or {}
+    if tryPending() and list then
+        settle()
+        clampPage()
+        notify()
+    end
 end
 
 -- While the buy dialog is open nothing that reads the auction house starts
@@ -842,12 +925,23 @@ end
 -- TC_Buy's report of how a purchase ended (spec 2.7 steps 5 and 6): after
 -- a purchase, a gone auction or a failed purchase the check of that
 -- appearance runs again, so the list and the tile show what is left. A
--- search that failed or a dialog closed before an outcome reads nothing.
+-- search that failed or a dialog closed before an outcome reads nothing. A
+-- completed purchase makes its appearance pending until it is collected
+-- (TC-39).
 function State.BuyFinished(outcome, variant)
     if outcome ~= "completed" and outcome ~= "failed" and outcome ~= "gone" then return end
     local appearance = variant and variant.appearance
-    if not appearance or variant.visit ~= visit or away or checking[appearance.id] then return end
+    if not appearance then return end
     batch(function()
+        if outcome == "completed" then
+            bought[appearance.id], seen[appearance.id] = true, nil
+            if tryPending() then
+                settle()
+                clampPage()
+                notify()
+            end
+        end
+        if variant.visit ~= visit or away or checking[appearance.id] then return end
         startCheck(appearance)
         notify()
     end)
@@ -958,6 +1052,8 @@ local function itemList()
         appearance = appearance, collected = collected[id] == true, weapon = slot.weapon,
         typeText = slot.name, rows = {}, foot = { button = CHECK_AGAIN, enabled = not run },
     }
+    -- bought or in the bags, not collected (TC-39): in the place of Collected
+    if pending[id] and not out.collected then out.pendingText = PENDING_TEXT[pending[id]] end
     if slot.weapon then
         -- a weapon's type is its weapon type (spec 2.6)
         for _, weapon in ipairs(weaponTypesOf(appearance.slot) or {}) do
@@ -1068,10 +1164,14 @@ local function weaponDropdown()
     return { text = text, entries = entries }
 end
 
--- The funnel's Show entries: the Filter's values, the chosen one marked.
+-- The funnel's Show entries: the Filter's values, the chosen one marked; in
+-- All, while an appearance of any slot is pending, Bought, not collected too.
 local function showEntries(filter)
     local entries = {}
     for i, value in ipairs(State.FILTERS) do entries[i] = { name = value, value = value, selected = value == filter } end
+    if view.mode == "All" and next(pending) then
+        entries[#entries + 1] = { name = PENDING_FILTER, value = PENDING_FILTER, selected = filter == PENDING_FILTER }
+    end
     return entries
 end
 
@@ -1368,6 +1468,11 @@ function State.TileTooltip(appearance)
         headLines(lines, sources[head], c, MAX_DROPS)
     end
     local tail = {}
+    -- bought or in the bags, not collected (TC-39): how to collect it
+    local waiting = pending[appearance.id]
+    if waiting and not collected[appearance.id] then
+        tail[1], tail[2] = { text = " " }, { text = PENDING_TEXT[waiting], color = c.white }
+    end
     local result = view.mode == "For sale" and forSaleResult(appearance.id) or tileResult(appearance.id)
     if result then
         tail[#tail + 1] = { text = " " }
@@ -1440,6 +1545,8 @@ function State.View()
         local tile = {
             appearance = appearance, collected = collected[appearance.id], weapon = slot.weapon,
             open = view.open ~= nil and view.open.id == appearance.id,
+            -- bought or in the bags, not collected (TC-39); never with collected
+            pending = (pending[appearance.id] and not collected[appearance.id]) and true or nil,
         }
         local result = forSaleMode and forSaleResult(appearance.id) or tileResult(appearance.id)
         if result and result.rows[1] then
@@ -1488,7 +1595,11 @@ function State.View()
             button = "Clear search", action = clearSearch }
     elseif forSaleMode then
         -- only a kept scan says nothing is for sale
-        if #appearances == 0 and scans[view.slot] then
+        if #appearances == 0 and scans[view.slot] and allPending() then
+            answer.empty = { title = "Nothing left to buy",
+                text = ("Every %s appearance for sale here is one you bought and have not collected yet."):format(slotWord),
+                button = "Show all appearances", action = selectAll }
+        elseif #appearances == 0 and scans[view.slot] then
             answer.empty = { title = "Nothing for sale",
                 text = ("No %s appearance you have not collected is on the auction house right now."):format(slotWord),
                 button = "Show all appearances", action = selectAll }
@@ -1497,6 +1608,7 @@ function State.View()
         -- The list is never empty (an empty read keeps no list), so past
         -- the weapon type only the Filter can leave nothing.
         local text = view.filter == "Collected" and ("No collected %s appearances%s."):format(slotWord, forClass)
+            or view.filter == PENDING_FILTER and ("No %s appearance%s is bought and not collected."):format(slotWord, forClass)
             or ("Every %s appearance%s is collected."):format(slotWord, forClass)
         answer.empty = { title = "No matches", text = text, button = "Show all", action = showAll }
     end

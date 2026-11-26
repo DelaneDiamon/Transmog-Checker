@@ -284,6 +284,14 @@ function Fake.new(opts)
     function methods:GetText() return self.text end
     -- a font string's text width: 6 for each character
     function methods:GetStringWidth() return #(self.text or "") * 6 end
+    -- a font string's text height: 12 for each line of 6 per character wrapped
+    -- at its width (one line without a width), none for no text
+    function methods:GetStringHeight()
+        local n = #(self.text or "")
+        if n == 0 then return 0 end
+        local width = self.width
+        return (width and width > 0 and math.ceil(n * 6 / width) or 1) * 12
+    end
     function methods:GetName() return self.name end
     function methods:SetEnabled(on) self.enabled = on and true or false end
     function methods:Enable() self.enabled = true end
@@ -312,6 +320,8 @@ function Fake.new(opts)
     function methods:CreateFontString(name, layer, template)
         local w = c.newWidget("FontString", name, self, template)
         w.layer = layer
+        -- noStringHeight: the font strings have no GetStringHeight
+        if opts.noStringHeight then w.GetStringHeight = false end
         return w
     end
     -- Masks (SimpleFrameAPIDocumentation.lua:113-127,
@@ -1322,6 +1332,8 @@ function Fake.new(opts)
             return (opts.holidays or {})[sourceID]
         end,
         PlayerHasTransmogItemModifiedAppearance = function(sourceID)
+            -- c.collectedRaises: it raises (a test sets and clears it)
+            if c.collectedRaises then error("fake: PlayerHasTransmogItemModifiedAppearance failed") end
             return collectedSources[sourceID] == true
         end,
         -- AppearanceSourceInfo (AppearanceSourceDocumentation.lua:6-30), the
@@ -1388,6 +1400,26 @@ function Fake.new(opts)
     if opts.noList then T.GetCategoryAppearances = nil end
     if opts.noItemTransmog then T.GetItemInfo = nil end
     C_TransmogCollection = not opts.noTransmog and T or nil
+    -- ContainerDocumentation.lua:175-190, 313-325: the player's bags,
+    -- c.bags[bag] = { itemID or false per slot } (a test may change it; the
+    -- backpack has 16 empty slots by default); c.bagReads counts
+    -- GetContainerNumSlots calls. noContainer: C_Container is nil.
+    c.bags, c.bagReads = opts.bags or { [0] = { false, false, false, false, false, false, false, false,
+        false, false, false, false, false, false, false, false } }, 0
+    Enum.BagIndex = { Backpack = 0, Bag_1 = 1, Bag_2 = 2, Bag_3 = 3, Bag_4 = 4, ReagentBag = 5 }
+    NUM_BAG_SLOTS, NUM_TOTAL_EQUIPPED_BAG_SLOTS = 4, 5
+    C_Container = not opts.noContainer and {
+        GetContainerNumSlots = function(bag)
+            misuse(type(bag) == "number", "GetContainerNumSlots with " .. type(bag))
+            c.bagReads = c.bagReads + 1
+            return #(c.bags[bag] or {})
+        end,
+        GetContainerItemID = function(bag, slot)
+            misuse(type(bag) == "number" and type(slot) == "number", "GetContainerItemID with " .. type(bag))
+            local id = (c.bags[bag] or {})[slot]
+            return id or nil
+        end,
+    } or nil
     -- TransmogSetsDocumentation.lua:167-181, 215-229, 520-540: the sets of
     -- a source (opts.sets, { [sourceID] = { setID } }) and a set's info
     -- (opts.setInfo, { [setID] = { name, label } }); noSets: no C_TransmogSets.

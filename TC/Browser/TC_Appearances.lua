@@ -308,6 +308,34 @@ function Appearances.IsCollected(appearance)
     return false
 end
 
+-- The appearances the items in the backpack and the equipped bags carry, as
+-- a set of appearance ids (TC-39). The bags are walked as Blizzard's
+-- SearchBagsForFirstItem walks them (ContainerFrame.lua:411-420): Backpack to
+-- NUM_TOTAL_EQUIPPED_BAG_SLOTS, C_Container.GetContainerNumSlots and
+-- GetContainerItemID (ContainerDocumentation.lua:175-190, 313-325); an item's
+-- appearance is C_TransmogCollection.GetItemInfo, which needs no item data.
+-- Without those calls the set is empty.
+function Appearances.ReadBags()
+    local found = {}
+    local Bags, TCol = C_Container, C_TransmogCollection
+    if not (Bags and Bags.GetContainerNumSlots and Bags.GetContainerItemID and TCol and TCol.GetItemInfo) then
+        return found
+    end
+    local first = Enum and Enum.BagIndex and Enum.BagIndex.Backpack or 0
+    local seen = {}
+    for bag = first, NUM_TOTAL_EQUIPPED_BAG_SLOTS or NUM_BAG_SLOTS or 4 do
+        for slot = 1, Bags.GetContainerNumSlots(bag) or 0 do
+            local itemID = Bags.GetContainerItemID(bag, slot)
+            if itemID and not seen[itemID] then
+                seen[itemID] = true
+                local appearanceID = TCol.GetItemInfo(itemID)
+                if appearanceID then found[appearanceID] = true end
+            end
+        end
+    end
+    return found
+end
+
 -- The appearance's item ids, each once, in the order of its sources; kept on
 -- the appearance once its sources gave any. It needs no item data.
 function Appearances.ItemIDs(appearance)
