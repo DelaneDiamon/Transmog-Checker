@@ -1352,6 +1352,12 @@ local function sourceText(source, c)
     return profession or typeText(source), c.white
 end
 
+-- A source's short text, as the list of other items words it: the item
+-- tooltip's ALT lines (TC-15) use it, without its colour.
+function State.SourceText(source)
+    return (sourceText(source, { green = true, white = true }))
+end
+
 -- The source the tooltip heads with (CollectionWardrobeUtil.
 -- GetDefaultSourceIndex, CollectionsUtil.lua:3-39), else the first.
 local function headIndex(sources)
@@ -1386,7 +1392,7 @@ local function bindLine(itemID)
     local bindType = select(14, loadedInfo(itemID))
     local binds = Enum and Enum.ItemBind
     if bindType ~= nil and bindType == (binds and binds.OnEquip or 2) then
-        return "Binds when equipped: equip it or sell it to a vendor to collect."
+        return TC.Appearances.BIND_ON_EQUIP_TEXT
     elseif bindType ~= nil and bindType == (binds and binds.OnAcquire or 1) then
         return "Binds when picked up."
     end

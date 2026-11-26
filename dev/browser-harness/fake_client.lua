@@ -176,9 +176,11 @@ function Fake.new(opts)
     end
     c.collectedSources = collectedSources
     -- the inventory slot each source is worn in
-    c.slotOfSource = {}
+    c.slotOfSource, c.categoryOfSource = {}, {}
     for _, a in ipairs(appearances) do
-        for _, source in ipairs(a.sources) do c.slotOfSource[source] = SLOT_OF_CATEGORY[a.category] end
+        for _, source in ipairs(a.sources) do
+            c.slotOfSource[source], c.categoryOfSource[source] = SLOT_OF_CATEGORY[a.category], a.category
+        end
     end
 
     local function misuse(cond, what)
@@ -454,21 +456,66 @@ function Fake.new(opts)
     if opts.noAuctionErrors then Enum.AuctionHouseError = nil end
     -- a list of { enum, member } the client lacks
     for _, missing in ipairs(opts.noEnumMembers or {}) do Enum[missing[1]][missing[2]] = nil end
-    GameTooltip = c.newWidget("GameTooltip", "GameTooltip")
-    -- The tooltip keeps its owner, anchor and lines: SetOwner starts it
-    -- over; each line is { text, r, g, b, right, rr, rg, rb }.
-    GameTooltip.lines = {}
-    function GameTooltip:SetOwner(owner, anchor)
-        self.owner, self.anchor, self.lines = owner, anchor, {}
-        self.calls.SetOwner = { owner, anchor }
+    -- A tooltip keeps its owner, anchor and lines: SetOwner starts it
+    -- over; each line is { text, r, g, b, right, rr, rg, rb }. GetItem
+    -- answers the item c.hoverItem showed in it.
+    local function newTooltip(name)
+        local t = c.newWidget("GameTooltip", name)
+        t.lines = {}
+        function t:SetOwner(owner, anchor)
+            self.owner, self.anchor, self.lines, self.item = owner, anchor, {}, nil
+            self.calls.SetOwner = { owner, anchor }
+        end
+        if not opts.noGetOwner then function t:GetOwner() return self.owner end end
+        -- The left font string of line n, global <name>TextLeft<n> as the
+        -- client names it: it reads and writes the tooltip's line n.
+        local function defineLeft(tip, n)
+            if not name then return end
+            _G[name .. "TextLeft" .. n] = {
+                GetText = function() return tip.lines[n] and tip.lines[n].text end,
+                SetText = function(_, text) if tip.lines[n] then tip.lines[n].text = text end end,
+                Hide = function() if tip.lines[n] then tip.lines[n].hidden = true end end,
+            }
+        end
+        function t:AddLine(text, r, g, b, wrap)
+            self.lines[#self.lines + 1] = { text = text, r = r, g = g, b = b }
+            defineLeft(self, #self.lines)
+            self.calls.AddLine = { text, r, g, b, wrap }
+        end
+        function t:AddDoubleLine(text, right, r, g, b, rr, rg, rb)
+            self.lines[#self.lines + 1] = { text = text, r = r, g = g, b = b, right = right, rr = rr, rg = rg, rb = rb }
+            defineLeft(self, #self.lines)
+        end
+        function t:NumLines() return #self.lines end
+        function t:GetItem()
+            if self.item then return "Item", self.item end
+        end
+        return t
     end
-    if not opts.noGetOwner then function GameTooltip:GetOwner() return self.owner end end
-    function GameTooltip:AddLine(text, r, g, b, wrap)
-        self.lines[#self.lines + 1] = { text = text, r = r, g = g, b = b }
-        self.calls.AddLine = { text, r, g, b, wrap }
-    end
-    function GameTooltip:AddDoubleLine(text, right, r, g, b, rr, rg, rb)
-        self.lines[#self.lines + 1] = { text = text, r = r, g = g, b = b, right = right, rr = rr, rg = rg, rb = rb }
+    GameTooltip = newTooltip("GameTooltip")
+    -- another tooltip, such as ItemRefTooltip, made when a test asks
+    c.newTooltip = newTooltip
+    -- TooltipDataProcessor (TooltipDataProcessor.lua): the post-calls the
+    -- addon registered, each { dataType, fn }. c.hoverItem(link, tooltip)
+    -- shows the item in the tooltip (GameTooltip by default), as a bag
+    -- button's OnEnter and every UpdateTooltip after it do, and runs the
+    -- item post-calls; it answers the tooltip's lines as text.
+    c.postCalls = {}
+    TooltipDataProcessor = { AddTooltipPostCall = function(dataType, fn)
+        c.postCalls[#c.postCalls + 1] = { dataType = dataType, fn = fn }
+    end }
+    function c.hoverItem(link, tooltip)
+        tooltip = tooltip or GameTooltip
+        tooltip:SetOwner(UIParent, "ANCHOR_RIGHT")
+        tooltip.item = link
+        -- c.tooltipPre(tooltip): what Blizzard has put in the tooltip before the post-calls
+        if c.tooltipPre then c.tooltipPre(tooltip) end
+        for _, post in ipairs(c.postCalls) do
+            if post.dataType == Enum.TooltipDataType.Item then post.fn(tooltip, { type = post.dataType }) end
+        end
+        local out = {}
+        for i, line in ipairs(tooltip.lines) do out[i] = line.text end
+        return out
     end
     -- the tooltip's lines as text, "left | right" for a double line
     function c.tooltipTexts()
@@ -502,7 +549,6 @@ function Fake.new(opts)
     INVTYPE_HEAD, INVTYPE_FEET, INVTYPE_WAIST, INVTYPE_BODY, INVTYPE_CLOAK = "Head", "Feet", "Waist", "Shirt", "Back"
     INVTYPE_WEAPON, INVTYPE_SHIELD, INVTYPE_HOLDABLE, INVTYPE_RANGED = "One-Hand", "Off Hand", "Held In Off-hand", "Ranged"
     INVTYPE_RANGEDRIGHT, INVTYPE_CHEST = "Ranged", "Chest"
-    TooltipDataProcessor = { AddTooltipPostCall = function() end }
     UIParent = c.newWidget("Frame", "UIParent")
     GameFontNormal = not opts.noFontObjects and c.newWidget("Font", "GameFontNormal") or nil
     GameFontHighlightSmall = not opts.noFontObjects and c.newWidget("Font", "GameFontHighlightSmall") or nil
@@ -882,11 +928,19 @@ function Fake.new(opts)
         if itemLoaded[itemID] ~= nil then return itemLoaded[itemID] end
         return itemDef(itemID).load == nil
     end
+    -- An item id, or an item link's ("|Hitem:<id>:...|h"), as the calls
+    -- that take ItemInfo accept either; nil for anything else.
+    local function idOf(item)
+        if type(item) == "number" then return item end
+        return type(item) == "string" and tonumber(item:match("item:(%d+)")) or nil
+    end
+    c.idOf = idOf
     C_Item = {
         -- ItemDocumentation.lua:659-679: itemID, itemType, itemSubType,
         -- itemEquipLoc, icon, classID, subClassID, without item data.
-        GetItemInfoInstant = not opts.noItemInstant and function(itemID)
-            misuse(type(itemID) == "number", "GetItemInfoInstant with " .. type(itemID))
+        GetItemInfoInstant = not opts.noItemInstant and function(item)
+            local itemID = idOf(item)
+            misuse(itemID ~= nil, "GetItemInfoInstant with " .. type(item))
             c.instantCalls = (c.instantCalls or 0) + 1
             local d = itemDef(itemID)
             if not d.classID then return nil end
@@ -908,9 +962,10 @@ function Fake.new(opts)
         -- 5 required level (minLevel, default 1), 7 subtype, 9 equip
         -- location (equipLoc, default INVTYPE_FEET), 14 bind type; nothing
         -- until the data has loaded.
-        GetItemInfo = function(itemID)
+        GetItemInfo = function(item)
             c.itemInfoCalls = c.itemInfoCalls + 1
-            if type(itemID) ~= "number" or not isLoaded(itemID) then return nil end
+            local itemID = idOf(item)
+            if not itemID or not isLoaded(itemID) then return nil end
             local d = itemDef(itemID)
             return d.name, "link", d.quality, 1, d.minLevel == nil and 1 or d.minLevel, "Armor", d.subType, 1,
                 d.equipLoc or "INVTYPE_FEET", 0, 0, d.classID or 4, d.subClassID or 1, d.bindType
@@ -1260,8 +1315,12 @@ function Fake.new(opts)
         CollectionWardrobeUtil = nil
     end
 
+    -- Fake.forbiddenTotal counts the forbidden calls of every client made.
     local function forbid(name)
-        return function() c.forbidden[#c.forbidden + 1] = name end
+        return function()
+            c.forbidden[#c.forbidden + 1] = name
+            Fake.forbiddenTotal = (Fake.forbiddenTotal or 0) + 1
+        end
     end
     local col = c.collections
     -- the class filter before the latest write, while that write is in this
@@ -1341,12 +1400,14 @@ function Fake.new(opts)
         GetSourceInfo = function(sourceID)
             misuse(type(sourceID) == "number", "GetSourceInfo with " .. type(sourceID))
             if opts.sourceInfoNil then return nil end
-            return { sourceID = sourceID, itemID = (opts.sourceItems or {})[sourceID] or sourceID, sourceType = 1 }
+            return { sourceID = sourceID, itemID = (opts.sourceItems or {})[sourceID] or sourceID, sourceType = 1,
+                categoryID = c.categoryOfSource[sourceID] or CATEGORIES.None }
         end,
         -- TransmogItemsDocumentation.lua:521-536: an item's appearance and
         -- source, or nothing; by the fixture's sources (sourceItems).
-        GetItemInfo = function(itemID)
-            misuse(type(itemID) == "number", "C_TransmogCollection.GetItemInfo with " .. type(itemID))
+        GetItemInfo = function(item)
+            local itemID = idOf(item)
+            misuse(itemID ~= nil, "C_TransmogCollection.GetItemInfo with " .. type(item))
             c.transmogInfoCalls = c.transmogInfoCalls + 1
             for _, a in ipairs(appearances) do
                 for _, s in ipairs(a.sources) do
@@ -1396,6 +1457,7 @@ function Fake.new(opts)
         GetAppearanceInfoBySource = forbid("GetAppearanceInfoBySource"),
         AccountCanCollectSource = forbid("AccountCanCollectSource"),
         PlayerCanCollectSource = forbid("PlayerCanCollectSource"),
+        PlayerHasTransmog = forbid("PlayerHasTransmog"),
     }
     if opts.noList then T.GetCategoryAppearances = nil end
     if opts.noItemTransmog then T.GetItemInfo = nil end

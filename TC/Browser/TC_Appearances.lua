@@ -308,6 +308,44 @@ function Appearances.IsCollected(appearance)
     return false
 end
 
+-- How a bind-on-equip item that is not collected is collected (measured in
+-- game on Forever): the browser's tooltip and the item tooltip say it.
+Appearances.BIND_ON_EQUIP_TEXT = "Binds when equipped: equip it or sell it to a vendor to collect."
+
+-- The slot key of TC.Slots whose categories hold the category, or nil.
+local function slotOfCategory(category)
+    for _, entry in ipairs(TC.Slots) do
+        for _, own in ipairs(entry.categories) do
+            if categoryValue(own) == category then return entry.key end
+        end
+    end
+end
+
+-- What an item says of its appearance (TC-15), the one rule the item
+-- tooltip uses: nil when the item has no appearance; else { appearance
+-- ({ id, slot, category }, as List gives them, for Sources), sourceID,
+-- itemCollected (the item's own source is collected), collected
+-- (IsCollected), bindType (C_Item.GetItemInfo's 14th, nil until the
+-- item's data is in) }. Only the bind type needs item data; the slot and
+-- category come from the source's categoryID (GetSourceInfo), nil without.
+function Appearances.OfItem(item)
+    local TCol = C_TransmogCollection
+    if not (TCol and TCol.GetItemInfo) then return nil end
+    local appearanceID, sourceID = TCol.GetItemInfo(item)
+    if not appearanceID then return nil end
+    local info = sourceID and TCol.GetSourceInfo and TCol.GetSourceInfo(sourceID)
+    local category = type(info) == "table" and info.categoryID or nil
+    local appearance = { id = appearanceID, category = category, slot = category and slotOfCategory(category) }
+    local own = sourceID and TCol.PlayerHasTransmogItemModifiedAppearance
+        and TCol.PlayerHasTransmogItemModifiedAppearance(sourceID)
+    local name, bindType, _
+    if C_Item and C_Item.GetItemInfo then
+        name, _, _, _, _, _, _, _, _, _, _, _, _, bindType = C_Item.GetItemInfo(item)
+    end
+    return { appearance = appearance, sourceID = sourceID, itemCollected = own and true or false,
+        collected = Appearances.IsCollected(appearance), bindType = name and bindType or nil }
+end
+
 -- The appearances the items in the backpack and the equipped bags carry, as
 -- a set of appearance ids (TC-39). The bags are walked as Blizzard's
 -- SearchBagsForFirstItem walks them (ContainerFrame.lua:411-420): Backpack to

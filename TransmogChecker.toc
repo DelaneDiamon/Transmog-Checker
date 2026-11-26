@@ -9,8 +9,6 @@ Libs/LibStub/LibStub.lua
 Libs/LibAHTab/LibAHTab.lua
 TransmogChecker.lua
 TC/Common/TC_Constants.lua
-TC/Common/TC_ItemChecker.lua
-TC/Tooltip/TC_Tooltip.lua
 TC/Browser/TC_AuctionQueue.lua
 TC/Browser/TC_Slots.lua
 TC/Browser/TC_Appearances.lua
@@ -19,3 +17,4 @@ TC/Browser/TC_Scan.lua
 TC/Browser/TC_BrowserState.lua
 TC/Browser/TC_Buy.lua
 TC/Browser/TC_BrowserPanel.lua
+TC/Tooltip/TC_Tooltip.lua

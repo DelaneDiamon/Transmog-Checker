@@ -8551,6 +8551,398 @@ test("TC-39 F5 the longest tooltip stays within 20 lines, pending lines in, pric
     noErrors(c, "longest tooltip")
 end)
 
+---------------------------------------------------------------- Item tooltip (TC-15)
+
+-- The item tooltip's fixture, feet on the Warlock (cloth): appearance 1 is
+-- collected through the cloth 501 and also carried by the plate 502;
+-- appearance 2 is not collected (503 plate, bind on equip, data after 1 s;
+-- 504 leather, bind on pickup; 505 mail, bind on equip); appearance 3 has
+-- ten items of every source form (source ids descending, the fake's sort);
+-- appearance 4 is grey 701 and white 702; 800 is a non-gear item that
+-- carries appearance 5; 950 is gear with no appearance.
+local BIND_SENTENCE = "Binds when equipped: equip it or sell it to a vendor to collect."
+local function tipFixture(opts)
+    local feet = Fake.CATEGORIES.Feet
+    local function boots(name, subClassID, quality, bindType, extra)
+        local d = { name = name, quality = quality, bindType = bindType, subType = "Boots", classID = 4,
+            subClassID = subClassID, equipLoc = "INVTYPE_FEET" }
+        for k, v in pairs(extra or {}) do d[k] = v end
+        return d
+    end
+    local items = {
+        [501] = boots("Felcloth Boots", 1, 2, 2), [502] = boots("Plate Sabatons", 4, 2, 1),
+        [503] = boots("Iron Greaves", 4, 2, 2, { load = 1 }), [504] = boots("Leather Treads", 2, 3, 1),
+        [505] = boots("Mail Boots", 3, 2, 2),
+        [601] = boots("Willow Boots", 1, 2, 1), [602] = boots("Hogger's Boots", 2, 3, 1),
+        [603] = boots("Vendor Boots", 3, 1, 1), [604] = boots("Tailored Boots", 1, 2, 1),
+        [605] = boots("Linked Boots", 3, 2, 1), [606] = boots("Far Boots", 1, 2, 2, { load = "never" }),
+        [607] = boots("World Boots A", 1, 2, 2), [608] = boots("World Boots B", 1, 2, 2),
+        [609] = boots("World Boots C", 1, 2, 2), [610] = boots("World Boots D", 1, 2, 2),
+        [701] = boots("Tattered Shoes", 1, 0, 0), [702] = boots("Plain Shoes", 1, 1, 0),
+        [800] = { name = "Hearthstone", quality = 1, bindType = 1, subType = "Junk", classID = 15, subClassID = 0,
+            equipLoc = "" },
+        [950] = boots("Odd Boots", 1, 2, 2),
+        -- appearance 6: white 711 and green 712, quality known after 1 s
+        [711] = boots("Late White", 1, 1, 0, { load = 1 }), [712] = boots("Late Green", 1, 2, 0, { load = 1 }),
+    }
+    local sourceItems = { [11] = 501, [12] = 502, [21] = 503, [22] = 504, [23] = 505, [41] = 701, [42] = 702,
+        [51] = 800, [61] = 711, [62] = 712 }
+    for i = 0, 9 do sourceItems[40 - i] = 601 + i end
+    local o = {
+        appearances = {
+            { id = 1, uiOrder = 5, category = feet, sources = { 11, 12 }, collectedSource = 11 },
+            { id = 2, uiOrder = 4, category = feet, sources = { 21, 22, 23 } },
+            { id = 3, uiOrder = 3, category = feet, sources = { 40, 39, 38, 37, 36, 35, 34, 33, 32, 31 },
+                sourceTypes = { 4, 1, 3, 6, 6, 4, 4, 4, 4, 4 } },
+            { id = 4, uiOrder = 2, category = feet, sources = { 41, 42 } },
+            { id = 5, uiOrder = 1, category = feet, sources = { 51 } },
+            { id = 6, uiOrder = 0, category = feet, sources = { 61, 62 } },
+        },
+        items = items, sourceItems = sourceItems,
+        drops = { [39] = { { encounter = "Hogger", instance = "Elwynn Forest" } } },
+    }
+    local unloaded = opts and opts.unloaded
+    for k, v in pairs(opts or {}) do o[k] = v end
+    o.unloaded = nil
+    local c = boot(o)
+    -- unloaded: the tooltip is shown before ADDON_LOADED has bound the settings
+    if not unloaded then c.fire("ADDON_LOADED", "TransmogChecker") end
+    return c
+end
+local function itemLink(itemID)
+    return ("|cff1eff00|Hitem:%d::::::::60:9::::::|h[Item %d]|h|r"):format(itemID, itemID)
+end
+-- A line without its colour codes.
+local function plain(text)
+    return (text:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""))
+end
+-- The tooltip's lines for the item, as plain text.
+local function tipLines(c, itemID, tooltip)
+    local out = {}
+    for i, line in ipairs(c.hoverItem(itemLink(itemID), tooltip)) do out[i] = plain(line) end
+    return out
+end
+local function tipNoErrors(c, what)
+    noErrors(c, what)
+    sentNothing(c, what)
+    equal(#c.forbidden, 0, what .. ": forbidden calls: " .. table.concat(c.forbidden, ", "))
+end
+
+test("TC-15 the tooltip says EXACT, MODEL or MODEL NOT COLLECTED, in today's colours", function()
+    local c = tipFixture()
+    local lines = c.hoverItem(itemLink(501))
+    equal(lines[1], "|cFF9D9D9DTC:|r |cFF00FF00EXACT COLLECTED|r", "501: its own source is collected")
+    lines = c.hoverItem(itemLink(502))
+    equal(lines[1], "|cFF9D9D9DTC:|r |cFF00FF00MODEL COLLECTED|r", "502: collected through another item")
+    lines = c.hoverItem(itemLink(504))
+    equal(lines[1], "|cFF9D9D9DTC:|r |cFFFF7F00MODEL NOT COLLECTED|r", "504: not collected")
+    tipNoErrors(c, "statuses")
+end)
+
+test("TC-15 a look collected through an item of another armor type is MODEL COLLECTED; plate on a cloth class is never not collectable", function()
+    local c = tipFixture()
+    equal(tipLines(c, 502)[1], "TC: MODEL COLLECTED", "plate 502, collected through cloth 501")
+    equal(#tipLines(c, 503), 0, "plate 503: no line until its quality is known (skipgreys on)")
+    c.advance(1.1)
+    equal(tipLines(c, 503)[1], "TC: MODEL NOT COLLECTED", "plate 503 on the Warlock")
+    for _, itemID in ipairs({ 501, 502, 503, 504, 505, 601, 602, 603, 604, 605, 606, 607 }) do
+        for _, line in ipairs(tipLines(c, itemID)) do
+            check(not line:find("COLLECTABLE", 1, true) and not line:find("LEVEL", 1, true)
+                and not line:find("No transmog info", 1, true), itemID .. ": no class or level line, got " .. line)
+        end
+    end
+    tipNoErrors(c, "armor types")
+end)
+
+test("TC-15 the bind sentence: only on a bind-on-equip item not collected, once its data is in", function()
+    local c = tipFixture()
+    local lines = c.hoverItem(itemLink(505))
+    equal(lines[2], "|cFF9D9D9DTC:|r |cFFFF7F00" .. BIND_SENTENCE .. "|r", "505, bind on equip, loaded")
+    equal(tipLines(c, 504)[2] and tipLines(c, 504)[2]:find("Binds", 1, true), nil, "504 binds on pickup: no sentence")
+    equal(tipLines(c, 501)[2], nil, "501 binds on equip but is collected: one line")
+    lines = tipLines(c, 503)
+    equal(#lines, 0, "503 before its data: no line, its quality is unknown")
+    c.advance(1.1)
+    lines = tipLines(c, 503)
+    equal(lines[1], "TC: MODEL NOT COLLECTED", "503 once its data is in")
+    equal(lines[2], "TC: " .. BIND_SENTENCE, "503 once its data is in")
+    tipNoErrors(c, "bind sentence")
+end)
+
+test("TC-15 no line for an item with no appearance, a non-gear item, or another tooltip", function()
+    local c = tipFixture()
+    equal(#tipLines(c, 950), 0, "950 has no appearance")
+    equal(#tipLines(c, 800), 0, "800 is not gear")
+    equal(#tipLines(c, 501, c.newTooltip("ItemRefTooltip")), 0, "ItemRefTooltip")
+    equal(tipLines(c, 501)[1], "TC: EXACT COLLECTED", "GameTooltip still")
+    tipNoErrors(c, "no line")
+end)
+
+test("TC-15 grey and white items: silent with /tc skipgreys on, annotated with it off", function()
+    local c = tipFixture()
+    equal(TC.Config.skipPoorAndCommon, true, "on by default")
+    equal(#tipLines(c, 701), 0, "grey, skip on")
+    equal(#tipLines(c, 702), 0, "white, skip on")
+    SlashCmdList.TC("skipgreys")
+    equal(tipLines(c, 701)[1], "TC: MODEL NOT COLLECTED", "grey, skip off")
+    equal(tipLines(c, 702)[1], "TC: MODEL NOT COLLECTED", "white, skip off")
+    SlashCmdList.TC("skipgreys")
+    equal(#tipLines(c, 701), 0, "grey, skip on again")
+    tipNoErrors(c, "greys")
+end)
+
+test("TC-15 ALT lines: each other item with its short source, at most 8 and then and N more", function()
+    local c = tipFixture()
+    local lines = tipLines(c, 601)
+    local want = {
+        "TC: MODEL NOT COLLECTED",
+        "ALT: Hogger's Boots [602] (Hogger)",
+        "ALT: Vendor Boots [603] (Vendor)",
+        "ALT: Tailored Boots [604] (Tailoring)",
+        "ALT: Linked Boots [605] (Profession)",
+        "ALT: Retrieving item information [606] (World Drop)",
+        "ALT: World Boots A [607] (World Drop)",
+        "ALT: World Boots B [608] (World Drop)",
+        "ALT: World Boots C [609] (World Drop)",
+        "ALT: and 1 more",
+    }
+    equal(table.concat(lines, "\n"), table.concat(want, "\n"), "601's lines")
+    tipNoErrors(c, "alt lines")
+end)
+
+test("TC-15 ALT lines with /tc alts: hidden for a collected look while on, Collected while off", function()
+    local c = tipFixture()
+    equal(table.concat(tipLines(c, 502), "\n"), "TC: MODEL COLLECTED", "502, hide on")
+    SlashCmdList.TC("alts")
+    equal(table.concat(tipLines(c, 502), "\n"), "TC: MODEL COLLECTED\nALT: Felcloth Boots [501] (Collected)",
+        "502, hide off")
+    equal(table.concat(tipLines(c, 501), "\n"), "TC: EXACT COLLECTED\nALT: Plate Sabatons [502] (World Drop)",
+        "501, hide off")
+    tipNoErrors(c, "alts setting")
+end)
+
+test("TC-15 an alternative's data is asked for once per item per session, not on every show", function()
+    local c = tipFixture()
+    local function asked(itemID)
+        local n = 0
+        for _, id in ipairs(c.loadRequests) do if id == itemID then n = n + 1 end end
+        return n
+    end
+    for _ = 1, 5 do tipLines(c, 601) end
+    c.fire("TRANSMOG_COLLECTION_UPDATED")
+    for _ = 1, 5 do tipLines(c, 601) end
+    equal(asked(606), 1, "606's requests")
+    equal(asked(607), 0, "607 is loaded: no request")
+    tipNoErrors(c, "requests")
+end)
+
+test("TC-15 for every fixture item the tooltip's collected answer is the browser's IsCollected", function()
+    local c = tipFixture()
+    SlashCmdList.TC("skipgreys")
+    local n = 0
+    for itemID = 501, 702 do
+        local appearanceID = C_TransmogCollection.GetItemInfo(itemID)
+        if appearanceID then
+            local status = tipLines(c, itemID)[1]
+            local collected = status == "TC: EXACT COLLECTED" or status == "TC: MODEL COLLECTED"
+            check(collected or status == "TC: MODEL NOT COLLECTED", itemID .. ": a status, got " .. tostring(status))
+            equal(collected, TC.Appearances.IsCollected({ id = appearanceID }), itemID .. ": collected")
+            n = n + 1
+        end
+    end
+    equal(n, 17, "fixture items with an appearance")
+    tipNoErrors(c, "same rule")
+end)
+
+test("TC-15 hovering one item for ten seconds computes once; the collection event computes again", function()
+    local c = tipFixture()
+    -- the ALT line of 503 waits for its data, which arrives after 1 s
+    tipLines(c, 504)
+    c.advance(2)
+    local before = c.transmogInfoCalls
+    for _ = 1, 50 do tipLines(c, 504) c.advance(0.2) end
+    equal(c.transmogInfoCalls - before, 1, "computations over 50 shows")
+    c.collectedSources[22] = true
+    equal(tipLines(c, 504)[1], "TC: MODEL NOT COLLECTED", "kept until the event")
+    c.fire("TRANSMOG_COLLECTION_UPDATED")
+    equal(tipLines(c, 504)[1], "TC: EXACT COLLECTED", "after the event")
+    equal(c.transmogInfoCalls - before, 2, "computations after the event")
+    equal(tipLines(c, 505)[1], "TC: MODEL COLLECTED", "505 shares the look")
+    tipNoErrors(c, "memory")
+end)
+
+test("TC-15 an API call that raises adds no line, raises nothing and is reported once", function()
+    local c = tipFixture()
+    c.collectedRaises = true
+    local ok, lines = pcall(tipLines, c, 504)
+    check(ok, "the post-call raised: " .. tostring(lines))
+    equal(#lines, 0, "lines when the call raises")
+    equal(#tipLines(c, 505), 0, "lines on a second item")
+    equal(#c.errors, 1, "errors reported: " .. table.concat(c.errors, "; "))
+    c.collectedRaises = false
+    equal(tipLines(c, 504)[1], "TC: MODEL NOT COLLECTED", "once the call answers again")
+    sentNothing(c, "raises")
+end)
+
+-- The tooltip module's kept answers: the table `memo` its event handler
+-- assigns (an upvalue of that handler), counted.
+local function memoSize(c)
+    for _, w in ipairs(c.widgets) do
+        if w.events.TRANSMOG_COLLECTION_UPDATED and w.scripts.OnEvent then
+            local i = 1
+            while true do
+                local name, value = debug.getupvalue(w.scripts.OnEvent, i)
+                if not name then break end
+                if name == "memo" then
+                    local n = 0
+                    for _ in pairs(value) do n = n + 1 end
+                    return n
+                end
+                i = i + 1
+            end
+        end
+    end
+    error("the tooltip module's memo was not found")
+end
+
+test("TC-15 F1 the kept answers are bounded: 1,500 distinct links leave fewer than 1,000, and answers stay right", function()
+    local c = tipFixture()
+    for itemID = 2000, 3499 do tipLines(c, itemID) end
+    local size = memoSize(c)
+    check(size > 0 and size < 1000, "fewer than 1,000 kept answers, got " .. size)
+    equal(tipLines(c, 501)[1], "TC: EXACT COLLECTED", "501 after the reset")
+    equal(tipLines(c, 502)[1], "TC: MODEL COLLECTED", "502 after the reset")
+    equal(tipLines(c, 504)[1], "TC: MODEL NOT COLLECTED", "504 after the reset")
+    check(memoSize(c) < 1000, "still bounded")
+    tipNoErrors(c, "bounded memory")
+end)
+
+test("TC-15 F2 collected is the shared rule's answer alone, even when the item's own source reads collected", function()
+    local c = tipFixture()
+    -- 504's own source (22) is collected, but the appearance's source list does not hold it
+    c.collectedSources[22] = true
+    local all = C_TransmogCollection.GetAllAppearanceSources
+    C_TransmogCollection.GetAllAppearanceSources = function(id)
+        local out = {}
+        for _, s in ipairs(all(id) or {}) do if s ~= 22 then out[#out + 1] = s end end
+        return out
+    end
+    equal(TC.Appearances.IsCollected({ id = 2 }), false, "the browser's rule: not collected")
+    equal(tipLines(c, 504)[1], "TC: MODEL NOT COLLECTED", "the tooltip says what the rule says")
+    tipNoErrors(c, "own source only")
+end)
+
+test("TC-15 F3 with skipgreys on, an item whose quality is unknown shows nothing until its data says it is green or better", function()
+    local c = tipFixture()
+    equal(TC.Config.skipPoorAndCommon, true, "skip on")
+    equal(#tipLines(c, 711), 0, "white, data not loaded")
+    equal(#tipLines(c, 712), 0, "green, data not loaded")
+    c.advance(1.1)
+    equal(#tipLines(c, 711), 0, "white, data in")
+    equal(tipLines(c, 712)[1], "TC: MODEL NOT COLLECTED", "green, data in")
+    tipNoErrors(c, "unknown quality")
+end)
+
+test("TC-15 F3 with skipgreys off, an item whose quality is unknown still gets its line", function()
+    local c = tipFixture()
+    SlashCmdList.TC("skipgreys")
+    equal(tipLines(c, 711)[1], "TC: MODEL NOT COLLECTED", "white, data not loaded, skip off")
+    tipNoErrors(c, "unknown quality, skip off")
+end)
+
+test("TC-15 F4 the lines are added once per show, again after the tooltip starts over", function()
+    local c = tipFixture()
+    equal(#tipLines(c, 601), 10, "the first show")
+    for _, post in ipairs(c.postCalls) do post.fn(GameTooltip, { type = post.dataType }) end
+    for _, post in ipairs(c.postCalls) do post.fn(GameTooltip, { type = post.dataType }) end
+    equal(#GameTooltip.lines, 10, "two more post-calls for the same show")
+    equal(#tipLines(c, 601), 10, "shown again after SetOwner")
+    equal(#tipLines(c, 502), 1, "another item")
+    tipNoErrors(c, "once per show")
+end)
+
+test("TC-15 F5 a tooltip shown before the settings are loaded raises nothing; the settings then apply", function()
+    local c = tipFixture({ unloaded = true })
+    equal(TC.Config, nil, "no settings yet")
+    equal(tipLines(c, 502)[1], "TC: MODEL COLLECTED", "a line with no settings")
+    equal(tipLines(c, 701)[1], "TC: MODEL NOT COLLECTED", "no skip without settings")
+    c.fire("ADDON_LOADED", "TransmogChecker")
+    equal(#tipLines(c, 701), 0, "grey skipped once the settings are in")
+    tipNoErrors(c, "unloaded settings")
+end)
+
+test("TC-15 F5 TC.Appearances missing, or its OfItem: no line, nothing raised, the error reported once", function()
+    for _, how in ipairs({ "Appearances", "OfItem" }) do
+        local c = tipFixture()
+        if how == "Appearances" then TC.Appearances = nil else TC.Appearances.OfItem = nil end
+        for i = 1, 10 do
+            local ok, lines = pcall(tipLines, c, i % 2 == 0 and 501 or 504)
+            check(ok, how .. ": the post-call raised: " .. tostring(lines))
+            equal(#lines, 0, how .. ": lines")
+        end
+        equal(#c.errors, 1, how .. ": errors reported: " .. table.concat(c.errors, "; "))
+        equal(#c.misuse, 0, how .. ": misuse")
+    end
+end)
+
+test("TC-15 F5 /tc debug prints once per computation, not per show", function()
+    local c = tipFixture()
+    SlashCmdList.TC("debug")
+    local function computed()
+        local n = 0
+        for _, text in ipairs(c.printed) do if text:find("computed", 1, true) then n = n + 1 end end
+        return n
+    end
+    for _ = 1, 6 do tipLines(c, 504) end
+    equal(computed(), 1, "six shows of one item")
+    for _ = 1, 6 do tipLines(c, 505) end
+    equal(computed(), 2, "six shows of a second item")
+    SlashCmdList.TC("debug")
+    tipLines(c, 501)
+    equal(computed(), 2, "debug off: silent")
+    tipNoErrors(c, "debug")
+end)
+
+-- the lines up to and with the status line, joined (the ALT lines follow)
+local function head(lines)
+    local out = {}
+    for _, line in ipairs(lines) do
+        out[#out + 1] = line
+        if line:find("^TC: ") then break end
+    end
+    return table.concat(out, "|")
+end
+
+test("TC-15 F5 /tc blizz hides Blizzard's line only while on and only when the line is there", function()
+    local NOT_COLLECTED = "You haven't collected this appearance"
+    local function boot2(blizzardLine)
+        local c = tipFixture()
+        TRANSMOGRIFY_TOOLTIP_APPEARANCE_UNKNOWN = NOT_COLLECTED
+        c.tooltipPre = function(tip)
+            tip:AddLine("Felcloth Boots")
+            if blizzardLine then tip:AddLine(blizzardLine) end
+            tip:AddLine("Binds when picked up")
+        end
+        return c
+    end
+    local c = boot2(NOT_COLLECTED)
+    equal(head(tipLines(c, 504)), "Felcloth Boots||Binds when picked up|TC: MODEL NOT COLLECTED",
+        "on: Blizzard's line emptied, the others kept")
+    SlashCmdList.TC("blizz")
+    equal(head(tipLines(c, 504)),
+        "Felcloth Boots|" .. NOT_COLLECTED .. "|Binds when picked up|TC: MODEL NOT COLLECTED", "off: untouched")
+    c = boot2(nil)
+    equal(head(tipLines(c, 504)), "Felcloth Boots|Binds when picked up|TC: MODEL NOT COLLECTED",
+        "on, no Blizzard line: nothing touched")
+    for _, line in ipairs(GameTooltip.lines) do check(not line.hidden, "no line hidden") end
+    TRANSMOGRIFY_TOOLTIP_APPEARANCE_UNKNOWN = nil
+    tipNoErrors(c, "blizz")
+end)
+
+test("TC-15 no forbidden collection call was made in the whole run", function()
+    equal(Fake.forbiddenTotal or 0, 0, "forbidden calls across every test")
+end)
+
 ---------------------------------------------------------------- run
 
 for _, t in ipairs(tests) do
