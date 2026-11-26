@@ -3597,6 +3597,388 @@ function buyWatch(rest, text)
 end
 end)()
 
+-- "/tcprobe weapons": can the class filter give every class's weapon types?
+-- The addon lists a weapon slot's types by asking GetCategoryInfo for each
+-- weapon category (Blizzard_Wardrobe.lua:884-888) and the client answers for
+-- the player's class (a Warlock's Main hand lists only Daggers and Staves).
+-- This sets Collections' class filter to each class in turn, reads the same
+-- answers and the weapon appearance lists, puts the filter back and records
+-- what differs. It reaches the auction house in no way. Its own function,
+-- like the art check, for the 200-local limit of the main chunk.
+local startWeapons
+;(function()
+local WEAPON_FIRST_IDS = 5
+local FLAGS = {
+    { key = "canMainHand", slot = "main", slotID = 16, label = "main hand" },
+    { key = "canOffHand", slot = "off", slotID = 17, label = "off hand" },
+    { key = "canRanged", slot = "ranged", slotID = 18, label = "ranged" },
+}
+local WEAPON_EVENTS = {
+    "TRANSMOG_COLLECTION_UPDATED", "TRANSMOG_SEARCH_UPDATED", "TRANSMOG_COLLECTION_SOURCE_ADDED",
+}
+local run
+
+-- The category loop's bounds as Blizzard's wardrobe and the addon take them.
+local function categoryRange(record)
+    local types = Enum and Enum.TransmogCollectionType
+    local meta = Enum and Enum.TransmogCollectionTypeMeta
+    local first, last, fromFirst, fromLast
+    if type(_G.FIRST_TRANSMOG_COLLECTION_WEAPON_TYPE) == "number" then
+        first, fromFirst = _G.FIRST_TRANSMOG_COLLECTION_WEAPON_TYPE, "global FIRST_TRANSMOG_COLLECTION_WEAPON_TYPE"
+    else
+        first, fromFirst = enum("TransmogCollectionType", "Wand", 12), "Enum.TransmogCollectionType.Wand or 12"
+    end
+    if type(_G.LAST_TRANSMOG_COLLECTION_WEAPON_TYPE) == "number" then
+        last, fromLast = _G.LAST_TRANSMOG_COLLECTION_WEAPON_TYPE, "global LAST_TRANSMOG_COLLECTION_WEAPON_TYPE"
+    elseif meta and type(meta.NumValues) == "number" then
+        last, fromLast = meta.NumValues - 1, "Enum.TransmogCollectionTypeMeta.NumValues - 1"
+    else
+        last, fromLast = 29, "fallback 29"
+        for _, value in pairs(types or {}) do
+            if type(value) == "number" and value > last then
+                last = value
+            end
+        end
+        if types then
+            fromLast = "largest value of Enum.TransmogCollectionType, at least 29"
+        end
+    end
+    if last - first > 100 then
+        last = first + 100
+        fromLast = fromLast .. " (cut to 100 categories)"
+    end
+    record.range = { first = first, last = last, firstFrom = fromFirst, lastFrom = fromLast }
+    local names = {}
+    for name, value in pairs(types or {}) do
+        if type(value) == "number" and value >= 12 then
+            names[#names + 1] = { value = value, name = name }
+        end
+    end
+    table.sort(names, function(a, b) return a.value < b.value end)
+    record.enumNames = names
+    local categories = {}
+    for category = first, last do
+        categories[#categories + 1] = category
+    end
+    return categories
+end
+
+-- GetCategoryInfo's six answers, "nothing", or why there are none.
+local function readInfo(category)
+    local result = call(C_TransmogCollection, "GetCategoryInfo", category)
+    if result.missing or result.error then
+        return { problem = failureText(result) }
+    end
+    if result[1] == nil then
+        return { nothing = true }
+    end
+    return { name = result[1], isWeapon = result[2], canHaveIllusions = result[3],
+        canMainHand = result[4], canOffHand = result[5], canRanged = result[6] }
+end
+
+local function locationOf(slotID)
+    return { slotID = slotID, type = enum("TransmogType", "Appearance", 0),
+        modification = enum("TransmogModification", "Main", 0) }
+end
+
+-- A list's counts and its first five ids, with the set of not-hidden ids.
+local function readCounts(category, slotID)
+    local read, ids = readList(category, locationOf(slotID))
+    local counts = { entries = read.entries, notHidden = read.shown, collected = read.collected, first5 = {} }
+    for i = 1, WEAPON_FIRST_IDS do
+        counts.first5[i] = read.first10[i]
+    end
+    counts.noList = read.noList
+    return counts, ids
+end
+
+-- Every category's info and, for each location in `slots` (all three, or the
+-- ones the info's flags name), its list. Returns the rows and the id sets.
+local function readAll(categories, allSlots)
+    local rows, sets = {}, {}
+    for index, category in ipairs(categories) do
+        local row = { category = category, info = readInfo(category) }
+        local ids = {}
+        for _, flag in ipairs(FLAGS) do
+            if allSlots or (row.info.name ~= nil and row.info[flag.key]) then
+                row[flag.slot], ids[flag.slot] = readCounts(category, flag.slotID)
+            end
+        end
+        rows[index], sets[index] = row, ids
+    end
+    return rows, sets
+end
+
+-- Which category names a class has per slot, as the addon lists them (it
+-- also needs isWeapon), and a signature of all six answers of every category.
+local function typesOf(rows)
+    local types, signature = { main = {}, off = {}, ranged = {} }, {}
+    for _, row in ipairs(rows) do
+        local info = row.info
+        local text = tostring(row.category) .. ":" .. tostring(info.name or (info.nothing and "nothing") or info.problem)
+        for _, flag in ipairs(FLAGS) do
+            text = text .. (info[flag.key] and "1" or "0")
+            if info.name ~= nil and info.isWeapon and info[flag.key] then
+                types[flag.slot][#types[flag.slot] + 1] = info.name
+            end
+        end
+        text = text .. (info.isWeapon and "w" or "-") .. (info.canHaveIllusions and "i" or "-")
+        signature[#signature + 1] = text
+    end
+    return types, table.concat(signature, ";")
+end
+
+local function typeLine(row)
+    local types = typesOf(row.rows or {})
+    local parts = {}
+    for _, flag in ipairs(FLAGS) do
+        parts[#parts + 1] = flag.label .. " " .. (#types[flag.slot] > 0 and table.concat(types[flag.slot], ", ") or "-")
+    end
+    return table.concat(parts, " | ")
+end
+
+local function summarise(current)
+    local record, rows = current.record, current.record.perClass
+    local summary = { perClass = {}, union = { main = {}, off = {}, ranged = {} }, categories = {} }
+    local firstSignature, differ = nil, false
+    -- a class whose filter did not take (the set raised, or the read-back is
+    -- another class) answered for the wrong class: kept aside, not counted
+    for _, class in ipairs(rows) do
+        if class.rows and (class.setRaised or class.filterAfterSet ~= class.classID) then
+            class.unreliableRows, class.rows = class.rows, nil
+            class.notCounted = "the class filter did not read back as this class"
+            current.sets[class.classID] = nil
+        end
+    end
+    local unionSeen = { main = {}, off = {}, ranged = {} }
+    for _, class in ipairs(rows) do
+        if class.rows then
+            local types, signature = typesOf(class.rows)
+            summary.perClass[#summary.perClass + 1] = { classID = class.classID, className = class.className,
+                filterAfterSet = class.filterAfterSet, ["main hand"] = types.main, ["off hand"] = types.off,
+                ranged = types.ranged }
+            if firstSignature == nil then
+                firstSignature = signature
+            elseif signature ~= firstSignature then
+                differ = true
+            end
+            for _, flag in ipairs(FLAGS) do
+                for index, row in ipairs(class.rows) do
+                    local info = row.info
+                    if info.name ~= nil and info.isWeapon and info[flag.key] and not unionSeen[flag.slot][index] then
+                        unionSeen[flag.slot][index] = true
+                    end
+                end
+            end
+        end
+    end
+    summary.typesDifferByClass = differ
+    for _, flag in ipairs(FLAGS) do
+        for index, category in ipairs(current.categories) do
+            if unionSeen[flag.slot][index] then
+                local name
+                for _, class in ipairs(rows) do
+                    local info = class.rows and class.rows[index].info
+                    if info and info.name then
+                        name = info.name
+                        break
+                    end
+                end
+                summary.union[flag.slot][#summary.union[flag.slot] + 1] = name or tostring(category)
+            end
+        end
+    end
+    -- per category and slot: is the id list the same under every class that has it
+    for index, category in ipairs(current.categories) do
+        for _, flag in ipairs(FLAGS) do
+            local firstIds, firstSize, classes, same, smallest, largest = nil, nil, 0, true, nil, nil
+            for _, class in ipairs(rows) do
+                local ids = current.sets[class.classID] and current.sets[class.classID][index]
+                    and current.sets[class.classID][index][flag.slot]
+                if ids then
+                    classes = classes + 1
+                    local size = class.rows[index][flag.slot].notHidden
+                    smallest = (smallest == nil or size < smallest) and size or smallest
+                    largest = (largest == nil or size > largest) and size or largest
+                    if firstIds == nil then
+                        firstIds, firstSize = ids, size
+                    elseif size ~= firstSize or not sameSet(ids, firstIds) then
+                        same = false
+                    end
+                end
+            end
+            if classes > 0 then
+                summary.categories[#summary.categories + 1] = { category = category, slot = flag.slot,
+                    classesWithIt = classes, sameIdsUnderEveryClass = same, notHidden = firstSize,
+                    smallest = smallest, largest = largest }
+            end
+        end
+    end
+    -- the player's own class: explicit filter against the filter as found
+    local own = { classID = current.playerClassID }
+    for _, class in ipairs(rows) do
+        if class.classID == current.playerClassID and class.rows then
+            local _, startSignature = typesOf(record.start.rows)
+            local _, classSignature = typesOf(class.rows)
+            own.categoryAnswersEqual = startSignature == classSignature
+            local listsEqual, compared = true, 0
+            for index in ipairs(current.categories) do
+                for _, flag in ipairs(FLAGS) do
+                    local explicit = current.sets[class.classID] and current.sets[class.classID][index]
+                        and current.sets[class.classID][index][flag.slot]
+                    if explicit then
+                        compared = compared + 1
+                        local began = current.startSets[index][flag.slot]
+                        if not began or not sameSet(began, explicit)
+                            or record.start.rows[index][flag.slot].notHidden ~= class.rows[index][flag.slot].notHidden then
+                            listsEqual = false
+                        end
+                    end
+                end
+            end
+            own.listsCompared, own.listsEqual = compared, listsEqual
+            own.equalToStart = own.categoryAnswersEqual and listsEqual
+        end
+    end
+    if own.equalToStart == nil then
+        own.note = "the player's class has no recorded answers"
+    end
+    summary.ownClass = own
+    record.summary = summary
+    return differ
+end
+
+-- Ends the run on every path: puts the filter back, reads it back, stops
+-- listening, writes the summary.
+local function finish(reason)
+    local current = run
+    if not current then
+        return
+    end
+    run = nil
+    local record = current.record
+    record.endedBecause = reason
+    local restore = { wanted = current.startFilter }
+    if current.startFilter ~= nil then
+        restore.error = failureText(call(C_TransmogCollection, "SetClassFilter", current.startFilter))
+        restore.readBack = answer(call(C_TransmogCollection, "GetClassFilter"))
+        restore.restored = restore.readBack == current.startFilter
+    else
+        restore.note = "the filter could not be read at the start, so none was put back"
+        restore.restored = false
+    end
+    record.restore = restore
+    local ok, differ = pcall(summarise, current)
+    if not ok then
+        record.summaryError = tostring(differ)
+        differ = nil
+    end
+    record.events.counts = current.eventCounts
+    stopListening(current.listener)
+    record.tookSeconds = round3(preciseTime() - current.t0)
+    print(("TCProbe: types differ by class: %s; filter restored: %s (%s, %.1f s)."):format(
+        differ == nil and "unknown" or (differ and "yes" or "no"), restore.restored and "yes" or "no",
+        reason, record.tookSeconds))
+    print("TCProbe: /reload now.")
+end
+
+local function step(current, work)
+    if current ~= run then
+        return
+    end
+    local ok, err = pcall(work)
+    if not ok then
+        current.record.stepError = tostring(err)
+        finish("error")
+    end
+end
+
+local function nextClass(current, index)
+    step(current, function()
+        local entry = current.list[index]
+        if not entry then
+            return finish("done")
+        end
+        local row = { classID = entry.id, className = entry.name }
+        current.record.perClass[index] = row
+        local set = call(C_TransmogCollection, "SetClassFilter", entry.id)
+        row.setRaised = set.error ~= nil or set.missing == true
+        row.setError = failureText(set)
+        row.filterAfterSet = answer(call(C_TransmogCollection, "GetClassFilter"))
+        C_Timer.After(0, function()
+            step(current, function()
+                row.rows, current.sets[entry.id] = readAll(current.categories, false)
+                print(("TCProbe: %s (%d): %s%s"):format(tostring(entry.name), entry.id, typeLine(row),
+                    row.setRaised and (" (SetClassFilter failed: " .. tostring(row.setError) .. ")") or ""))
+                C_Timer.After(0, function()
+                    nextClass(current, index + 1)
+                end)
+            end)
+        end)
+    end)
+end
+
+function startWeapons()
+    if run or classRun then
+        print("TCProbe: the weapons check or the classes check is already running; wait for its last line.")
+        return
+    end
+    local TC = C_TransmogCollection
+    local player = call(_G, "UnitClass", "player")
+    local record = { startedAt = date("%H:%M:%S"), player = { className = player[1], classID = player[3] },
+        perClass = {}, events = {}, auctionHouseCalls = "none" }
+    db.weapons = record
+    local startFilter = answer(call(TC, "GetClassFilter"))
+    record.startFilter = startFilter
+    if type(startFilter) ~= "number" then
+        startFilter = nil
+    end
+    local categories = categoryRange(record)
+    local ids = call(C_SpecializationInfo, "GetAllClassIDs")[1]
+    local list = {}
+    if type(ids) == "table" then
+        record.classListFrom = "C_SpecializationInfo.GetAllClassIDs"
+    else
+        ids = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13 }
+        record.classListFrom = "ids 1 to 13 that C_CreatureInfo.GetClassInfo answers"
+    end
+    for _, classID in ipairs(ids) do
+        local classInfo = call(C_CreatureInfo, "GetClassInfo", classID)[1]
+        if type(classInfo) == "table" then
+            list[#list + 1] = { id = classID, name = classInfo.className }
+        end
+    end
+    record.classes = list
+    local current = { record = record, list = list, categories = categories, sets = {}, eventCounts = {},
+        startFilter = startFilter, playerClassID = player[3], t0 = preciseTime() }
+    run = current
+    local registered, refused
+    current.listener, registered, refused = listen(WEAPON_EVENTS, function(_, event)
+        if event == "PLAYER_LOGOUT" then
+            return finish("logout")
+        end
+        current.eventCounts[event] = (current.eventCounts[event] or 0) + 1
+    end)
+    record.events.registered, record.events.refused = registered, refused
+    -- under the filter as found, before anything is changed
+    local ok, err = pcall(function()
+        local rows
+        rows, current.startSets = readAll(categories, true)
+        record.start = { rows = rows, filter = startFilter }
+    end)
+    if not ok then
+        record.startError = tostring(err)
+        record.start = record.start or { rows = {} }
+        current.startSets = current.startSets or {}
+    end
+    print(("TCProbe: weapons started: %d categories (%d to %d), %d classes, filter now %s. It asks the auction house nothing and puts the filter back."):format(
+        #categories, record.range.first, record.range.last, #list, tostring(startFilter)))
+    step(current, function()
+        nextClass(current, 1)
+    end)
+end
+end)()
+
 local function probeStatic()
     probeClient()
     probeNamespaces()
@@ -3710,6 +4092,8 @@ SlashCmdList["TCPROBE"] = function(msg)
         toggleArt()
     elseif word == "buywatch" then
         buyWatch(rest, msg)
+    elseif word == "weapons" then
+        startWeapons()
     else
         probeStatic()
     end
