@@ -415,22 +415,35 @@ function Appearances.Items(appearance, done)
     end)
 end
 
+-- The appearance's sources in the category List read it from, each the
+-- client's AppearanceSourceInfo (GetAppearanceSources,
+-- TransmogItemsDocumentation.lua:212-228: sourceID, itemID, isCollected,
+-- sourceType, name and quality once the item is loaded), in Collections'
+-- order (CollectionWardrobeUtil.SortSources, as GetSortedAppearanceSources
+-- sorts them, Blizzard_FrameXMLUtil/CollectionsUtil.lua:43-89). An order
+-- function that fails leaves the client's order; no answer is an empty list.
+function Appearances.Sources(appearance)
+    local TCol = C_TransmogCollection
+    local entry = TC.Slots[appearance.slot]
+    if not (TCol and TCol.GetAppearanceSources and entry) then return {} end
+    local category = appearance.category or categoryValue(entry.categories[1])
+    local sources = TCol.GetAppearanceSources(appearance.id, category, location(entry.slotID))
+    if type(sources) ~= "table" then return {} end
+    local sort = CollectionWardrobeUtil and CollectionWardrobeUtil.SortSources
+    local ok, sorted = false, nil
+    if sort then ok, sorted = pcall(sort, sources) end
+    return ok and type(sorted) == "table" and sorted or sources
+end
+
 -- The source a tile is dressed with: the first of the category's sources
 -- after Collections' sort, or else any source of the appearance
 -- (WardrobeItemsCollectionMixin:GetAnAppearanceSourceFromVisual, as the
--- probe's tiles used it). The category is the one List read the appearance
--- from.
+-- probe's tiles used it).
 function Appearances.DisplaySource(appearance)
     local TCol = C_TransmogCollection
-    local entry = TC.Slots[appearance.slot]
-    if not (TCol and entry) then return nil end
-    local category = appearance.category or categoryValue(entry.categories[1])
-    local sources = TCol.GetAppearanceSources and TCol.GetAppearanceSources(appearance.id, category, location(entry.slotID))
-    if type(sources) == "table" and sources[1] then
-        local sort = CollectionWardrobeUtil and CollectionWardrobeUtil.SortSources
-        local sorted = sort and sort(sources)
-        return (type(sorted) == "table" and sorted[1] or sources[1]).sourceID
-    end
+    if not (TCol and TC.Slots[appearance.slot]) then return nil end
+    local sources = Appearances.Sources(appearance)
+    if sources[1] then return sources[1].sourceID end
     local all = TCol.GetAllAppearanceSources and TCol.GetAllAppearanceSources(appearance.id)
     return type(all) == "table" and all[1] or nil
 end

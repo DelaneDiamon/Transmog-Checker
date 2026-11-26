@@ -114,6 +114,14 @@ end
 --   noTemplates     { [template] = true }: CreateFrame raises for those
 --   noAtlases       true, or { [atlas] = true }: C_Texture.GetAtlasInfo
 --                   answers nothing for every atlas, or for those
+--   noSetLight      models have no SetLight
+--   noGetOwner      GameTooltip has no GetOwner
+--   noMaskAPI       CreateMaskTexture and AddMaskTexture are nil
+--   noLightMakers   CreateColor and CreateVector3D are nil
+--   fileIDs         GetFileIDFromPath exists and answers these ({ [path] = id })
+--   realSortSources CollectionWardrobeUtil.SortSources is Blizzard's
+--   drops           { [sourceID] = drops } for GetAppearanceSourceDrops
+--   an appearance's sourceTypes: the source type of each source (default 4)
 function Fake.new(opts)
     opts = opts or {}
     local c = {
@@ -223,7 +231,9 @@ function Fake.new(opts)
     function methods:SetShown(shown) if shown then self:Show() else self:Hide() end end
     function methods:IsShown() return self.shown end
     function methods:GetParent() return self.parent end
-    function methods:GetFrameLevel() return self.parent and self.parent:GetFrameLevel() + 1 or 0 end
+    -- A frame is one level above its parent until SetFrameLevel says otherwise.
+    function methods:SetFrameLevel(level) self.level = level end
+    function methods:GetFrameLevel() return self.level or (self.parent and self.parent:GetFrameLevel() + 1 or 0) end
     function methods:IsObjectType(t)
         return t == self.kind or t == "Frame" or (t == "Button" and self.kind == "DropdownButton")
     end
@@ -261,8 +271,40 @@ function Fake.new(opts)
         if c.combat then c.propagateInCombat = c.propagateInCombat + 1 end
         self.propagate = on and true or false
     end
-    function methods:CreateTexture() return c.newWidget("Texture", nil, self) end
-    function methods:CreateFontString() return c.newWidget("FontString", nil, self) end
+    -- the draw layer, the template and the sublevel are kept on the region
+    function methods:CreateTexture(name, layer, template, sublevel)
+        local w = c.newWidget("Texture", name, self, template)
+        w.layer, w.sublevel = layer, sublevel
+        return w
+    end
+    function methods:CreateFontString(name, layer, template)
+        local w = c.newWidget("FontString", name, self, template)
+        w.layer = layer
+        return w
+    end
+    -- Masks (SimpleFrameAPIDocumentation.lua:113-127,
+    -- SimpleTextureAPIDocumentation.lua:10): a texture keeps its masks in
+    -- w.masks; noMaskAPI: neither call exists.
+    function methods:CreateMaskTexture() return c.newWidget("MaskTexture", nil, self) end
+    function methods:AddMaskTexture(mask)
+        misuse(type(mask) == "table" and mask.kind == "MaskTexture", "AddMaskTexture argument")
+        self.masks = self.masks or {}
+        self.masks[#self.masks + 1] = mask
+    end
+    -- A button's font string (SimpleButtonAPIDocumentation): one, made on asking.
+    function methods:GetFontString()
+        if self.kind ~= "Button" then return nil end
+        self.fontString = self.fontString or c.newWidget("FontString", nil, self)
+        return self.fontString
+    end
+    -- ModelLight (SharedScriptObjectModelLightDocumentation.lua:6-17):
+    -- every call is kept in c.lights; noSetLight: models have no SetLight.
+    c.lights = {}
+    function methods:SetLight(enabled, light)
+        misuse(type(enabled) == "boolean" and type(light) == "table" and type(light.point) == "table"
+            and type(light.ambientIntensity) == "number" and type(light.diffuseIntensity) == "number", "SetLight arguments")
+        c.lights[#c.lights + 1] = { model = self, enabled = enabled, light = light }
+    end
     -- SimpleButtonAPIDocumentation.lua:423-430: the argument is a font object.
     function methods:SetNormalFontObject(font)
         misuse(type(font) == "table", "SetNormalFontObject with " .. type(font))
@@ -292,6 +334,9 @@ function Fake.new(opts)
         c.itemAppearances[#c.itemAppearances + 1] = { model = self, appearance = appearanceID }
     end
     local meta = { __index = function(w, key)
+        if key == "GetOwner" and opts.noGetOwner then return nil end
+        if key == "SetLight" and (opts.noSetLight or w.kind ~= "DressUpModel") then return nil end
+        if (key == "CreateMaskTexture" or key == "AddMaskTexture") and opts.noMaskAPI then return nil end
         local method = methods[key]
         if method then
             return function(self, ...)
@@ -368,10 +413,54 @@ function Fake.new(opts)
     -- a list of { enum, member } the client lacks
     for _, missing in ipairs(opts.noEnumMembers or {}) do Enum[missing[1]][missing[2]] = nil end
     GameTooltip = c.newWidget("GameTooltip", "GameTooltip")
+    -- The tooltip keeps its owner, anchor and lines: SetOwner starts it
+    -- over; each line is { text, r, g, b, right, rr, rg, rb }.
+    GameTooltip.lines = {}
+    function GameTooltip:SetOwner(owner, anchor)
+        self.owner, self.anchor, self.lines = owner, anchor, {}
+        self.calls.SetOwner = { owner, anchor }
+    end
+    if not opts.noGetOwner then function GameTooltip:GetOwner() return self.owner end end
+    function GameTooltip:AddLine(text, r, g, b, wrap)
+        self.lines[#self.lines + 1] = { text = text, r = r, g = g, b = b }
+        self.calls.AddLine = { text, r, g, b, wrap }
+    end
+    function GameTooltip:AddDoubleLine(text, right, r, g, b, rr, rg, rb)
+        self.lines[#self.lines + 1] = { text = text, r = r, g = g, b = b, right = right, rr = rr, rg = rg, rb = rb }
+    end
+    -- the tooltip's lines as text, "left | right" for a double line
+    function c.tooltipTexts()
+        local out = {}
+        for i, line in ipairs(GameTooltip.lines) do out[i] = line.right and (line.text .. " | " .. line.right) or line.text end
+        return out
+    end
+    -- ColorMixin and Vector3D makers (Blizzard_SharedXMLBase/Color.lua:3,
+    -- Blizzard_SharedXML/Vector3D.lua:93); noLightMakers: neither exists.
+    if not opts.noLightMakers then
+        function CreateColor(r, g, b, a) return { r = r, g = g, b = b, a = a } end
+        function CreateVector3D(x, y, z) return { x = x, y = y, z = z } end
+    else
+        CreateColor, CreateVector3D = nil, nil
+    end
+    -- GetFileIDFromPath: absent unless a test gives fileIDs ({ [path] = id
+    -- or false }); a path not listed has none.
+    GetFileIDFromPath = opts.fileIDs and function(path) return opts.fileIDs[path] or nil end or nil
+    -- The client's strings the tile tooltip reads, in retail wording (made up
+    -- for the fake: the clone has no GlobalStrings).
+    TRANSMOG_SOURCE_1, TRANSMOG_SOURCE_2, TRANSMOG_SOURCE_3, TRANSMOG_SOURCE_4 = "Boss Drop", "Quest", "Vendor", "World Drop"
+    TRANSMOG_SOURCE_6, TRANSMOG_SOURCE_BOSS_DROP = "Profession", 1
+    TRANSMOG_COLLECTED, WARDROBE_OTHER_ITEMS = "Collected", "Other items using this appearance:"
+    RETRIEVING_ITEM_INFO = "Retrieving item information"
+    WARDROBE_TOOLTIP_ENCOUNTER_SOURCE, WARDROBE_TOOLTIP_BOSS_DROP_FORMAT = "%s (%s)", "Drop: %s"
+    WARDROBE_TOOLTIP_BOSS_DROP_FORMAT_WITH_DIFFICULTIES = "Drop: %s (%s)"
+    WARDROBE_TOOLTIP_CYCLE_ARROW_ICON, WARDROBE_TOOLTIP_CYCLE_SPACER_ICON = "> ", "  "
     TooltipDataProcessor = { AddTooltipPostCall = function() end }
     UIParent = c.newWidget("Frame", "UIParent")
     GameFontNormal = not opts.noFontObjects and c.newWidget("Font", "GameFontNormal") or nil
     GameFontHighlightSmall = not opts.noFontObjects and c.newWidget("Font", "GameFontHighlightSmall") or nil
+    GameFontDisableSmall = not opts.noFontObjects and c.newWidget("Font", "GameFontDisableSmall") or nil
+    GameFontNormalMed3 = not opts.noFontObjects and c.newWidget("Font", "GameFontNormalMed3") or nil
+    GameFontWhite = not opts.noFontObjects and c.newWidget("Font", "GameFontWhite") or nil
     -- the money display's fonts (GameFontStyles.xml:58-78)
     PriceFontWhite = not opts.noFontObjects and c.newWidget("Font", "PriceFontWhite") or nil
     PriceFontRed = not opts.noFontObjects and c.newWidget("Font", "PriceFontRed") or nil
@@ -540,10 +629,15 @@ function Fake.new(opts)
             self:GenerateMenu()
             c.menu = { owner = self, elements = self.menuRoot.elements }
             c.menuOpens = c.menuOpens + 1
+            -- DropdownButton.lua:128-129 and 85-88: the button is told, the
+            -- menu already set or already cleared
+            self:OnMenuOpened(c.menu)
         end
         -- DropdownButton.lua:132-139: closing signals an update
         function w:CloseMenu()
-            if self:IsMenuOpen() then c.menu = nil end
+            local was = self:IsMenuOpen()
+            if was then c.menu = nil end
+            if was then self:OnMenuClosed() end
             self:SignalUpdate()
         end
         function w:SetMenuOpen(open) if open then self:OpenMenu() else self:CloseMenu() end end
@@ -579,6 +673,7 @@ function Fake.new(opts)
                 misuse(response == nil, "a responder answered " .. tostring(response))
                 local owner = c.menu.owner
                 c.menu = nil
+                owner:OnMenuClosed()
                 owner:SignalUpdate()
                 return true
             end
@@ -601,8 +696,14 @@ function Fake.new(opts)
         misuse(kind == "Frame" or kind == "Button" or kind == "DressUpModel" or kind == "EditBox",
             "CreateFrame kind " .. tostring(kind))
         local w = c.newWidget(kind, name, parent, template)
-        -- IconButtonTemplate's Icon (IconButtonTemplate.xml:23-29)
-        if template == "SquareIconButtonTemplate" then w.Icon = w:CreateTexture() end
+        -- CollectionsBackgroundTemplate's corners (SharedCollectionTemplates.xml:176-200)
+        if template == "CollectionsBackgroundTemplate" then
+            -- inherits InsetFrameTemplate with useParentLevel (SharedUIPanelTemplates.xml:389)
+            w.level = parent:GetFrameLevel()
+            for _, key in ipairs({ "BGCornerTopLeft", "BGCornerTopRight", "BGCornerBottomLeft", "BGCornerBottomRight" }) do
+                w[key] = w:CreateTexture()
+            end
+        end
         -- MoneyDisplayFrameMixin:SetAmount (MoneyFrame.lua:557-572): the
         -- fake shows the amount as text in the item list's form ("1g 5c"),
         -- so a test reads the price the same way with or without it
@@ -1087,9 +1188,20 @@ function Fake.new(opts)
                 return source1.sourceID > source2.sourceID
             end,
             -- Not Blizzard's: highest source id first, enough to tell the
-            -- sorted list from the one the client gives.
+            -- sorted list from the one the client gives. realSortSources:
+            -- Blizzard's, copied from Blizzard_FrameXMLUtil/CollectionsUtil.lua:43-76
+            -- without a primary visual or source.
             SortSources = not opts.noSortSources and function(sources)
-                table.sort(sources, function(a, b) return a.sourceID > b.sourceID end)
+                table.sort(sources, opts.realSortSources and function(s1, s2)
+                    if s1.isCollected ~= s2.isCollected then return s1.isCollected end
+                    if s1.isValidSourceForPlayer ~= s2.isValidSourceForPlayer then return s1.isValidSourceForPlayer end
+                    if s1.quality and s2.quality then
+                        if s1.quality ~= s2.quality then return s1.quality > s2.quality end
+                    else
+                        return s1.quality
+                    end
+                    return s1.sourceID > s2.sourceID
+                end or function(a, b) return a.sourceID > b.sourceID end)
                 return sources
             end or nil,
         }
@@ -1141,10 +1253,22 @@ function Fake.new(opts)
             misuse(a and category == a.category and type(location) == "table"
                 and location.slotID == SLOT_OF_CATEGORY[category], "GetAppearanceSources arguments")
             if not a or opts.sourcesNil then return nil end
+            c.sourcesCalls = (c.sourcesCalls or 0) + 1
+            -- AppearanceSourceInfo (AppearanceSourceDocumentation.lua:6-30):
+            -- the item's name and quality only once its data is in; the
+            -- source type from the fixture's sourceTypes (default 4)
             local infos = {}
-            for i, s in ipairs(a.sources) do infos[i] = { sourceID = s } end
+            for i, s in ipairs(a.sources) do
+                local itemID = (opts.sourceItems or {})[s] or s
+                local loaded = isLoaded(itemID)
+                infos[i] = { sourceID = s, visualID = id, itemID = itemID, isCollected = collectedSources[s] == true,
+                    sourceType = a.sourceTypes and a.sourceTypes[i] or 4, isValidSourceForPlayer = true,
+                    name = loaded and itemDef(itemID).name or nil, quality = loaded and itemDef(itemID).quality or nil }
+            end
             return infos
         end,
+        -- TransmogItemsDocumentation: a boss drop's encounters, from opts.drops[sourceID]
+        GetAppearanceSourceDrops = function(sourceID) return (opts.drops or {})[sourceID] end,
         PlayerHasTransmogItemModifiedAppearance = function(sourceID)
             return collectedSources[sourceID] == true
         end,

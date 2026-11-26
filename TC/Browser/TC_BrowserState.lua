@@ -984,6 +984,8 @@ local function statusLine(answer)
     elseif view.mode == "All" then
         answer.statusButton = PRICE_SLOT
     end
+    -- the hint is advice, not state, and is drawn so (visual pass, board 9)
+    answer.statusHint = answer.status == STATUS_ALL
     if answer.statusButton then answer.statusAction = State.ScanAgain end
 end
 
@@ -1056,6 +1058,143 @@ function State.BuyRow(index)
     if row and row.buy and row.buy.enabled then TC.Buy.Start(row.buy.variant) end
 end
 
+-- The tile tooltip (visual pass, board 7), built as Collections builds its
+-- own (CollectionWardrobeUtil.SetAppearanceTooltip, Blizzard_FrameXMLUtil/
+-- CollectionsUtil.lua:183-384). The client's strings and colours are read
+-- when it has them; the English texts after them are the board's wording,
+-- used only without them (their wording on Forever is unverified).
+local function clientText(name, fallback)
+    local s = _G[name]
+    return type(s) == "string" and s or fallback
+end
+local function fontColour(name, r, g, b)
+    local c = _G[name]
+    if type(c) == "table" and c.GetRGB then return { c:GetRGB() } end
+    return { r, g, b }
+end
+local LOWEST_PRICE, SEE_ITEMS, CHECK_HINT = "Lowest price", "Click to see the items for sale.", "Click to check the auction house."
+local NO_ANSWER_TEXT, CHECK_AGAIN_HINT, DETAILS_HINT = "No answer from the auction house.", "Click to check again.", "Click for details."
+
+-- An item quality's colour (C_Item.GetItemQualityColor), white without one.
+local function qualityColour(quality, white)
+    if type(quality) == "number" and C_Item and C_Item.GetItemQualityColor then
+        local ok, r, g, b = pcall(C_Item.GetItemQualityColor, quality)
+        if ok and r then return { r, g, b } end
+    end
+    return white
+end
+
+-- A source's name in its quality colour, the client's own or its item's
+-- once loaded; until then Collections' red "Retrieving item information"
+-- (GetAppearanceNameTextAndColor, CollectionsUtil.lua:132-154).
+local function sourceName(source, c)
+    local name, quality = source.name, source.quality
+    if not name and source.itemID then
+        name = TC.Appearances.ItemName(source.itemID)
+        if name and C_Item and C_Item.GetItemInfo then quality = select(3, C_Item.GetItemInfo(source.itemID)) end
+    end
+    if not name then return clientText("RETRIEVING_ITEM_INFO", "Retrieving item information"), c.red end
+    return name, qualityColour(quality, c.white)
+end
+
+-- A source's source text: "Collected" in green, or the client's name of its
+-- source type (TRANSMOG_SOURCE_n) in white (GetAppearanceSourceTextAndColor,
+-- CollectionsUtil.lua:156-170).
+local function sourceText(source, c)
+    if source.isCollected then return clientText("TRANSMOG_COLLECTED", "Collected"), c.green end
+    local text = source.sourceType and _G["TRANSMOG_SOURCE_" .. source.sourceType]
+    return type(text) == "string" and text or "", c.white
+end
+
+-- The boss of a boss drop with a single drop, as the header's source line
+-- says it (CollectionsUtil.lua:221-232, 298-306, 312-318); nil otherwise.
+local function dropText(source)
+    local TCol = C_TransmogCollection
+    if source.sourceType ~= (TRANSMOG_SOURCE_BOSS_DROP or 1) or not (TCol and TCol.GetAppearanceSourceDrops) then return nil end
+    local drops = TCol.GetAppearanceSourceDrops(source.sourceID)
+    if type(drops) ~= "table" or #drops ~= 1 then return nil end
+    local drop = drops[1]
+    local where = clientText("WARDROBE_TOOLTIP_ENCOUNTER_SOURCE", "%s (%s)"):format(drop.encounter, drop.instance)
+    if type(drop.difficulties) == "table" and drop.difficulties[1] then
+        return clientText("WARDROBE_TOOLTIP_BOSS_DROP_FORMAT_WITH_DIFFICULTIES", "Drop: %s (%s)"):format(where,
+            table.concat(drop.difficulties, clientText("PLAYER_LIST_DELIMITER", ", ")))
+    end
+    return clientText("WARDROBE_TOOLTIP_BOSS_DROP_FORMAT", "Drop: %s"):format(where)
+end
+
+-- The source the tooltip heads with (CollectionWardrobeUtil.
+-- GetDefaultSourceIndex, CollectionsUtil.lua:3-39), else the first.
+local function headIndex(sources)
+    local pick = CollectionWardrobeUtil and CollectionWardrobeUtil.GetDefaultSourceIndex
+    local ok, index = false, nil
+    if pick then ok, index = pcall(pick, sources) end
+    return ok and sources[index] and index or 1
+end
+
+-- The tile tooltip's lines for an appearance, each { text, color, right,
+-- rightColor, money }: the head item's name and, when not collected, its
+-- source; then, with more than one item, "Other items using this
+-- appearance:" and every item with its source or "Collected", collected
+-- ones included (Collections hides the list for a collected appearance,
+-- CollectionsUtil.lua:330); no "Tab to cycle" line. Then, when the browser
+-- keeps a result for the tile, the lowest price or "Not for sale" and its
+-- age, and the click hint. It reads the game's appearance data, never the
+-- auction house; it asks for the data of this appearance's items whose
+-- names are not loaded, once a visit (LoadNames).
+function State.TileTooltip(appearance)
+    local c = { white = fontColour("HIGHLIGHT_FONT_COLOR", 1, 1, 1), normal = fontColour("NORMAL_FONT_COLOR", 1, 0.82, 0),
+        green = fontColour("GREEN_FONT_COLOR", 0.1, 1, 0.1), red = fontColour("RED_FONT_COLOR", 1, 0.125, 0.125),
+        grey = fontColour("GRAY_FONT_COLOR", 0.5, 0.5, 0.5) }
+    local sources = TC.Appearances.Sources(appearance)
+    local lines, missing = {}, {}
+    for _, source in ipairs(sources) do
+        if not source.name and source.itemID then missing[#missing + 1] = source.itemID end
+    end
+    if missing[1] and not away then TC.Appearances.LoadNames(missing) end
+    local head = sources[1] and headIndex(sources)
+    if head then
+        local name, colour = sourceName(sources[head], c)
+        lines[1] = { text = name, color = colour }
+        if not sources[head].isCollected then
+            local text, textColour = sourceText(sources[head], c)
+            local ok, drop = pcall(dropText, sources[head])
+            text = ok and drop or text
+            if text ~= "" then lines[#lines + 1] = { text = text, color = textColour } end
+        end
+    end
+    if #sources > 1 then
+        lines[#lines + 1] = { text = " " }
+        lines[#lines + 1] = { text = clientText("WARDROBE_OTHER_ITEMS", "Other items using this appearance:"), color = c.normal }
+        for i, source in ipairs(sources) do
+            local name, colour = sourceName(source, c)
+            local text, textColour = sourceText(source, c)
+            local mark = clientText(i == head and "WARDROBE_TOOLTIP_CYCLE_ARROW_ICON" or "WARDROBE_TOOLTIP_CYCLE_SPACER_ICON", "")
+            lines[#lines + 1] = { text = mark .. name, color = colour, right = text, rightColor = textColour }
+        end
+    end
+    local result = view.mode == "For sale" and forSaleResult(appearance.id) or tileResult(appearance.id)
+    if result then
+        lines[#lines + 1] = { text = " " }
+        local first = result.rows[1]
+        if first then
+            local parts = money(first.minPrice)
+            lines[#lines + 1] = { text = LOWEST_PRICE, color = c.normal, right = moneyText(parts), money = parts, rightColor = c.white }
+        else
+            lines[#lines + 1] = { text = LOWEST_PRICE, color = c.normal, right = "Not for sale", rightColor = c.grey }
+        end
+        if result.at then lines[#lines + 1] = { text = age(result.at, result.scanned and "Scanned" or "Checked"), color = c.grey } end
+        lines[#lines + 1] = { text = first and SEE_ITEMS or DETAILS_HINT, color = c.grey }
+    elseif checking[appearance.id] then
+        -- reading: no hint
+    elseif noAnswer[appearance.id] then
+        lines[#lines + 1] = { text = NO_ANSWER_TEXT, color = c.grey }
+        lines[#lines + 1] = { text = CHECK_AGAIN_HINT, color = c.grey }
+    else
+        lines[#lines + 1] = { text = CHECK_HINT, color = c.grey }
+    end
+    return lines
+end
+
 -- What to draw now. Without a list there are no tiles and nothing that says
 -- the slot has no appearance.
 function State.View()
@@ -1076,8 +1215,10 @@ function State.View()
     local size = PAGE_SIZE
     for i = (view.page - 1) * size + 1, math.min(view.page * size, #appearances) do
         local appearance = appearances[i]
+        -- strip: nil while nothing is known, so no strip is drawn (visual
+        -- pass, decision 3A)
         local tile = {
-            appearance = appearance, collected = collected[appearance.id], strip = "not checked", weapon = slot.weapon,
+            appearance = appearance, collected = collected[appearance.id], weapon = slot.weapon,
             open = view.open ~= nil and view.open.id == appearance.id,
         }
         local result = forSaleMode and forSaleResult(appearance.id) or tileResult(appearance.id)

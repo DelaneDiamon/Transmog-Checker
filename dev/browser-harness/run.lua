@@ -1031,7 +1031,7 @@ test("start state: All, Head, Filter Not collected, page 1", function()
     equal(#v.tiles, 24, "tiles on page 1")
     for _, tile in ipairs(v.tiles) do
         check(tile.collected == false, "no collected tile under Not collected")
-        equal(tile.strip, "not checked", "strip state")
+        equal(tile.strip, nil, "no strip while nothing is known")
     end
     equal(c.changes, 1, "notifications for the first Refresh")
 end)
@@ -1539,7 +1539,7 @@ test("state: leaving the tab during a check discards the unfinished result and k
     equal(#c.ah.sends, sends, "browses after leaving")
     local v = TC.BrowserState.View()
     equal(v.tiles[1].price, "5s", "finished result kept")
-    equal(v.tiles[2].strip, "not checked", "unfinished result discarded")
+    equal(v.tiles[2].strip, nil, "unfinished result discarded")
     equal(v.list, nil, "no flyout")
     click(tiles[1])
     equal(#c.ah.sends, sends, "no browse for the kept tile after coming back")
@@ -1559,7 +1559,7 @@ test("state: closing the auction window discards everything and cancels the queu
     TC.BrowserState.Refresh()
     local v = TC.BrowserState.View()
     equal(v.list, nil, "no list")
-    for _, tile in ipairs(v.tiles) do equal(tile.strip, "not checked", "strip after closing") end
+    for _, tile in ipairs(v.tiles) do equal(tile.strip, nil, "strip after closing") end
 end)
 
 test("state: the change notification fires once per change", function()
@@ -1790,7 +1790,7 @@ test("state: after a scan every tile in All has a price or Not for sale, collect
     c.advance(10)
     TC.BrowserState.SelectMode("All")
     local v = TC.BrowserState.View()
-    for i, tile in ipairs(v.tiles) do check(tile.strip ~= "not checked", "tile " .. i .. " has a strip state") end
+    for i, tile in ipairs(v.tiles) do check(tile.strip ~= nil, "tile " .. i .. " has a strip state") end
     local collectedTile = tileOf(1001)
     equal(collectedTile.collected, true, "1001 collected")
     equal(collectedTile.price, "1s", "the collected tile's price")
@@ -1943,7 +1943,7 @@ test("state: a failed scan is not kept: the failure text with Scan again, tiles 
     equal(tileIDs(v), "1020", "the tile found before the failure stays")
     equal(v.empty, nil, "no empty state")
     TC.BrowserState.SelectMode("All")
-    equal(tileOf(1020).strip, "not checked", "nothing kept for All")
+    equal(tileOf(1020).strip, nil, "nothing kept for All")
     c.ah.fail = false
     TC.BrowserState.SelectMode("For sale")
     equal(#c.ah.sends, 2, "For sale scans again")
@@ -2032,7 +2032,7 @@ test("state: closing the auction window discards the scan result and the mode", 
     local v = TC.BrowserState.View()
     equal(v.mode, "All", "mode")
     equal(v.status, "Click an appearance to check the auction house.", "status")
-    for _, tile in ipairs(v.tiles) do equal(tile.strip, "not checked", "strip after closing") end
+    for _, tile in ipairs(v.tiles) do equal(tile.strip, nil, "strip after closing") end
     TC.BrowserState.SelectMode("For sale")
     equal(#c.ah.sends, 2, "For sale scans again in the new visit")
     -- closing during a scan: late answers change nothing
@@ -2079,7 +2079,7 @@ test("follow-up 2: a check stopped by leaving the tab before its items loaded ke
     c.advance(3)
     local v = TC.BrowserState.View()
     equal(v.list, nil, "no flyout")
-    equal(v.tiles[1].strip, "not checked", "the stopped check kept nothing")
+    equal(v.tiles[1].strip, nil, "the stopped check kept nothing")
     equal(#c.ah.sends, 0, "browses")
 end)
 
@@ -2492,7 +2492,7 @@ test("whole: a click on a tile whose appearance has two tradeable names makes ex
     check(textShown(c, "x2"), "a found row's quantity")
     check(textShown(c, "Checked just now"), "the foot's age")
     check(textShown(c, "Check again"), "the foot's button")
-    equal(frames[2].border.color[2], 0.82, "gold open marker")
+    check(visible(frames[2].openGlow), "the open glow (Collections' selected border)")
     -- the strip shows the cheapest, 99g, with coin icons
     check(frames[2].price.text:find("^99"), "strip price drawn, got " .. tostring(frames[2].price.text))
     -- the found row's name follows the variant's own name once it arrives
@@ -2599,7 +2599,7 @@ test("whole: the head's Collected line has the check and is green; a look not co
     local list = itemListFrame(c)
     local collected = find(c, function(w) return w.text == "Collected" and w.kind == "FontString" and under(w, list) end)
     check(collected and visible(collected), "the Collected line")
-    equal(collected.textColor[2], 0.8, "Collected in green")
+    equal(collected.textColor[2], 1, "Collected in green (GREEN_FONT_COLOR)")
     local tileCheck = frames[1].check.calls.SetTexture[1]
     local icon = find(c, function(w)
         return w.kind == "Texture" and under(w, list) and w.calls.SetTexture and w.calls.SetTexture[1] == tileCheck
@@ -3013,7 +3013,7 @@ test("state: a slot change during a scan leaves at most one scan in flight and n
     equal(#c.ah.sends, 4, "no browse for the slot change in All")
     state().SelectSlot("head")
     equal(state().View().status, "Scanned just now", "head's Scan again finished and kept")
-    check(state().View().tiles[1].strip ~= "not checked", "head's tiles carry its result")
+    check(state().View().tiles[1].strip ~= nil, "head's tiles carry its result")
 end)
 
 test("state: titles, status texts and empty states carry the slot's name; a check result is kept when the player returns", function()
@@ -3038,7 +3038,7 @@ test("state: titles, status texts and empty states carry the slot's name; a chec
     c.advance(10)
     equal(state().View().tiles[1].price, "5s", "the check's price")
     state().SelectSlot("head")
-    equal(state().View().tiles[1].strip, "not checked", "nothing of legs under head")
+    equal(state().View().tiles[1].strip, nil, "nothing of legs under head")
     state().SelectSlot("legs")
     local sends = #c.ah.sends
     equal(state().View().tiles[1].price, "5s", "the check kept on returning")
@@ -6114,7 +6114,7 @@ local function texturePath(w) return w.calls.SetTexture and w.calls.SetTexture[1
 -- The funnel's reset mark: the 14 square button on it.
 local function markOf(c)
     local funnel = funnelOf(c)
-    return find(c, function(w) return w.kind == "Button" and w.parent == funnel and w.width == 14 end)
+    return find(c, function(w) return w.kind == "Button" and w.parent == funnel and w.width == 23 end)
 end
 local function arrowsOf(c)
     return findAll(c, function(w) return w.kind == "Button" and w.width == 22 and w.height == 22 and w.calls.SetNormalTexture end)
@@ -6132,13 +6132,17 @@ test("B whole: the header row: two glyph toggles at x 60 and 94, the slot row, S
     local c, tabs = visitTwice({ appearances = manySlots() })
     tabs[1].scripts.OnClick(tabs[1])
     local all, sale = modeTab(c, "All"), modeTab(c, "For sale")
-    for _, t in ipairs({ { all, "60,-4", "catalogue", "All appearances" }, { sale, "94,-4", "sweep", "For sale, cheapest first" } }) do
+    -- round plates of the slot buttons' 31, centred (both ways) where the 30 square toggles were
+    for _, t in ipairs({ { all, "59.5,-3.5", "catalogue", "All appearances", "lootroll-icon-transmog", 60 },
+        { sale, "93.5,-3.5", "sweep", "For sale, cheapest first", "Interface\\Icons\\INV_Misc_Coin_01", 94 } }) do
         local b = t[1]
-        equal(b.template, "SquareIconButtonTemplate", t[3] .. " template")
-        equal(b.width .. "x" .. b.height, "30x30", t[3] .. " size")
+        local p = b.points[1]
+        equal((p.x + b.width / 2) .. "," .. (p.y - b.height / 2), (t[6] + 15) .. ",-19", t[3] .. " centre: x 15 and y 19 from the old square's corner")
+        equal(b.template, nil, t[3] .. ": a plain button, no square template")
+        equal(b.width .. "x" .. b.height, "31x31", t[3] .. " size")
         equal(point(b), t[2], t[3] .. " position")
-        equal(texturePath(b.Icon), "Interface\\AddOns\\TransmogChecker\\Media\\" .. t[3], t[3] .. " art")
-        equal(b.Icon.width .. "x" .. b.Icon.height, "16x16", t[3] .. " glyph size")
+        equal(texturePath(b.Icon) or b.Icon.calls.SetAtlas[1], t[5], t[3] .. " art: the owner's choice")
+        equal(b.Icon.width .. "x" .. b.Icon.height, "25x25", t[3] .. " glyph size, masked round")
         local title, line = hover(b)
         equal(title, t[4], t[3] .. " tooltip names it")
         check(line, t[3] .. " tooltip line")
@@ -6192,8 +6196,8 @@ test("B whole: the funnel's mark shows while a choice differs; the mark and Rese
     local funnel = funnelOf(c)
     check(mark and not visible(mark), "no mark at the start")
     check(not funnel.highlightLocked, "the funnel's highlight is not held at the start")
-    equal(mark.width .. "x" .. mark.height, "14x14", "the mark's size")
-    equal(mark.points[1].relativePoint, "TOPLEFT", "the mark at the funnel's top left")
+    equal(mark.width .. "x" .. mark.height, "23x23", "the mark's size, the auction house's ClearFiltersButton")
+    equal(mark.points[1].relativePoint .. " " .. point(mark), "TOPRIGHT -3,0", "the mark on the funnel's top right corner")
     local names, choose = classEntries(c)
     choose(names[1])
     check(visible(mark), "the mark after All classes")
@@ -6579,7 +6583,7 @@ test("B whole: a click checks without opening; the strip reads, then prices; the
     c.ah.listings = { listing("Item " .. id, id, 500) }
     tabs[1].scripts.OnClick(tabs[1])
     local frames = tileFrames(c)
-    local function gold(f) return f.border.color[2] == 0.82 end
+    local function gold(f) return visible(f.openGlow) end
     c.click(frames[1].button)
     equal(itemListFrame(c), nil, "no flyout")
     check(visible(frames[1].bar), "the strip shows the reading state")
@@ -6642,7 +6646,7 @@ end)
 
 test("B whole: without the icon and menu templates and the atlases every control is still there and works", function()
     local c, tabs = visitTwice({ appearances = manySlots(), noMenuTemplates = true, noAtlases = true,
-        noTemplates = { SquareIconButtonTemplate = true, UIPanelCloseButton = true, SpinnerTemplate = true } })
+        noTemplates = { UIPanelCloseButton = true, SpinnerTemplate = true } })
     tabs[1].scripts.OnClick(tabs[1])
     local all, sale = modeTab(c, "All"), modeTab(c, "For sale")
     check(all and sale and visible(all) and visible(sale), "both toggles")
@@ -6674,6 +6678,582 @@ test("B whole: without the icon and menu templates and the atlases every control
     equal(#c.ah.sends, sends + 1, "the sweep toggle scans")
     check(sale.highlightLocked and not all.highlightLocked, "no ring art: the sweep toggle lit, the catalogue not")
     noErrors(c, "fallbacks")
+end)
+
+---------------------------------------------------------------- Visual pass, second slice and the tile tooltip (TC-36, TC-35)
+
+-- Two Head appearances: 1 with three items of different source types, the
+-- Vendor one collected and the Quest one loading 1 s after it is asked for;
+-- 2 with one item. Shown under the Filter All.
+local function tipFixture(extra)
+    local opts = {
+        appearances = { { id = 1, uiOrder = 2, sources = { 11, 12, 13 }, sourceTypes = { 4, 3, 2 }, collectedSource = 12,
+            classes = { [9] = true } },
+            { id = 2, uiOrder = 1, sources = { 21 }, sourceTypes = { 3 }, classes = { [9] = true } } },
+        sourceItems = { [11] = 501, [12] = 502, [13] = 503, [21] = 601 },
+        items = { [501] = { name = "Abjurer's Boots", quality = 2, bindType = 2, subType = "Cloth" },
+            [502] = { name = "Felcloth Boots", quality = 3, bindType = 2, subType = "Cloth" },
+            [503] = { name = "Cowl of Dusk", quality = 2, bindType = 2, subType = "Cloth", load = 1 },
+            [601] = { name = "Patchwork Shoes", quality = 1, bindType = 2, subType = "Cloth" } },
+        realSortSources = true,
+    }
+    for k, v in pairs(extra or {}) do opts[k] = v end
+    local c, tabs = visitTwice(opts)
+    tabs[1].scripts.OnClick(tabs[1])
+    TC.BrowserState.SetFilter("All")
+    return c, tileFrames(c)
+end
+local function enter(frame) frame.button.scripts.OnEnter(frame.button) end
+local function leave(frame) frame.button.scripts.OnLeave(frame.button) end
+local function tipText(c) return table.concat(c.tooltipTexts(), "\n") end
+local function requested(c, itemID)
+    local n = 0
+    for _, id in ipairs(c.loadRequests) do if id == itemID then n = n + 1 end end
+    return n
+end
+
+test("TC-36 strip: no result answers no strip; price, not for sale, reading and no answer answer theirs", function()
+    local c = checkState({ [1] = { 500 } })
+    local tiles = TC.BrowserState.View().tiles
+    equal(tiles[1].strip, nil, "no result: no strip")
+    click(tiles[1])
+    equal(tileOf(tiles[1].appearance.id).strip, "bar", "reading")
+    c.advance(10)
+    equal(tileOf(tiles[1].appearance.id).strip, "price", "a price")
+    click(tiles[2])
+    c.advance(10)
+    equal(tileOf(tiles[2].appearance.id).strip, "not for sale", "not for sale")
+    c.ah.fail = true
+    click(tiles[3])
+    c.advance(10)
+    equal(tileOf(tiles[3].appearance.id).strip, "no answer", "no answer")
+end)
+
+test("TC-36 strip: the plate draws only once something is known; the tile and the model keep their box", function()
+    local c, tabs = visitTwice()
+    local id = 1006 * 10 + 1
+    c.ah.listings = { listing("Item " .. id, id, 500) }
+    tabs[1].scripts.OnClick(tabs[1])
+    local f = tileFrames(c)[1]
+    local function box() return f.width .. "x" .. f.height .. " " .. f.model.width .. "x" .. f.model.height .. " " .. point(f.model) end
+    local before = box()
+    check(not visible(f.strip) and not visible(f.stripLine), "no plate while nothing is known")
+    c.click(f.button)
+    check(visible(f.strip) and visible(f.bar), "the plate and the bar while it reads")
+    c.advance(10)
+    check(visible(f.strip) and (f.price.text or "") ~= "", "the plate with the price")
+    equal(box(), before, "tile and model box with the strip")
+    equal(before, "78x104 76x82 1,-1", "the tile 78 x 104, the model 76 x 82 at 1, -1")
+    check(f.strip.calls.SetGradient ~= nil, "the plate is a gradient")
+    noErrors(c, "strip")
+end)
+
+test("TC-36 markers: collected, open and hover each show their own art; collected and open show both", function()
+    local c, frames = tipFixture()
+    c.ah.listings = { listing("Abjurer's Boots", 501, 500), listing("Patchwork Shoes", 601, 700) }
+    local col, other = frames[1], frames[2]
+    equal(col.edge.calls.SetAtlas[1], "transmog-wardrobe-border-collected", "collected: the bright border")
+    check(visible(col.check), "collected: the check")
+    check(not visible(col.openGlow) and not visible(col.hoverGlow), "collected: no open or hover glow")
+    equal(other.edge.calls.SetAtlas[1], "transmog-wardrobe-border-uncollected", "not collected: the dim border")
+    check(not visible(other.check), "not collected: no check")
+    equal(other.edge.sublevel, -1, "the border on OVERLAY -1")
+    equal(other.openGlow.calls.SetAtlas[1], "transmog-wardrobe-border-selected", "the open art")
+    equal(other.hoverGlow.calls.SetAtlas[1], "transmog-wardrobe-border-highlighted", "the hover art")
+    -- open
+    c.click(other.button)
+    c.advance(10)
+    c.click(other.button)
+    check(visible(other.openGlow) and not visible(other.hoverGlow) and not visible(other.check), "open: the open glow only")
+    -- hover
+    enter(col)
+    check(visible(col.hoverGlow) and not visible(col.openGlow), "hover: the hover glow only")
+    leave(col)
+    check(not visible(col.hoverGlow), "the hover ends when the pointer leaves")
+    -- collected and open
+    c.click(col.button)
+    c.advance(10)
+    c.click(col.button)
+    check(visible(col.openGlow) and visible(col.check), "collected and open: the open glow and the check")
+    equal(col.edge.calls.SetAtlas[1], "transmog-wardrobe-border-collected", "collected and open: the bright border")
+    noErrors(c, "markers")
+end)
+
+test("TC-36 markers: the hover state and the tooltip end when the page turns", function()
+    local c, tabs = visitTwice()
+    tabs[1].scripts.OnClick(tabs[1])
+    local f = tileFrames(c)[3]
+    enter(f)
+    check(visible(f.hoverGlow) and GameTooltip:IsShown(), "hovered, with the tooltip")
+    equal(GameTooltip.owner, f.button, "the tooltip's owner")
+    equal(GameTooltip.anchor, "ANCHOR_RIGHT", "anchored right, as Collections")
+    TC.BrowserState.NextPage()
+    check(not visible(f.hoverGlow), "the hover ends on a page turn")
+    check(not GameTooltip:IsShown(), "the tooltip hides on a page turn")
+    noErrors(c, "page turn")
+end)
+
+test("TC-35 tooltip: items in Collections' order with sources, collected marked, a name that loads later, the hint", function()
+    local c, frames = tipFixture()
+    local requestsBefore = #c.loadRequests
+    enter(frames[1])
+    equal(tipText(c), table.concat({ "Felcloth Boots", " ", "Other items using this appearance:",
+        "> Felcloth Boots | Collected", "  Abjurer's Boots | World Drop", "  Retrieving item information | Quest",
+        "Click to check the auction house." }, "\n"), "the lines")
+    local lines = GameTooltip.lines
+    equal(lines[4].rg .. "," .. lines[4].rb, "1,0.1", "Collected in green")
+    equal(lines[6].r .. "," .. lines[6].g, "1,0.125", "the loading name in red")
+    equal(#c.loadRequests - requestsBefore, 1, "item data asked for on hover")
+    equal(requested(c, 503), 1, "for the item without a name, of this appearance")
+    leave(frames[1])
+    enter(frames[1])
+    equal(requested(c, 503), 1, "a second hover asks nothing again")
+    c.advance(1.1)
+    check(tipText(c):find("  Cowl of Dusk | Quest", 1, true), "the name fills in once loaded, got\n" .. tipText(c))
+    -- one item: no list, its source under its name
+    leave(frames[1])
+    enter(frames[2])
+    equal(tipText(c), "Patchwork Shoes\nVendor\nClick to check the auction house.", "one item")
+    sentNothing(c, "hovering")
+    noErrors(c, "tooltip")
+end)
+
+test("TC-35 tooltip: the kept price for found, Not for sale for not for sale, nothing for no result; none while the flyout is open", function()
+    local c, frames = tipFixture()
+    c.ah.listings = { listing("Abjurer's Boots", 501, 500) }
+    enter(frames[1])
+    check(not tipText(c):find("Lowest price", 1, true), "no result: no price line")
+    leave(frames[1])
+    c.click(frames[1].button)
+    c.click(frames[2].button)
+    c.advance(10)
+    enter(frames[1])
+    local text = tipText(c)
+    check(text:find(" \nLowest price | 5s\nChecked just now\nClick to see the items for sale.", 1, true), "found, got\n" .. text)
+    leave(frames[1])
+    enter(frames[2])
+    text = tipText(c)
+    check(text:find("Lowest price | Not for sale\nChecked just now", 1, true), "not for sale, got\n" .. text)
+    c.click(frames[2].button)
+    check(visible(itemListFrame(c)), "the flyout opens")
+    check(not GameTooltip:IsShown(), "no tooltip while the tile's flyout is open")
+    noErrors(c, "kept price")
+end)
+
+test("TC-35 tooltip: a single boss drop says its boss and instance, as Collections does", function()
+    local c, tabs = visitTwice({ appearances = { { id = 2, uiOrder = 1, sources = { 21 }, sourceTypes = { 1 }, classes = { [9] = true } } },
+        sourceItems = { [21] = 601 }, drops = { [21] = { { encounter = "Ragnaros", instance = "Molten Core", difficulties = {} } } } })
+    tabs[1].scripts.OnClick(tabs[1])
+    enter(tileFrames(c)[1])
+    equal(c.tooltipTexts()[2], "Drop: Ragnaros (Molten Core)", "the encounter and instance")
+    noErrors(c, "boss drop")
+end)
+
+test("TC-36 art: with the templates and atlases each element is built from them", function()
+    local c, tabs = visitTwice()
+    tabs[1].scripts.OnClick(tabs[1])
+    local inset = find(c, function(w) return w.template == "CollectionsBackgroundTemplate" end)
+    check(inset, "the Collections inset")
+    equal(point(inset) .. " " .. inset.points[2].point .. " " .. inset.points[2].x .. "," .. inset.points[2].y,
+        "0,-74 BOTTOMRIGHT 0,0", "from y 74 to the panel's bottom")
+    for _, key in ipairs({ "BGCornerTopLeft", "BGCornerTopRight", "BGCornerBottomLeft", "BGCornerBottomRight" }) do
+        check(not inset[key].shown, key .. " hidden")
+    end
+    local f = tileFrames(c)[1]
+    check(f.edge and f.openGlow and f.hoverGlow, "the tile's atlases")
+    local scan = find(c, function(w) return w.kind == "Button" and w.text == "Price this slot" end)
+    equal(scan.glyph and scan.glyph.calls.SetAtlas[1], "UI-RefreshButton", "the scan glyph")
+    equal(scan.width .. "x" .. scan.height .. " " .. point(scan), "110x20 28,-447", "the scan button keeps its size and place")
+    equal(scan.glyph.width, 14, "the glyph 14 square")
+    equal(point(scan:GetFontString()), "8,0", "the text moved right by half the glyph")
+    local fly = openTile(c, f)
+    local stripes = findAll(c, function(w) return w.kind == "Texture" and under(w, fly) and w.calls.SetAtlas
+        and w.calls.SetAtlas[1] == "auctionhouse-rowstripe-1" end)
+    equal(#stripes, 2, "the row stripe on alternate rows")
+    local arrows = arrowsOf(c)
+    equal(arrows[1].calls.SetHighlightTexture[1], "Interface\\Buttons\\UI-Common-MouseHilight", "the arrows' highlight")
+    local empty = find(c, function(w) return w.kind == "FontString" and w.template == "GameFontNormalMed3" end)
+    check(empty, "the empty heading in GameFontNormalMed3")
+    noErrors(c, "art")
+end)
+
+test("TC-36 art: each template and atlas refused in turn: the fallback, nothing raises", function()
+    local cases = {
+        { noTemplates = { CollectionsBackgroundTemplate = true }, see = function(c)
+            check(not find(c, function(w) return w.template == "CollectionsBackgroundTemplate" end), "no inset") end },
+        { noAtlases = { ["transmog-wardrobe-border-uncollected"] = true }, see = function(c, f)
+            check(f.edge == nil, "no border atlas")
+            equal(table.concat(f.border.color, ","), "0.302,0.267,0.216,1", "the board's line colour") end },
+        { noAtlases = { ["transmog-wardrobe-border-selected"] = true }, see = function(c, f)
+            check(f.openGlow == nil, "no open atlas")
+            c.click(f.button) c.advance(10) c.click(f.button)
+            equal(f.border.color[2], 0.82, "open: the gold line") end },
+        { noAtlases = { ["transmog-wardrobe-border-highlighted"] = true }, see = function(c, f)
+            check(f.hoverGlow == nil, "no hover atlas")
+            enter(f)
+            equal(f.border.color[1], 0.965, "hover: the light line")
+            leave(f)
+            equal(f.border.color[1], 0, "the line goes back") end },
+        { noAtlases = { ["auctionhouse-rowstripe-1"] = true, ["auctionhouse-ui-row-highlight"] = true }, see = function(c, f)
+            local fly = openTile(c, f)
+            check(not find(c, function(w) return under(w, fly) and w.calls.SetAtlas
+                and w.calls.SetAtlas[1]:find("^auctionhouse") end), "no row atlas")
+            local row = rowBuy(c):GetParent()
+            row.scripts.OnEnter(row)
+            check(visible(row.highlight) and row.highlight.color, "the row highlight in colour") end },
+        { noAtlases = { ["UI-RefreshButton"] = true }, see = function(c)
+            local scan = find(c, function(w) return w.kind == "Button" and w.text == "Price this slot" end)
+            check(scan.glyph == nil, "text only")
+            equal(scan.width .. " " .. point(scan), "110 28,-447", "same size and place") end },
+        { noAtlases = { ["lootroll-icon-transmog"] = true }, fileIDs = {}, see = function(c)
+            equal(texturePath(modeTab(c, "All").Icon), "Interface\\AddOns\\TransmogChecker\\Media\\catalogue", "catalogue: Media")
+            equal(texturePath(modeTab(c, "For sale").Icon), "Interface\\AddOns\\TransmogChecker\\Media\\sweep",
+                "sweep: Media when the client has no file for the coin") end },
+        { noAtlases = true, noTemplates = { CollectionsBackgroundTemplate = true }, noSetLight = true, see = function() end },
+    }
+    for i, case in ipairs(cases) do
+        local id = 1006 * 10 + 1
+        local opts = { noAtlases = case.noAtlases, noTemplates = case.noTemplates, fileIDs = case.fileIDs, noSetLight = case.noSetLight }
+        local c, tabs = visitTwice(opts)
+        c.ah.listings = { listing("Item " .. id, id, 500) }
+        tabs[1].scripts.OnClick(tabs[1])
+        local f = tileFrames(c)[1]
+        case.see(c, f)
+        enter(f)
+        leave(f)
+        TC.BrowserState.NextPage()
+        noErrors(c, "case " .. i)
+    end
+end)
+
+test("TC-36 light: Collections' light on tile and flyout models when SetLight exists; skipped without it", function()
+    local c, tabs = visitTwice()
+    tabs[1].scripts.OnClick(tabs[1])
+    equal(#c.lights, 24, "one light per tile model")
+    local l = c.lights[1]
+    equal(tostring(l.enabled) .. " " .. l.light.point.x .. "," .. l.light.point.y .. "," .. l.light.point.z .. " "
+        .. l.light.ambientIntensity .. " " .. l.light.diffuseIntensity .. " " .. tostring(l.light.omnidirectional),
+        "true -1,1,-1 1.05 0 false", "ItemModelBaseMixin:OnLoad's values")
+    openTile(c, tileFrames(c)[1])
+    equal(#c.lights, 25, "the flyout's model too")
+    for _, opts in ipairs({ { noSetLight = true }, { noLightMakers = true } }) do
+        local d, t = visitTwice(opts)
+        t[1].scripts.OnClick(t[1])
+        openTile(d, tileFrames(d)[1])
+        equal(#d.lights, 0, "no light")
+        noErrors(d, "without the light")
+    end
+end)
+
+test("TC-36 whole: nothing before the tab; opening it, hovering every tile of a page and turning pages sends nothing", function()
+    local c, tabs = visitTwice()
+    equal(#tileFrames(c), 0, "no tile before the tab is selected")
+    check(not find(c, function(w) return w.template == "CollectionsBackgroundTemplate" end), "no inset before the tab")
+    tabs[1].scripts.OnClick(tabs[1])
+    local frames = tileFrames(c)
+    for _ = 1, 3 do
+        for _, f in ipairs(frames) do enter(f) leave(f) end
+        enter(frames[5])
+        TC.BrowserState.NextPage()
+        check(not GameTooltip:IsShown(), "the page turn hid the tooltip")
+    end
+    c.advance(30)
+    sentNothing(c, "hover and paging")
+    equal(#c.ah.more, 0, "page requests")
+    noErrors(c, "whole")
+end)
+
+test("chosen art: the toggles' glyphs, the mark at the funnel's top right, and the Media fallbacks", function()
+    local c, tabs = visitTwice({ appearances = manySlots() })
+    tabs[1].scripts.OnClick(tabs[1])
+    local all, sale = modeTab(c, "All"), modeTab(c, "For sale")
+    equal(all.Icon.calls.SetAtlas[1], "lootroll-icon-transmog", "catalogue atlas")
+    equal(texturePath(sale.Icon), "Interface\\Icons\\INV_Misc_Coin_01", "sweep icon")
+    equal(table.concat(sale.Icon.calls.SetTexCoord, ","), "0.08,0.92,0.08,0.92", "the icon's border cropped")
+    check(all.Icon.calls.SetVertexColor == nil, "the game art is not tinted")
+    check(visible(all.ring) and not visible(sale.ring), "the ring on the selected toggle")
+    c.click(sale)
+    c.advance(10)
+    check(visible(sale.ring) and not visible(all.ring), "the ring follows")
+    equal(all.Icon.calls.SetAlpha[1], 0.45, "the other glyph dimmed")
+    local mark = markOf(c)
+    equal(mark.points[1].point .. " " .. mark.points[1].relativePoint .. " " .. point(mark), "CENTER TOPRIGHT -3,0",
+        "the mark on the top right corner")
+    local d, t = visitTwice({ appearances = manySlots(), noAtlases = true, fileIDs = { ["Interface\\Icons\\INV_Misc_Coin_01"] = 1 } })
+    t[1].scripts.OnClick(t[1])
+    equal(texturePath(modeTab(d, "All").Icon), "Interface\\AddOns\\TransmogChecker\\Media\\catalogue", "no atlas: Media")
+    equal(texturePath(modeTab(d, "For sale").Icon), "Interface\\Icons\\INV_Misc_Coin_01", "the coin file the client has")
+    noErrors(c, "chosen art")
+    noErrors(d, "chosen art fallbacks")
+end)
+
+test("round toggles: plain round plates with the slot row's highlight, a round mask on the glyph, one ring", function()
+    local c, tabs = visitTwice({ appearances = manySlots() })
+    tabs[1].scripts.OnClick(tabs[1])
+    check(not find(c, function(w) return w.template == "SquareIconButtonTemplate" end), "no square template frame")
+    local all, sale = modeTab(c, "All"), modeTab(c, "For sale")
+    for _, b in ipairs({ all, sale }) do
+        local highlight = find(c, function(w) return w.parent == b and w.layer == "HIGHLIGHT" end)
+        equal(highlight and highlight.calls.SetAtlas[1], "bags-roundhighlight", "the slot row's round highlight")
+        check(b.base and visible(b.base) and b.base.masks, "the round base, masked")
+        equal(b.Icon.masks and b.Icon.masks[1].calls.SetTexture[1], "Interface\\CharacterFrame\\TempPortraitAlphaMask",
+            "the glyph masked to a circle")
+    end
+    local function rings() return (visible(all.ring) and 1 or 0) + (visible(sale.ring) and 1 or 0) end
+    equal(rings(), 1, "one ring")
+    c.click(sale)
+    equal(rings(), 1, "one ring after switching")
+    local d, t = visitTwice({ appearances = manySlots(), noMaskAPI = true })
+    t[1].scripts.OnClick(t[1])
+    local coin = modeTab(d, "For sale")
+    equal(coin.Icon.width .. " " .. table.concat(coin.Icon.calls.SetTexCoord, ","), "18 0.08,0.92,0.08,0.92",
+        "without the mask API: cropped and shrunk")
+    check(not visible(coin.base), "no square base without the mask")
+    noErrors(c, "round toggles")
+    noErrors(d, "round toggles without masks")
+end)
+
+test("chosen art: the funnel's settings art with its hover and pressed forms; then Map-Filter-Button; then the text", function()
+    local c, tabs = visitTwice({ appearances = manySlots() })
+    tabs[1].scripts.OnClick(tabs[1])
+    local funnel = funnelOf(c)
+    equal(funnel.icon.calls.SetAtlas[1], "common-dropdown-a-button-settings-shadowless", "the owner's art")
+    equal(funnel.width .. "x" .. funnel.height .. " " .. point(funnel), "30x30 757,-4", "its box and place")
+    funnel.scripts.OnEnter(funnel)
+    equal(funnel.icon.calls.SetAtlas[1], "common-dropdown-a-button-settings-hover-shadowless", "hover")
+    funnel.scripts.OnLeave(funnel)
+    equal(funnel.icon.calls.SetAtlas[1], "common-dropdown-a-button-settings-shadowless", "back")
+    local d, t = visitTwice({ appearances = manySlots(), noAtlases = { ["common-dropdown-a-button-settings-shadowless"] = true } })
+    t[1].scripts.OnClick(t[1])
+    equal(funnelOf(d).icon.calls.SetAtlas[1], "Map-Filter-Button", "the first fallback")
+    local e, u = visitTwice({ appearances = manySlots(), noAtlases = { ["common-dropdown-a-button-settings-shadowless"] = true,
+        ["Map-Filter-Button"] = true } })
+    u[1].scripts.OnClick(u[1])
+    equal(funnelOf(e).text, "Filter", "the text last")
+    for _, x in ipairs({ c, d, e }) do noErrors(x, "funnel art") end
+end)
+
+---------------------------------------------------------------- Fixes after QA (TC-36, TC-35)
+
+-- A texture, font string or mask: a region, not a frame.
+local function isRegion(w) return w.kind == "Texture" or w.kind == "FontString" or w.kind == "MaskTexture" end
+
+test("F1 inset: every text and texture of ours lies on a frame above the inset; the content frame takes no mouse", function()
+    local c, tabs = visitTwice({ appearances = manySlots() })
+    tabs[1].scripts.OnClick(tabs[1])
+    local inset = find(c, function(w) return w.template == "CollectionsBackgroundTemplate" end)
+    local panel = inset.parent
+    equal(inset:GetFrameLevel(), panel:GetFrameLevel(), "the inset is at the panel's own level (useParentLevel)")
+    local content = find(c, function(w) return w.kind == "Frame" and w.parent == panel and w.calls.SetAllPoints
+        and w.calls.SetAllPoints[1] == panel end)
+    check(content, "a content frame covering the panel")
+    local at = {}
+    for i, child in ipairs(panel.children) do at[child] = i end
+    check(at[content] > at[inset], "the content frame is created after the inset")
+    check(content:GetFrameLevel() > inset:GetFrameLevel(), "the content frame is above the inset")
+    check(not (content.calls.EnableMouse and content.calls.EnableMouse[1]), "the content frame takes no mouse")
+    check(next(content.scripts) == nil, "and has no scripts")
+    local onContent = findAll(c, function(w) return isRegion(w) and w.parent == content end)
+    equal(#onContent, 7, "count, status, progress back, fill and the three border pieces are on it")
+    local function walk()
+        local regions, frames = 0, 0
+        for _, w in ipairs(c.widgets) do
+            if w ~= inset and w ~= panel and under(w, panel) and not under(w, inset) then
+                if isRegion(w) then
+                    regions = regions + 1
+                    check(w.parent ~= panel, "a region of the panel itself: " .. w.kind .. " " .. tostring(w.text))
+                    check(w.parent:GetFrameLevel() > inset:GetFrameLevel(), "a region on a frame not above the inset")
+                elseif w.kind == "Frame" or w.kind == "Button" or w.kind == "DropdownButton" or w.kind == "DressUpModel"
+                    or w.kind == "EditBox" then
+                    frames = frames + 1
+                    check(w:GetFrameLevel() > inset:GetFrameLevel(), "a frame not above the inset: " .. w.kind .. " " .. tostring(w.text))
+                end
+            end
+        end
+        check(regions > 100 and frames > 50, "the walk saw the browser: " .. regions .. " regions, " .. frames .. " frames")
+    end
+    walk()
+    openTile(c, tileFrames(c)[1])
+    walk()
+    noErrors(c, "inset levels")
+end)
+
+test("F2 tooltip: the boss-drop strings have English fallbacks; the line is produced with each global nil", function()
+    local names = { "WARDROBE_TOOLTIP_ENCOUNTER_SOURCE", "WARDROBE_TOOLTIP_BOSS_DROP_FORMAT",
+        "WARDROBE_TOOLTIP_BOSS_DROP_FORMAT_WITH_DIFFICULTIES" }
+    for _, difficulties in ipairs({ {}, { "Normal", "Heroic" } }) do
+        local want = difficulties[1] and "Drop: Ragnaros (Molten Core) (Normal, Heroic)" or "Drop: Ragnaros (Molten Core)"
+        for _, missing in ipairs({ names[1], names[2], names[3], "all" }) do
+            local c, tabs = visitTwice({ appearances = { { id = 2, uiOrder = 1, sources = { 21 }, sourceTypes = { 1 }, classes = { [9] = true } } },
+                sourceItems = { [21] = 601 }, drops = { [21] = { { encounter = "Ragnaros", instance = "Molten Core", difficulties = difficulties } } } })
+            tabs[1].scripts.OnClick(tabs[1])
+            for _, name in ipairs(names) do
+                if missing == "all" or missing == name then _G[name] = nil end
+            end
+            enter(tileFrames(c)[1])
+            equal(c.tooltipTexts()[2], want, "boss line with " .. missing .. " nil")
+            noErrors(c, "drop fallbacks")
+        end
+    end
+end)
+
+-- the tooltip's lines as text, from the state
+local function stateTip(appearance)
+    local out = {}
+    for i, l in ipairs(TC.BrowserState.TileTooltip(appearance)) do out[i] = l.right and (l.text .. " | " .. l.right) or l.text end
+    return table.concat(out, "\n")
+end
+
+test("F3 tooltip: the last lines follow the tile's state", function()
+    local c = checkState({ [1] = { 500 } })
+    local tiles = TC.BrowserState.View().tiles
+    local a1, a2, a3 = tiles[1].appearance, tiles[2].appearance, tiles[3].appearance
+    check(stateTip(a1):find("Click to check the auction house.$"), "no result: check hint, got\n" .. stateTip(a1))
+    click(tiles[1])
+    local reading = stateTip(a1)
+    check(not reading:find("Click", 1, true) and not reading:find("Lowest price", 1, true), "reading: no hint, got\n" .. reading)
+    c.advance(10)
+    check(stateTip(a1):find("Lowest price | 5s\nChecked just now\nClick to see the items for sale.$"), "price, got\n" .. stateTip(a1))
+    click(tiles[2])
+    c.advance(10)
+    local none = stateTip(a2)
+    check(none:find("Lowest price | Not for sale\nChecked just now\nClick for details.$"), "not for sale, got\n" .. none)
+    check(not none:find("items for sale", 1, true), "no items hint under Not for sale")
+    c.ah.fail = true
+    click(tiles[3])
+    c.advance(10)
+    local failed = stateTip(a3)
+    check(failed:find("No answer from the auction house.\nClick to check again.$"), "no answer, got\n" .. failed)
+    check(not failed:find("Click to check the auction house.", 1, true), "no answer: not the first-time hint")
+    c.ah.fail = false
+    click(tiles[3])
+    local again = stateTip(a3)
+    check(not again:find("Click", 1, true) and not again:find("No answer", 1, true), "checking again: no hint, got\n" .. again)
+end)
+
+test("F3 tooltip: a partial scan result has a price and no age", function()
+    local c = scanState({ [1010] = 500, [1020] = 300, [1030] = 700 })
+    c.ah.pageSize = 2
+    TC.BrowserState.SelectMode("For sale")
+    c.advance(0.26)
+    local first = TC.BrowserState.View().tiles[1]
+    local text = stateTip(first.appearance)
+    check(text:find("Lowest price | 3s\nClick to see the items for sale.$"), "partial: price, no age, got\n" .. text)
+    check(not text:find("Checked", 1, true) and not text:find("Scanned", 1, true), "no age line")
+    c.advance(10)
+    check(stateTip(TC.BrowserState.View().tiles[1].appearance):find("Lowest price | 3s\nScanned just now\nClick to see the items for sale.$"),
+        "the finished scan has its age")
+end)
+
+test("F4 tooltip: it hides only while it is ours", function()
+    local c, tabs = visitTwice()
+    tabs[1].scripts.OnClick(tabs[1])
+    local f = tileFrames(c)[3]
+    local other = c.newWidget("Frame", nil, UIParent)
+    local function foreign()
+        enter(f)
+        GameTooltip:SetOwner(other, "ANCHOR_TOP")
+        GameTooltip:AddLine("someone else's")
+        GameTooltip:Show()
+    end
+    foreign()
+    TC.BrowserState.NextPage()
+    check(GameTooltip:IsShown() and GameTooltip.owner == other, "a page turn leaves another frame's tooltip")
+    TC.BrowserState.PreviousPage()
+    foreign()
+    tabs[1].frameRef:Hide()
+    check(GameTooltip:IsShown() and GameTooltip.owner == other, "leaving the tab leaves it too")
+    tabs[1].scripts.OnClick(tabs[1])
+    enter(f)
+    check(GameTooltip.owner == f.button, "ours is owned by the tile's button")
+    TC.BrowserState.NextPage()
+    check(not GameTooltip:IsShown(), "our own tooltip still hides on a page turn")
+    -- without GetOwner it hides as before
+    noErrors(c, "foreign tooltip")
+    local d, u = visitTwice({ noGetOwner = true })
+    u[1].scripts.OnClick(u[1])
+    local g = tileFrames(d)[3]
+    enter(g)
+    check(GameTooltip.GetOwner == nil, "the fake has no GetOwner")
+    GameTooltip:SetOwner(other, "ANCHOR_TOP")
+    TC.BrowserState.NextPage()
+    check(not GameTooltip:IsShown(), "without GetOwner: hidden as today")
+    noErrors(d, "without GetOwner")
+end)
+
+test("F5 round toggles keep both centres of the 30 square toggles", function()
+    local c, tabs = visitTwice({ appearances = manySlots() })
+    tabs[1].scripts.OnClick(tabs[1])
+    for mode, x in pairs({ All = 60, ["For sale"] = 94 }) do
+        local b = modeTab(c, mode)
+        local p = b.points[1]
+        equal((p.x + b.width / 2) .. "," .. (p.y - b.height / 2), (x + 15) .. ",-19", mode .. " centre")
+    end
+end)
+
+test("F6 funnel: the open form while its menu is open, the normal form after; pressed forms follow the mouse", function()
+    local ART = "common-dropdown-a-button-settings-"
+    local c, tabs = visitTwice({ appearances = manySlots() })
+    tabs[1].scripts.OnClick(tabs[1])
+    local funnel = funnelOf(c)
+    local function atlas() return funnel.icon.calls.SetAtlas[1] end
+    local function script(name) funnel.scripts[name](funnel) end
+    equal(atlas(), ART .. "shadowless", "normal at the start")
+    script("OnEnter")
+    equal(atlas(), ART .. "hover-shadowless", "hover")
+    script("OnMouseDown")
+    check(funnel:IsMenuOpen(), "the press opens the menu")
+    equal(atlas(), ART .. "pressedhover-shadowless", "pressed with the pointer over it")
+    script("OnMouseUp")
+    equal(atlas(), ART .. "hover-shadowless", "released over it: hover")
+    script("OnLeave")
+    equal(atlas(), ART .. "open-shadowless", "menu open: the open form")
+    funnel:CloseMenu()
+    equal(atlas(), ART .. "shadowless", "menu closed: the normal form")
+    -- pressed, the pointer leaves, released outside: the pressed form goes
+    script("OnEnter")
+    script("OnMouseDown")
+    script("OnLeave")
+    equal(atlas(), ART .. "pressed-shadowless", "pressed with the pointer outside")
+    script("OnMouseUp")
+    equal(atlas(), ART .. "open-shadowless", "released outside: not pressed any more (the menu is open)")
+    c.choose("All")
+    equal(atlas(), ART .. "shadowless", "a choice closes the menu: normal")
+    noErrors(c, "funnel forms")
+    -- without the extra atlases: today's behaviour
+    local d, t = visitTwice({ appearances = manySlots(), noAtlases = { [ART .. "open-shadowless"] = true,
+        [ART .. "pressedhover-shadowless"] = true, [ART .. "pressed-shadowless"] = true } })
+    t[1].scripts.OnClick(t[1])
+    local f = funnelOf(d)
+    f.scripts.OnEnter(f)
+    equal(f.icon.calls.SetAtlas[1], ART .. "hover-shadowless", "hover while over")
+    f.scripts.OnMouseDown(f)
+    equal(f.icon.calls.SetAtlas[1], ART .. "shadowless", "without the pressed forms: the normal art while pressed, as before")
+    f.scripts.OnMouseUp(f)
+    equal(f.icon.calls.SetAtlas[1], ART .. "hover-shadowless", "released over it: hover")
+    f.scripts.OnLeave(f)
+    equal(f.icon.calls.SetAtlas[1], ART .. "shadowless", "without the open or pressed forms: normal")
+    noErrors(d, "funnel without the extra forms")
+end)
+
+test("F8 tooltip: it hides when the tab is left, the auction window closes, the slot changes and the toggle changes", function()
+    local ways = {
+        { "the tab is left", function(c, tabs) tabs[1].frameRef:Hide() end },
+        { "the auction window closes", function(c) c.closeAuction() end },
+        { "the slot changes", function(c) local b = slotButtons(c)[12] b.scripts.OnClick(b) end },
+        { "the toggle changes", function(c) c.click(modeTab(c, "For sale")) end },
+    }
+    for _, way in ipairs(ways) do
+        local c, tabs = visitTwice({ appearances = manySlots() })
+        tabs[1].scripts.OnClick(tabs[1])
+        local f = tileFrames(c)[2]
+        enter(f)
+        check(GameTooltip:IsShown() and GameTooltip.owner == f.button and visible(f.hoverGlow), "hovered before: " .. way[1])
+        way[2](c, tabs)
+        check(not GameTooltip:IsShown(), "the tooltip hides when " .. way[1])
+        check(not visible(f.hoverGlow), "and the hover ends when " .. way[1])
+        noErrors(c, way[1])
+    end
 end)
 
 ---------------------------------------------------------------- run

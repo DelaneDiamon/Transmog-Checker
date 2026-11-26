@@ -17,12 +17,30 @@ local TILE_WIDTH, TILE_HEIGHT = 78, 104
 local GAP_X, GAP_Y = 16, 24
 local MODEL_HEIGHT, STRIP_HEIGHT = 82, 20
 local CHECK_SIZE = 16
-local BORDER = { 0.25, 0.25, 0.25, 1 }
-local BORDER_COLLECTED = { 0.1, 0.8, 0.1, 1 }
+-- The tile's frame (visual pass v2, board 6): Collections' tile art
+-- (WardrobeItemsModelTemplate, Blizzard_Collections/Mainline/
+-- Blizzard_Wardrobe.xml:12-18, 29-33, 56-62; Blizzard_Wardrobe.lua:1101-1108):
+-- the border, bright for a collected appearance (decision 2A), the selected
+-- glow for the open tile and the highlighted glow on hover, each tested with
+-- C_Texture.GetAtlasInfo. Without an atlas, a 1-unit line in the board's
+-- colour for it.
+local EDGE_ATLAS, EDGE_COLLECTED_ATLAS = "transmog-wardrobe-border-uncollected", "transmog-wardrobe-border-collected"
+local OPEN_ATLAS, HOVER_ATLAS = "transmog-wardrobe-border-selected", "transmog-wardrobe-border-highlighted"
+local BORDER = { 0.302, 0.267, 0.216, 1 }
+local BORDER_COLLECTED = { 0.643, 0.553, 0.384, 1 }
 local BORDER_OPEN = { 1, 0.82, 0, 1 }
--- The strip is darker while the tile is not checked.
-local STRIP_EMPTY = { 0.04, 0.04, 0.04, 1 }
+local BORDER_HOVER = { 0.965, 0.863, 0.604, 1 }
+local WELL = { 0, 0, 0, 1 }
+local TEXT_WHITE = { 1, 1, 1 }
+-- The price strip, drawn only once something is known (decision 3A): a dark
+-- plate, #1b1712 to #14110d, under a 1-unit line of #2d261d.
+local STRIP_TOP, STRIP_BOTTOM, STRIP_LINE = { 0.106, 0.09, 0.071, 1 }, { 0.078, 0.067, 0.051, 1 }, { 0.176, 0.149, 0.114, 1 }
 local STRIP_CHECKED = { 0.12, 0.12, 0.12, 1 }
+-- Collections' model light, the values of ItemModelBaseMixin:OnLoad
+-- (Blizzard_TransmogShared/Blizzard_TransmogShared.lua:655-667), for
+-- SetLight(enabled, ModelLight) (SimpleModelAPIDocumentation.lua:563-571,
+-- SharedScriptObjectModelLightDocumentation.lua:6-17).
+local LIGHT = { point = { -1, 1, -1 }, ambient = 1.05, diffuse = 0 }
 -- The flyout (layout B, section 6): 232 wide, as high as its parts (head
 -- 66, which holds the summary line right of the model, rows of 40, foot 28)
 -- and at most 300; four rows show, more scroll. It opens right of its tile in columns 1 to 5, left in 6 to 8, 8
@@ -37,6 +55,17 @@ local HEAD_TEXT_WIDTH = FLY_WIDTH - HEAD_TEXT_X - 28
 local FLY_EDGE = { 0.54, 0.45, 0.30, 1 }
 local FLY_FILL = { 0.04, 0.035, 0.03, 0.97 }
 local NOTCH_SIZE = 12
+-- Hairlines under the head and over the foot, and the scroll track (layout
+-- B, board 6.1: #5a4a33, #2c251c).
+local FLY_LINE, FLY_TRACK = { 0.353, 0.29, 0.2, 1 }, { 0.173, 0.145, 0.114, 1 }
+-- Rows in the auction house's list language (visual pass, board 8): its row
+-- stripe on alternate rows and its highlight on hover
+-- (Blizzard_AuctionHouseUI/Mainline/Blizzard_AuctionHouseItemList.xml:15,
+-- 23), each tested; without them the board's colours.
+local ROW_STRIPE_ATLAS, ROW_HIGHLIGHT_ATLAS = "auctionhouse-rowstripe-1", "auctionhouse-ui-row-highlight"
+local ROW_STRIPE, ROW_HOVER = { 1, 1, 1, 0.045 }, { 1, 0.839, 0.471, 0.13 }
+-- The fade over the last row when more rows follow below.
+local FADE_HEIGHT = 16
 local HEAD_MODEL_WIDTH, HEAD_MODEL_HEIGHT = 44, 58
 -- A found row's Buy button.
 local BUY_WIDTH, BUY_HEIGHT = 40, 18
@@ -48,28 +77,57 @@ local COIN_ATLAS = { gold = "coin-gold", silver = "coin-silver", copper = "coin-
 local COIN_LETTERS = { gold = "g", silver = "s", copper = "c" }
 -- How often a shown item list redraws, so its age stays true.
 local AGE_REDRAW = 15
--- The status line's progress bar (spec 2.8) and a placeholder's short bar.
-local PROGRESS_WIDTH, PROGRESS_HEIGHT = 64, 7
+-- The status line's progress bar (spec 2.8) in Collections' search bar look
+-- (Blizzard_Collections/Mainline/Blizzard_Wardrobe.xml:339-390: a 0.4 black
+-- back, the status bar texture, the achievement bar's three-piece border),
+-- 72 x 11 (visual pass, board 9), and a placeholder's short bar (#3d352b).
+local PROGRESS_WIDTH, PROGRESS_HEIGHT = 72, 11
+local PROGRESS_BAR = "Interface\\TargetingFrame\\UI-StatusBar"
+local PROGRESS_BORDER = "Interface\\AchievementFrame\\UI-Achievement-ProgressBar-Border"
+local PROGRESS_BACK = { 0, 0, 0, 0.4 }
 local BAR_WIDTH, BAR_HEIGHT = 30, 4
-local BAR_COLOR = { 0.3, 0.3, 0.3, 1 }
+local BAR_COLOR = { 0.239, 0.208, 0.169, 1 }
 local PROGRESS_COLOR = { 1, 0.82, 0, 1 }
+-- The paging arrows' highlight (Blizzard_Collections/Shared/
+-- Blizzard_CollectionTemplates.xml:200).
+local ARROW_HIGHLIGHT = "Interface\\Buttons\\UI-Common-MouseHilight"
+-- The panel's background: one Collections inset under the grid, the status
+-- line and paging, from y 74 to the bottom (visual pass, board 2, decision
+-- 1A), CollectionsBackgroundTemplate (Blizzard_SharedXML/Mainline/
+-- SharedCollectionTemplates.xml:56-202) without its corner ornaments.
+local INSET_Y = 74
+local INSET_CORNERS = { "BGCornerTopLeft", "BGCornerTopRight", "BGCornerBottomLeft", "BGCornerBottomRight" }
 -- Parts of a line 6 apart.
 local TOOLS_GAP = 6
 -- The header row (layout B, 1.1): the catalogue and sweep toggles at x 60
 -- and 94, 30 square, then the slot row, Search and the funnel. The toggles'
--- glyphs are the addon's own art (Media), drawn 16 square.
+-- glyphs are the game art the owner chose in game, drawn 16 square: the
+-- catalogue the atlas lootroll-icon-transmog (Blizzard_Collections/Mainline/
+-- Blizzard_Wardrobe.xml:694), the sweep the coin icon, its built-in border
+-- cropped. Without the atlas, or without the icon file where the client can
+-- tell (GetFileIDFromPath, unverified on Forever), the addon's own art
+-- (Media).
 local TOGGLE_Y, TOGGLE_SIZE, GLYPH_SIZE = 4, 30, 16
 local MEDIA = "Interface\\AddOns\\TransmogChecker\\Media\\"
--- The catalogue glyph is white art tinted, lit and dim (the page's colours).
+local ICON_CROP = { 0.08, 0.92, 0.08, 0.92 }
+-- The toggles are round plates like the slot buttons: the game art 25 across
+-- inside the ring, masked round on a dark round base, or 18 and cropped
+-- without the mask API.
+local GLYPH_MASKED, GLYPH_UNMASKED, TOGGLE_BASE = 25, 18, { 0.05, 0.045, 0.04, 1 }
+local CIRCLE_MASK = "Interface\\CharacterFrame\\TempPortraitAlphaMask"
+-- The Media catalogue glyph is white art tinted, lit and dim (the page's colours).
 local GLYPH_ON, GLYPH_OFF = { 1, 0.914, 0.659, 1 }, { 0.604, 0.569, 0.498, 1 }
 -- The unselected glyph's alpha while the selected toggle carries the ring.
 local GLYPH_DIM_ALPHA = 0.45
 local TOGGLES = {
-    { mode = "All", x = 60, art = "catalogue", tint = true, title = "All appearances",
+    { mode = "All", x = 60, art = "catalogue", atlas = "lootroll-icon-transmog", tint = true, title = "All appearances",
         text = "Every appearance of the slot. A click on a tile checks it." },
-    { mode = "For sale", x = 94, art = "sweep", title = "For sale, cheapest first",
+    { mode = "For sale", x = 94, art = "sweep", icon = "Interface\\Icons\\INV_Misc_Coin_01", title = "For sale, cheapest first",
         text = "Scans this slot and shows what you have not collected, cheapest first." },
 }
+-- The scan action's glyph on "Price this slot" and "Scan again", left of
+-- the text, when the client has the atlas (the owner's choice).
+local SCAN_ATLAS, SCAN_GLYPH = "UI-RefreshButton", 14
 -- The slot row: round buttons of 31, 2 apart, 19 between groups
 -- (Blizzard_Collections/Camelot/Blizzard_Wardrobe.lua:24-27), at x 136
 -- (layout B). Collections' own art (WardrobeSlotButtonTemplate,
@@ -81,11 +139,22 @@ local SLOT_ART, SLOT_SELECTED, SLOT_HIGHLIGHT = "transmog-nav-slot-%s", "transmo
 -- Search at x 642, y 9, 108 x 20; the funnel at x 757, y 4, 30 square, with
 -- the world map's filter art (Blizzard_WorldMap/Mainline/
 -- Blizzard_WorldMapTemplates.xml:7, 41) and the auction house's reset mark
--- (Blizzard_SharedXML/Mainline/SharedUIPanelTemplates.xml:869), a 14 square
--- at its top left, while a choice differs from the start (layout B, 1.3).
+-- (Blizzard_SharedXML/Mainline/SharedUIPanelTemplates.xml:867-871), 23
+-- square, centred on its top right corner 3 in, as the auction house's
+-- Filter button carries it (ClearFiltersButton, Blizzard_AuctionHouseUI/
+-- Shared/Blizzard_AuctionHouseSearchBar.xml:21-25), while a choice differs
+-- from the start (layout B, 1.3).
 local SEARCH_X, SEARCH_Y = 642, 9
-local FUNNEL_X, FUNNEL_Y, FUNNEL_SIZE, MARK_SIZE = 757, 4, 30, 14
-local FUNNEL_ATLAS, RESET_ATLAS = "Map-Filter-Button", "auctionhouse-ui-filter-redx"
+local FUNNEL_X, FUNNEL_Y, FUNNEL_SIZE, MARK_SIZE, MARK_X = 757, 4, 30, 23, -3
+-- The funnel's art is the owner's choice, the settings button of
+-- Blizzard_DamageMeter/DamageMeterSettingsDropdownButton.xml:5-8, with its
+-- hover and pressed forms; without it the world map's filter art.
+local FUNNEL_ATLAS = "common-dropdown-a-button-settings-shadowless"
+local FUNNEL_HOVER = "common-dropdown-a-button-settings-hover-shadowless"
+local FUNNEL_PRESSED = "common-dropdown-a-button-settings-pressed-shadowless"
+local FUNNEL_PRESSED_HOVER = "common-dropdown-a-button-settings-pressedhover-shadowless"
+local FUNNEL_OPEN = "common-dropdown-a-button-settings-open-shadowless"
+local FUNNEL_FALLBACK, RESET_ATLAS = "Map-Filter-Button", "auctionhouse-ui-filter-redx"
 local FUNNEL_TEXT, FUNNEL_TIP = "Filter", "Filter: show and class"
 local CLASS_TEXT, RESET_TEXT = "Class: %s", "Reset filters"
 -- The band under the header: the count at x 28, y 50, and the weapon type
@@ -141,6 +210,7 @@ local function arrowButton(parent, direction, onClick, tip)
     button:SetNormalTexture(ARROW:format(direction, "Up"))
     button:SetPushedTexture(ARROW:format(direction, "Down"))
     button:SetDisabledTexture(ARROW:format(direction, "Disabled"))
+    button:SetHighlightTexture(ARROW_HIGHLIGHT, "ADD")
     button:SetScript("OnClick", onClick)
     tooltip(button, tip, ARROW_HINT)
     return button
@@ -168,6 +238,17 @@ local function applyCamera(model)
     if position and position.GetXYZ then model:SetCameraPosition(position:GetXYZ()) end
 end
 
+-- Collections' flat light on a model, once, when the client has SetLight
+-- and the vector and colour makers; a call that raises leaves the model as
+-- it is. Its effect on these tiles is unverified in game.
+local function light(model)
+    if not (model.SetLight and CreateVector3D and CreateColor) then return end
+    local p = LIGHT.point
+    pcall(model.SetLight, model, true, { omnidirectional = false, point = CreateVector3D(p[1], p[2], p[3]),
+        ambientIntensity = LIGHT.ambient, ambientColor = CreateColor(1, 1, 1),
+        diffuseIntensity = LIGHT.diffuse, diffuseColor = CreateColor(1, 1, 1) })
+end
+
 -- The player's figure, drawn with the transmog skin and wearing only the
 -- tile's piece, set up once as Blizzard's wardrobe does
 -- (ItemModelBaseMixin:OnLoad, as the probe's tiles ran it in game).
@@ -176,6 +257,7 @@ local function newModel(parent, x, y, width, height)
     model:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
     model:SetSize(width, height)
     model:SetAutoDress(false)
+    light(model)
     model:SetUseTransmogSkin(true)
     model:SetUseTransmogChoices(true)
     model:SetObeyHideInTransmogFlag(true)
@@ -196,6 +278,7 @@ local function newWeaponModel(parent, x, y, width, height)
     model:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
     model:SetSize(width, height)
     model:SetAutoDress(false)
+    light(model)
     model:SetKeepModelOnHide(true)
     model:SetScript("OnModelLoaded", applyCamera)
     return model
@@ -278,9 +361,64 @@ local function moneyMarkup(parts)
     return table.concat(words, " ")
 end
 
-local function newTile(grid, index, onClick, onWheel)
+-- An atlas the client has (C_Texture.GetAtlasInfo,
+-- TextureUtilsDocumentation.lua:75-88).
+local function hasAtlas(atlas)
+    return C_Texture ~= nil and C_Texture.GetAtlasInfo ~= nil and C_Texture.GetAtlasInfo(atlas) ~= nil
+end
+
+-- An atlas on a texture, when the client has SetAtlas (read from source).
+local function setAtlas(texture, atlas, useAtlasSize)
+    if texture.SetAtlas then texture:SetAtlas(atlas, useAtlasSize) end
+end
+
+-- A vertical gradient from bottom to top (SetGradient,
+-- SimpleTextureBaseAPIDocumentation.lua:439-449), or the flat colour
+-- without the colour maker.
+local function gradient(texture, bottom, top, flat)
+    texture:SetColorTexture(1, 1, 1, 1)
+    if texture.SetGradient and CreateColor then
+        texture:SetGradient("VERTICAL", CreateColor(unpack(bottom)), CreateColor(unpack(top)))
+    else
+        texture:SetColorTexture(unpack(flat))
+    end
+end
+
+-- Which of the tile's atlases the client has, asked once per panel.
+local function tileArt()
+    return { edge = hasAtlas(EDGE_ATLAS) and hasAtlas(EDGE_COLLECTED_ATLAS), open = hasAtlas(OPEN_ATLAS),
+        hover = hasAtlas(HOVER_ATLAS) }
+end
+
+-- An atlas texture of the tile's art on its button, centred, in the atlas's
+-- size, as Collections' tile draws it.
+local function glow(tile, atlas, sublevel, add)
+    local texture = tile.button:CreateTexture(nil, "OVERLAY", nil, sublevel)
+    texture:SetPoint("CENTER", tile, "CENTER", 0, 0)
+    setAtlas(texture, atlas, true)
+    if add then texture:SetBlendMode("ADD") end
+    texture:Hide()
+    return texture
+end
+
+-- The tile's markers from its state: the collected border and the check,
+-- the open glow, the hover glow. Without an atlas its state colours the
+-- tile's line instead: open over hover over collected.
+local function drawMarkers(tile)
+    local art = tile.art
+    tile.check:SetShown(tile.collected == true)
+    if tile.edge then setAtlas(tile.edge, tile.collected and EDGE_COLLECTED_ATLAS or EDGE_ATLAS, true) end
+    if tile.openGlow then tile.openGlow:SetShown(tile.isOpen == true) end
+    if tile.hoverGlow then tile.hoverGlow:SetShown(tile.hovered == true) end
+    local line = art.edge and WELL or (tile.collected and BORDER_COLLECTED or BORDER)
+    if tile.hovered and not art.hover then line = BORDER_HOVER end
+    if tile.isOpen and not art.open then line = BORDER_OPEN end
+    tile.border:SetColorTexture(unpack(line))
+end
+
+local function newTile(grid, index, art, onClick, onWheel, onEnter, onLeave)
     local tile = CreateFrame("Frame", nil, grid)
-    tile.index = index
+    tile.index, tile.art = index, art
     tile:SetSize(TILE_WIDTH, TILE_HEIGHT)
     local _, _, x, y = cell(index)
     tile:SetPoint("TOPLEFT", grid, "TOPLEFT", x, -y)
@@ -289,12 +427,17 @@ local function newTile(grid, index, onClick, onWheel)
     local inside = tile:CreateTexture(nil, "BORDER")
     inside:SetPoint("TOPLEFT", tile, "TOPLEFT", 1, -1)
     inside:SetPoint("BOTTOMRIGHT", tile, "BOTTOMRIGHT", -1, 1)
-    inside:SetColorTexture(0, 0, 0, 1)
-    -- The price strip, always there; empty and darker while not checked.
+    inside:SetColorTexture(unpack(WELL))
+    -- The price strip, a plate shown only once something is known; the model
+    -- and the tile keep their size without it (decision 3A).
     tile.strip = tile:CreateTexture(nil, "ARTWORK")
     tile.strip:SetPoint("TOPLEFT", tile, "TOPLEFT", 1, -1 - MODEL_HEIGHT)
     tile.strip:SetSize(TILE_WIDTH - 2, STRIP_HEIGHT)
-    tile.strip:SetColorTexture(unpack(STRIP_EMPTY))
+    gradient(tile.strip, STRIP_BOTTOM, STRIP_TOP, STRIP_CHECKED)
+    tile.stripLine = tile:CreateTexture(nil, "ARTWORK", nil, 1)
+    tile.stripLine:SetPoint("TOPLEFT", tile.strip, "TOPLEFT", 0, 0)
+    tile.stripLine:SetSize(TILE_WIDTH - 2, 1)
+    tile.stripLine:SetColorTexture(unpack(STRIP_LINE))
     tile.price = tile:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     tile.price:SetPoint("CENTER", tile.strip, "CENTER")
     tile.notForSale = tile:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -314,8 +457,20 @@ local function newTile(grid, index, onClick, onWheel)
     above:SetScript("OnClick", function() onClick(tile) end)
     above:EnableMouseWheel(true)
     above:SetScript("OnMouseWheel", function(_, delta) onWheel(delta) end)
+    above:SetScript("OnEnter", function() onEnter(tile) end)
+    above:SetScript("OnLeave", function() onLeave(tile) end)
     tile.button = above
-    tile.check = above:CreateTexture(nil, "OVERLAY")
+    -- Collections' border on OVERLAY sublevel -1, 3 below the centre
+    -- (Blizzard_Wardrobe.xml:12-18), the open and hover glows over it
+    if art.edge then
+        tile.edge = glow(tile, EDGE_ATLAS, -1)
+        tile.edge:ClearAllPoints()
+        tile.edge:SetPoint("CENTER", tile, "CENTER", 0, -3)
+        tile.edge:Show()
+    end
+    if art.open then tile.openGlow = glow(tile, OPEN_ATLAS, 0, true) end
+    if art.hover then tile.hoverGlow = glow(tile, HOVER_ATLAS, 1, true) end
+    tile.check = above:CreateTexture(nil, "OVERLAY", nil, 2)
     tile.check:SetSize(CHECK_SIZE, CHECK_SIZE)
     tile.check:SetPoint("TOPRIGHT", tile, "TOPRIGHT", -3, -3)
     tile.check:SetTexture(CHECK_TEXTURE)
@@ -344,11 +499,10 @@ end
 
 local function drawTile(tile, shown)
     tile.appearance = shown.appearance
-    local border = shown.open and BORDER_OPEN or shown.collected and BORDER_COLLECTED or BORDER
-    tile.border:SetColorTexture(unpack(border))
-    tile.check:SetShown(shown.collected == true)
-    tile.strip:SetColorTexture(unpack((shown.strip == "not checked" or shown.strip == "bar" or shown.strip == "no answer")
-        and STRIP_EMPTY or STRIP_CHECKED))
+    tile.collected, tile.isOpen = shown.collected == true, shown.open == true
+    drawMarkers(tile)
+    tile.strip:SetShown(shown.strip ~= nil)
+    tile.stripLine:SetShown(shown.strip ~= nil)
     tile.price:SetText(shown.money and moneyMarkup(shown.money) or "")
     tile.notForSale:SetText((shown.strip == "not for sale" or shown.strip == "no answer") and shown.price or "")
     tile.bar:SetShown(shown.strip == "bar")
@@ -444,6 +598,30 @@ local function newFlyout(panel, level, overTile)
     -- head: the model, the type and, when collected, "Collected" with the
     -- tile's check
     local model = newModel(frame, 10, -8, HEAD_MODEL_WIDTH, HEAD_MODEL_HEIGHT)
+    -- the tile's border around the small model, on a frame above it
+    -- (visual pass, board 8); without the atlases none, as before
+    local modelEdge
+    if hasAtlas(EDGE_ATLAS) and hasAtlas(EDGE_COLLECTED_ATLAS) then
+        local over = CreateFrame("Frame", nil, frame)
+        over:SetFrameLevel(frame:GetFrameLevel() + 5)
+        over:SetPoint("TOPLEFT", frame, "TOPLEFT", 10, -8)
+        over:SetSize(HEAD_MODEL_WIDTH, HEAD_MODEL_HEIGHT)
+        modelEdge = over:CreateTexture(nil, "OVERLAY")
+        modelEdge:SetPoint("TOPLEFT", over, "TOPLEFT", -3, 3)
+        modelEdge:SetPoint("BOTTOMRIGHT", over, "BOTTOMRIGHT", 3, -3)
+    end
+    -- hairlines under the head and over the foot (layout B, board 6.1)
+    local function hairline()
+        local line = frame:CreateTexture(nil, "ARTWORK")
+        line:SetHeight(1)
+        line:SetColorTexture(unpack(FLY_LINE))
+        return line
+    end
+    local headLine, footLine = hairline(), hairline()
+    headLine:SetPoint("TOPLEFT", frame, "TOPLEFT", 10, -(FLY_HEAD - 1))
+    headLine:SetWidth(FLY_INSIDE)
+    footLine:SetPoint("BOTTOMLEFT", frame, "BOTTOMLEFT", 10, FLY_FOOT)
+    footLine:SetWidth(FLY_INSIDE)
     local typeText = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     typeText:SetPoint("TOPLEFT", frame, "TOPLEFT", HEAD_TEXT_X, -10)
     typeText:SetWidth(HEAD_TEXT_WIDTH)
@@ -451,7 +629,8 @@ local function newFlyout(panel, level, overTile)
     local collectedText = frame:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     collectedText:SetPoint("TOPLEFT", typeText, "BOTTOMLEFT", 0, -4)
     collectedText:SetText("Collected")
-    collectedText:SetTextColor(0.1, 0.8, 0.1)
+    -- GREEN_FONT_COLOR (visual pass, board 8)
+    collectedText:SetTextColor(0.1, 1, 0.1)
     local collectedCheck = frame:CreateTexture(nil, "OVERLAY")
     collectedCheck:SetSize(12, 12)
     collectedCheck:SetPoint("LEFT", collectedText, "RIGHT", 2, 0)
@@ -481,12 +660,29 @@ local function newFlyout(panel, level, overTile)
     -- offset: the rows scrolled past; shown: the rows that fit
     local offset, count, shown = 0, 0, FLY_ROWS
     local rows = {}
+    local stripeArt, highlightArt = hasAtlas(ROW_STRIPE_ATLAS), hasAtlas(ROW_HIGHLIGHT_ATLAS)
+    local scroll
     for i = 1, FLY_ROWS do
         local row = CreateFrame("Frame", nil, frame)
         row:SetSize(FLY_INSIDE, FLY_ROW)
-        local stripe = row:CreateTexture(nil, "BACKGROUND")
-        stripe:SetAllPoints()
-        stripe:SetColorTexture(1, 1, 1, i % 2 == 1 and 0.045 or 0)
+        -- the stripe on alternate rows
+        if i % 2 == 1 then
+            local stripe = row:CreateTexture(nil, "BACKGROUND")
+            stripe:SetAllPoints()
+            if stripeArt then setAtlas(stripe, ROW_STRIPE_ATLAS) else stripe:SetColorTexture(unpack(ROW_STRIPE)) end
+        end
+        -- the highlight while the pointer is over the row; the row passes
+        -- the wheel on to the flyout's scrolling
+        row.highlight = row:CreateTexture(nil, "BORDER")
+        row.highlight:SetAllPoints()
+        if highlightArt then setAtlas(row.highlight, ROW_HIGHLIGHT_ATLAS) else row.highlight:SetColorTexture(unpack(ROW_HOVER)) end
+        row.highlight:SetBlendMode("ADD")
+        row.highlight:Hide()
+        row:EnableMouse(true)
+        row:SetScript("OnEnter", function() row.highlight:Show() end)
+        row:SetScript("OnLeave", function() row.highlight:Hide() end)
+        row:EnableMouseWheel(true)
+        row:SetScript("OnMouseWheel", function(_, delta) scroll(delta) end)
         row.name = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
         row.name:SetPoint("TOPLEFT", row, "TOPLEFT", 2, -4)
         row.name:SetWidth(FLY_INSIDE - 12)
@@ -501,10 +697,17 @@ local function newFlyout(panel, level, overTile)
         row.price = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
         rows[i] = row
     end
-    -- the scroll position, when the rows scroll
+    -- when the rows scroll: a thin track with the scroll position on it
+    -- (layout B, board 6.1), and a fade over the last row while more follow
+    local track = frame:CreateTexture(nil, "ARTWORK")
+    track:SetWidth(2)
+    track:SetColorTexture(unpack(FLY_TRACK))
     local thumb = frame:CreateTexture(nil, "OVERLAY")
-    thumb:SetWidth(4)
+    thumb:SetWidth(6)
     thumb:SetColorTexture(unpack(FLY_EDGE))
+    local fade = frame:CreateTexture(nil, "OVERLAY")
+    fade:SetSize(FLY_INSIDE, FADE_HEIGHT)
+    gradient(fade, FLY_FILL, { FLY_FILL[1], FLY_FILL[2], FLY_FILL[3], 0 }, { 0, 0, 0, 0 })
 
     -- foot
     local ageText = frame:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
@@ -542,6 +745,7 @@ local function newFlyout(panel, level, overTile)
         show(frame, "weaponModel", model, list.appearance, list.weapon, function()
             return newWeaponModel(frame, 10, -8, HEAD_MODEL_WIDTH, HEAD_MODEL_HEIGHT)
         end)
+        if modelEdge then setAtlas(modelEdge, list.collected and EDGE_COLLECTED_ATLAS or EDGE_ATLAS) end
         typeText:SetText(list.typeText)
         collectedText:SetShown(list.collected)
         collectedCheck:SetShown(list.collected)
@@ -579,12 +783,20 @@ local function newFlyout(panel, level, overTile)
                 row.price:SetText(shownRow.money and moneyMarkup(shownRow.money) or "")
             end
         end
-        thumb:SetShown(count > shown)
-        if count > shown then
-            local track = shown * FLY_ROW
-            thumb:SetHeight(track * shown / count)
+        local scrolls = count > shown
+        thumb:SetShown(scrolls)
+        track:SetShown(scrolls)
+        fade:SetShown(scrolls and offset + shown < count)
+        if scrolls then
+            local length = shown * FLY_ROW
+            thumb:SetHeight(length * shown / count)
             thumb:ClearAllPoints()
-            thumb:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -5, -(rowsTop + track * offset / count))
+            thumb:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -4, -(rowsTop + length * offset / count))
+            track:ClearAllPoints()
+            track:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -6, -rowsTop)
+            track:SetHeight(length)
+            fade:ClearAllPoints()
+            fade:SetPoint("BOTTOMLEFT", frame, "TOPLEFT", 10, -(rowsTop + length))
         end
         ageText:SetText(list.foot.age or "")
         note:SetText(list.foot.note or "")
@@ -593,12 +805,13 @@ local function newFlyout(panel, level, overTile)
         again:SetEnabled(list.foot.enabled)
     end
     -- the wheel over the flyout scrolls its rows, not the pages
-    frame:EnableMouseWheel(true)
-    frame:SetScript("OnMouseWheel", function(_, delta)
+    function scroll(delta)
         local was = offset
         offset = math.max(0, math.min(offset - delta, count - shown))
         if offset ~= was and current then drawList(current, currentIndex) end
-    end)
+    end
+    frame:EnableMouseWheel(true)
+    frame:SetScript("OnMouseWheel", function(_, delta) scroll(delta) end)
     local sinceDraw = 0
     frame:SetScript("OnUpdate", function(_, elapsed)
         sinceDraw = sinceDraw + (elapsed or 0)
@@ -726,36 +939,77 @@ local function listMenu(panel, button, width, side)
     return menu
 end
 
--- An atlas the client has (C_Texture.GetAtlasInfo,
--- TextureUtilsDocumentation.lua:75-88).
-local function hasAtlas(atlas)
-    return C_Texture ~= nil and C_Texture.GetAtlasInfo ~= nil and C_Texture.GetAtlasInfo(atlas) ~= nil
-end
-
--- A catalogue or sweep toggle: Blizzard's SquareIconButtonTemplate (the
--- auction house's favourites button, Blizzard_AuctionHouseSearchBar.xml:11;
--- IconButtonTemplate.xml:40-57), or a bare button with its own icon, holding
--- the addon's glyph from Media. A texture file cannot be tested for, so the
--- An atlas on a texture, when the client has SetAtlas (read from source).
-local function setAtlas(texture, atlas, useAtlasSize)
-    if texture.SetAtlas then texture:SetAtlas(atlas, useAtlasSize) end
-end
-
--- tooltip names it. The selected one carries the slot row's gold ring and the
+-- A catalogue or sweep toggle: a round plate in the slot row's look (the
+-- owner: a round ring needs no square outline), holding its glyph: the
+-- chosen game art, or the addon's own from Media. The tooltip
+-- names it. The selected one carries the slot row's gold ring and the
 -- other's glyph is dimmed; without the ring's atlas the selected one is lit
 -- instead (LockHighlight). It forwards the click to the state.
+-- A texture masked to a circle (CreateMaskTexture,
+-- SimpleFrameAPIDocumentation.lua:113-127; AddMaskTexture,
+-- SimpleTextureAPIDocumentation.lua:10), with the round mask the client's
+-- round icons use (Interface\CharacterFrame\TempPortraitAlphaMask, as
+-- Blizzard_AccountStoreCategoryList.xml:27); answers whether it is masked.
+local function circle(button, texture)
+    if not (button.CreateMaskTexture and texture.AddMaskTexture) then return false end
+    local ok = pcall(function()
+        local mask = button:CreateMaskTexture()
+        mask:SetTexture(CIRCLE_MASK, "CLAMPTOBLACKADDITIVE", "CLAMPTOBLACKADDITIVE")
+        mask:SetAllPoints(texture)
+        texture:AddMaskTexture(mask)
+        texture.mask = mask
+    end)
+    return ok and texture.mask ~= nil
+end
+
 local function newToggle(panel, toggle)
-    local button = templated("Button", panel, "SquareIconButtonTemplate")
-    if not (button and button.Icon) then
-        button = button or CreateFrame("Button", nil, panel)
-        button.Icon = button:CreateTexture(nil, "OVERLAY")
-        button.Icon:SetPoint("CENTER")
+    -- a plain round plate like the slot buttons (WardrobeSlotButtonTemplate,
+    -- Blizzard_Wardrobe.xml:99-129): 31 square, its centre (both ways) where
+    -- the 30 square toggle's was, the slot row's round highlight, no square frame
+    local button = CreateFrame("Button", nil, panel)
+    button:SetSize(SLOT_SIZE, SLOT_SIZE)
+    local grow = (SLOT_SIZE - TOGGLE_SIZE) / 2
+    button:SetPoint("TOPLEFT", panel, "TOPLEFT", toggle.x - grow, -(TOGGLE_Y - grow))
+    button.Icon = button:CreateTexture(nil, "ARTWORK")
+    button.Icon:SetPoint("CENTER")
+    if hasAtlas(SLOT_HIGHLIGHT) then
+        local highlight = button:CreateTexture(nil, "HIGHLIGHT")
+        highlight:SetSize(SLOT_SIZE, SLOT_SIZE)
+        highlight:SetPoint("CENTER", button, "CENTER", 0, 1)
+        setAtlas(highlight, SLOT_HIGHLIGHT)
+        highlight:SetBlendMode("ADD")
+    else
         button:SetHighlightTexture("Interface\\Buttons\\UI-Common-MouseHilight", "ADD")
     end
-    button:SetSize(TOGGLE_SIZE, TOGGLE_SIZE)
-    button:SetPoint("TOPLEFT", panel, "TOPLEFT", toggle.x, -TOGGLE_Y)
-    button.Icon:SetSize(GLYPH_SIZE, GLYPH_SIZE)
-    button.Icon:SetTexture(MEDIA .. toggle.art)
+    local tint, game = toggle.tint, true
+    if toggle.atlas and hasAtlas(toggle.atlas) then
+        setAtlas(button.Icon, toggle.atlas)
+        tint = false
+    elseif toggle.icon and not (GetFileIDFromPath and GetFileIDFromPath(toggle.icon) == nil) then
+        button.Icon:SetTexture(toggle.icon)
+        button.Icon:SetTexCoord(unpack(ICON_CROP))
+    else
+        button.Icon:SetTexture(MEDIA .. toggle.art)
+        game = false
+    end
+    -- the game art fills the plate inside the ring, cut to a circle; without
+    -- the mask API it is cropped (above) and shrunk to fit inside the ring
+    local size = GLYPH_SIZE
+    if game then
+        size = GLYPH_UNMASKED
+        -- a dark round base under the glyph, as a slot plate has
+        local base = button:CreateTexture(nil, "BACKGROUND")
+        base:SetSize(GLYPH_MASKED, GLYPH_MASKED)
+        base:SetPoint("CENTER")
+        base:SetColorTexture(unpack(TOGGLE_BASE))
+        if circle(button, base) and circle(button, button.Icon) then
+            size = GLYPH_MASKED
+        else
+            base:Hide()
+        end
+        button.base = base
+    end
+    button.Icon:SetSize(size, size)
     button:SetScript("OnClick", function() State.SelectMode(toggle.mode) end)
     tooltip(button, toggle.title, toggle.text)
     button.mode = toggle.mode
@@ -774,7 +1028,7 @@ local function newToggle(panel, toggle)
         else
             button:UnlockHighlight()
         end
-        if toggle.tint then button.Icon:SetVertexColor(unpack(selected and GLYPH_ON or GLYPH_OFF)) end
+        if tint then button.Icon:SetVertexColor(unpack(selected and GLYPH_ON or GLYPH_OFF)) end
     end
     return button
 end
@@ -905,14 +1159,50 @@ local function newFunnel(panel)
         menu = listMenu(panel, funnel, 170, "RIGHT")
     end
     funnel:SetPoint("TOPLEFT", panel, "TOPLEFT", FUNNEL_X, -FUNNEL_Y)
-    local art = hasAtlas(FUNNEL_ATLAS)
+    -- the owner's art, else the world map's filter art, else the text
+    local art = hasAtlas(FUNNEL_ATLAS) and FUNNEL_ATLAS or hasAtlas(FUNNEL_FALLBACK) and FUNNEL_FALLBACK or nil
     funnel:SetText(art and "" or FUNNEL_TEXT)
     if art then
         -- the template's dropdown art (MenuTemplates.xml:91) gives way to the funnel's
         if not menu and funnel.Background then funnel.Background:SetAlpha(0) end
         local icon = funnel:CreateTexture(nil, "ARTWORK")
         icon:SetAllPoints()
-        icon:SetAtlas(FUNNEL_ATLAS)
+        icon:SetAtlas(art)
+        funnel.icon = icon
+        -- the settings button's forms, as DamageMeterSettingsDropdownButton.lua:
+        -- 7-26 picks them (.xml:5-10), each where the client has its atlas
+        -- (else the next plainer one): pressed with the pointer over it,
+        -- hover, pressed (until the mouse is released, wherever), open while
+        -- its menu is open, else normal. A Blizzard dropdown tells of its menu
+        -- through OnMenuOpened and OnMenuClosed, which Blizzard's button
+        -- overrides the same way; our own list menu through its shown state.
+        if art == FUNNEL_ATLAS then
+            local function form(atlas, instead) return hasAtlas(atlas) and atlas or instead end
+            local hover, pressed = form(FUNNEL_HOVER, art), form(FUNNEL_PRESSED, art)
+            local pressedHover, open = form(FUNNEL_PRESSED_HOVER, pressed), form(FUNNEL_OPEN, art)
+            local over, down = false, false
+            local function paint()
+                local isOpen = funnel.IsMenuOpen and funnel:IsMenuOpen() or (menu ~= nil and menu:IsShown())
+                icon:SetAtlas(down and over and pressedHover or over and hover or down and pressed or isOpen and open or art)
+            end
+            funnel:HookScript("OnEnter", function() over = true paint() end)
+            funnel:HookScript("OnLeave", function() over = false paint() end)
+            funnel:HookScript("OnMouseDown", function() down = true paint() end)
+            funnel:HookScript("OnMouseUp", function() down = false paint() end)
+            funnel:HookScript("OnShow", function() over, down = false, false paint() end)
+            if menu then
+                menu:HookScript("OnShow", paint)
+                menu:HookScript("OnHide", paint)
+            else
+                for _, name in ipairs({ "OnMenuOpened", "OnMenuClosed" }) do
+                    local base = funnel[name]
+                    funnel[name] = function(self, ...)
+                        if base then base(self, ...) end
+                        paint()
+                    end
+                end
+            end
+        end
     end
     funnel:HookScript("OnEnter", function(self)
         if not GameTooltip then return end
@@ -925,7 +1215,7 @@ local function newFunnel(panel)
     end)
     local mark = CreateFrame("Button", nil, funnel)
     mark:SetSize(MARK_SIZE, MARK_SIZE)
-    mark:SetPoint("CENTER", funnel, "TOPLEFT", 1, 1)
+    mark:SetPoint("CENTER", funnel, "TOPRIGHT", MARK_X, 0)
     local markArt = mark:CreateTexture(nil, "ARTWORK")
     markArt:SetAllPoints()
     if hasAtlas(RESET_ATLAS) then markArt:SetAtlas(RESET_ATLAS) else markArt:SetColorTexture(0.7, 0.1, 0.05, 1) end
@@ -1000,10 +1290,29 @@ local function buildBrowser(panel)
     local search = newSearchBox(panel)
     search:SetPoint("TOPLEFT", panel, "TOPLEFT", SEARCH_X, -SEARCH_Y)
     local funnel = newFunnel(panel)
-    local count = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
-    count:SetPoint("TOPLEFT", panel, "TOPLEFT", COUNT_X, -COUNT_Y)
     local weaponType = newDropdown(panel, WEAPON_WIDTH, State.SelectWeaponType)
     weaponType:SetPoint("LEFT", panel, "TOPLEFT", WEAPON_X, -WEAPON_CENTRE)
+
+    -- the inset under the grid, the status line and paging; without the
+    -- template the bare window background, as before
+    local inset = templated("Frame", panel, "CollectionsBackgroundTemplate")
+    if inset then
+        inset:ClearAllPoints()
+        inset:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, -INSET_Y)
+        inset:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", 0, 0)
+        for _, key in ipairs(INSET_CORNERS) do
+            if type(inset[key]) == "table" and inset[key].Hide then inset[key]:Hide() end
+        end
+    end
+    -- The inset sits at the panel's own frame level (useParentLevel,
+    -- SharedUIPanelTemplates.xml:389), where a font string or texture of the
+    -- panel itself has no order against it. So every text and texture of
+    -- ours over it is on this plain frame above it, which takes no mouse.
+    local content = CreateFrame("Frame", nil, panel)
+    content:SetAllPoints(panel)
+    content:SetFrameLevel(math.max(panel:GetFrameLevel(), inset and inset:GetFrameLevel() or 0) + 1)
+    local count = content:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    count:SetPoint("TOPLEFT", panel, "TOPLEFT", COUNT_X, -COUNT_Y)
 
     local grid = CreateFrame("Frame", nil, panel)
     grid:SetPoint("TOPLEFT", panel, "TOPLEFT", GRID_X, -GRID_Y)
@@ -1013,9 +1322,57 @@ local function buildBrowser(panel)
     local function clickTile(tile)
         if tile.appearance then State.ClickTile(tile.appearance) end
     end
+    -- The tile under the pointer: its hover glow and its tooltip (board 7),
+    -- built from the state's lines on entering and on each draw, never per
+    -- frame. hoverID: the appearance it showed on entering; a draw that finds
+    -- another (a page turn) ends the hover. No tooltip while its flyout is open.
+    local hovered, hoverID, tipShown, tipOwner
+    -- hides the tooltip only while it is ours: another frame may own it by now
+    local function hideTip()
+        if tipShown and GameTooltip and not (GameTooltip.GetOwner and GameTooltip:GetOwner() ~= tipOwner) then
+            GameTooltip:Hide()
+        end
+        tipShown = false
+    end
+    local function showTip(tile)
+        if not GameTooltip or tile.isOpen then return hideTip() end
+        tipOwner = tile.button
+        GameTooltip:SetOwner(tile.button, "ANCHOR_RIGHT")
+        for _, line in ipairs(State.TileTooltip(tile.appearance)) do
+            local c = line.color or TEXT_WHITE
+            if line.right then
+                local r = line.rightColor or c
+                GameTooltip:AddDoubleLine(line.text, line.money and moneyMarkup(line.money) or line.right,
+                    c[1], c[2], c[3], r[1], r[2], r[3])
+            else
+                GameTooltip:AddLine(line.text, c[1], c[2], c[3])
+            end
+        end
+        GameTooltip:Show()
+        tipShown = true
+    end
+    local function endHover()
+        if not hovered then return end
+        hovered.hovered = false
+        drawMarkers(hovered)
+        hovered, hoverID = nil, nil
+        hideTip()
+    end
+    local function enterTile(tile)
+        if not tile.appearance then return end
+        endHover()
+        hovered, hoverID = tile, tile.appearance.id
+        tile.hovered = true
+        drawMarkers(tile)
+        showTip(tile)
+    end
+    local function leaveTile(tile)
+        if hovered == tile then endHover() end
+    end
+    local art = tileArt()
     local tiles = {}
     for i = 1, COLUMNS * ROWS do
-        tiles[i] = newTile(grid, i, clickTile, State.Wheel)
+        tiles[i] = newTile(grid, i, art, clickTile, State.Wheel, enterTile, leaveTile)
     end
     -- a click on a tile is the tile's own, not a click outside the flyout
     local function overTile()
@@ -1026,7 +1383,10 @@ local function buildBrowser(panel)
     end
     local flyout
 
-    local emptyTitle = grid:CreateFontString(nil, "OVERLAY", "GameFontNormalLarge")
+    -- the empty state: a heading in GameFontNormalMed3 (FontStyles.xml:278),
+    -- or GameFontNormalLarge as before without it, and the sentence in
+    -- GameFontHighlight (visual pass, board 10)
+    local emptyTitle = grid:CreateFontString(nil, "OVERLAY", GameFontNormalMed3 and "GameFontNormalMed3" or "GameFontNormalLarge")
     emptyTitle:SetPoint("TOP", grid, "TOP", 0, -120)
     local emptyText = grid:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
     emptyText:SetPoint("TOP", emptyTitle, "BOTTOM", 0, -8)
@@ -1045,7 +1405,9 @@ local function buildBrowser(panel)
     local nextPage = arrowButton(paging, "Next", State.NextPage, NEXT_TIP)
     nextPage:SetPoint("RIGHT", paging, "RIGHT", 0, 0)
     previous:SetPoint("RIGHT", nextPage, "LEFT", -TOOLS_GAP, 0)
-    local pageText = paging:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
+    -- Collections' page text font (CollectionsPageTextTemplate,
+    -- Blizzard_Collections/Shared/Blizzard_CollectionTemplates.xml:193)
+    local pageText = paging:CreateFontString(nil, "OVERLAY", GameFontWhite and "GameFontWhite" or "GameFontHighlight")
     pageText:SetPoint("RIGHT", previous, "LEFT", -TOOLS_GAP - 5, 0)
     pageText:SetJustifyH("RIGHT")
     -- the widest form of the page text seen, whose width the text keeps
@@ -1062,7 +1424,7 @@ local function buildBrowser(panel)
 
     -- the status line: one button, always first at the grid's left edge, its
     -- text after it, and a progress bar while a scan runs
-    local status = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
+    local status = content:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
     status:SetHeight(24)
     status:SetJustifyH("LEFT")
     local statusAction
@@ -1070,14 +1432,49 @@ local function buildBrowser(panel)
         if statusAction then statusAction() end
     end)
     statusButton:SetPoint("TOPLEFT", panel, "TOPLEFT", GRID_X, -STATUS_Y - 2)
-    local progress = panel:CreateTexture(nil, "ARTWORK")
+    -- the scan glyph left of the button's text, the text moved right by
+    -- half the glyph so the pair stays centred; without the atlas text only
+    if hasAtlas(SCAN_ATLAS) then
+        local glyph = statusButton:CreateTexture(nil, "OVERLAY")
+        glyph:SetSize(SCAN_GLYPH, SCAN_GLYPH)
+        setAtlas(glyph, SCAN_ATLAS)
+        local label = statusButton.GetFontString and statusButton:GetFontString()
+        if type(label) == "table" then
+            label:ClearAllPoints()
+            label:SetPoint("CENTER", statusButton, "CENTER", (SCAN_GLYPH + 2) / 2, 0)
+            glyph:SetPoint("RIGHT", label, "LEFT", -2, 0)
+        else
+            glyph:SetPoint("LEFT", statusButton, "LEFT", 6, 0)
+        end
+        statusButton.glyph = glyph
+    end
+    -- the progress bar: the black back, the gold bar texture and the border
+    local progress = content:CreateTexture(nil, "ARTWORK")
     progress:SetSize(PROGRESS_WIDTH, PROGRESS_HEIGHT)
     progress:SetPoint("LEFT", status, "RIGHT", TOOLS_GAP, 0)
-    progress:SetColorTexture(unpack(STRIP_CHECKED))
-    local progressFill = panel:CreateTexture(nil, "OVERLAY")
+    progress:SetColorTexture(unpack(PROGRESS_BACK))
+    local progressFill = content:CreateTexture(nil, "ARTWORK", nil, 1)
     progressFill:SetHeight(PROGRESS_HEIGHT)
     progressFill:SetPoint("LEFT", progress, "LEFT", 0, 0)
-    progressFill:SetColorTexture(unpack(PROGRESS_COLOR))
+    progressFill:SetTexture(PROGRESS_BAR)
+    progressFill:SetVertexColor(unpack(PROGRESS_COLOR))
+    -- left, right and centre of the border, as Blizzard_Wardrobe.xml:362-387
+    local progressBorder = {}
+    for i, part in ipairs({ { 0, 0.0625, "LEFT", -6 }, { 0.812, 0.8745, "RIGHT", 6 }, { 0.0625, 0.812 } }) do
+        local texture = content:CreateTexture(nil, "OVERLAY")
+        texture:SetTexture(PROGRESS_BORDER)
+        texture:SetTexCoord(part[1], part[2], 0, 0.75)
+        if part[3] then
+            texture:SetWidth(16)
+            texture:SetPoint("TOP" .. part[3], progress, "TOP" .. part[3], part[4], 5)
+            texture:SetPoint("BOTTOM" .. part[3], progress, "BOTTOM" .. part[3], part[4], -5)
+        else
+            texture:SetPoint("TOPLEFT", progressBorder[1], "TOPRIGHT")
+            texture:SetPoint("BOTTOMRIGHT", progressBorder[2], "BOTTOMLEFT")
+        end
+        progressBorder[i] = texture
+    end
+    local statusFonts = { hint = GameFontDisableSmall, state = GameFontHighlightSmall }
 
     local function draw()
         local view = State.View()
@@ -1131,9 +1528,23 @@ local function buildBrowser(panel)
         status:ClearAllPoints()
         status:SetPoint("TOPLEFT", panel, "TOPLEFT", view.statusButton and (GRID_X + STATUS_BUTTON + TOOLS_GAP) or GRID_X,
             -STATUS_Y)
+        -- the hint in the advice font, a state in the state font
+        local font = view.statusHint and statusFonts.hint or statusFonts.state
+        if font and status.SetFontObject then status:SetFontObject(font) end
         progress:SetShown(view.progress ~= nil)
+        for _, part in ipairs(progressBorder) do part:SetShown(view.progress ~= nil) end
         progressFill:SetShown((view.progress or 0) > 0)
         progressFill:SetWidth(math.max(1, PROGRESS_WIDTH * (view.progress or 0)))
+        -- the hover ends when its tile shows another appearance or none (a
+        -- page turn); its tooltip hides while its flyout is open and follows
+        -- what the state answers otherwise
+        if hovered then
+            if not hovered:IsVisible() or not hovered.appearance or hovered.appearance.id ~= hoverID then
+                endHover()
+            else
+                showTip(hovered)
+            end
+        end
     end
     State.SetListener(draw)
     -- the buy dialog belongs to the panel and hides with it
@@ -1141,6 +1552,7 @@ local function buildBrowser(panel)
 
     -- Leaving the tab stops a running check or scan (A6).
     panel:SetScript("OnHide", function()
+        endHover()
         funnel.close()
         weaponType.close()
         if search.ClearFocus then search:ClearFocus() end
