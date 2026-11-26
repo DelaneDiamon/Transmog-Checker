@@ -195,11 +195,50 @@ local function restore(run)
     end)
 end
 
+-- The weapon categories each class can learn, by class id and weapon slot
+-- key. The client's answer for the character's own class leaves out the
+-- weapon types whose skill the character has not learnt, while its answers
+-- for the other classes hold what they can train: measured on build 1.60.1
+-- from a Warlock, whose own answer had no one-handed swords (the other
+-- classes' answers are inferred from that one character).
+local CAN_LEARN = {
+    [1] = { mainhand = { 13, 14, 15, 16, 17, 20, 21, 22, 23, 24 }, offhand = { 18, 19 }, ranged = { 25, 26, 27 } },
+    [2] = { mainhand = { 13, 14, 15, 20, 21, 22, 24 }, offhand = { 18, 19 }, ranged = {} },
+    [3] = { mainhand = { 13, 14, 16, 17, 20, 21, 23, 24 }, offhand = { 19 }, ranged = { 25, 26, 27 } },
+    [4] = { mainhand = { 13, 14, 15, 16, 17 }, offhand = { 19 }, ranged = { 25, 26, 27 } },
+    [5] = { mainhand = { 15, 16, 23 }, offhand = { 19 }, ranged = { 12 } },
+    [7] = { mainhand = { 13, 15, 16, 17, 20, 22, 23 }, offhand = { 18, 19 }, ranged = {} },
+    [8] = { mainhand = { 14, 16, 23 }, offhand = { 19 }, ranged = { 12 } },
+    [9] = { mainhand = { 14, 16, 23 }, offhand = { 19 }, ranged = { 12 } },
+    [11] = { mainhand = { 15, 16, 17, 22, 23, 24 }, offhand = { 19 }, ranged = {} },
+}
+
+-- The character's own class gets, besides what the client answered for it,
+-- what its class can learn (CAN_LEARN); the other classes keep the client's
+-- answer. A category gets the name any class's answer gave it, else the
+-- client's subclass name, else its number.
+local function addOwnClass(learnt)
+    local id = UnitClass and select(3, UnitClass("player"))
+    local own, can = id and learnt[id], id and CAN_LEARN[id]
+    if not (own and can) then return end
+    for slot, categories in pairs(can) do
+        for _, category in ipairs(categories) do
+            if own[slot] and not own[slot][category] then
+                local name
+                for _, has in pairs(learnt) do name = name or (has[slot] and has[slot][category]) end
+                local filter = Appearances.CategoryFilter(category)
+                own[slot][category] = name or (filter and subclassName(filter)) or tostring(category)
+            end
+        end
+    end
+end
+
 -- Ends a pass: the filter back as it was found, then done gets learnt, or
 -- false (the fixed split) when nothing answered.
 local function finish(run, learnt)
     if pass == run then pass = nil end
     restore(run)
+    if learnt and run.answered then addOwnClass(learnt) end
     run.done(learnt and run.answered and learnt or false)
 end
 
@@ -226,7 +265,8 @@ end
 -- is set to each class in turn, one class per frame, and GetCategoryInfo
 -- read on the frame after the set, then put back as it was found. done(learnt)
 -- is called once, at the end of the pass, with { [classID] = { [slot key] =
--- { [category] = name } } }, or false for the fixed split: when a call
+-- { [category] = name } } } (the character's own class with what it can
+-- learn, addOwnClass), or false for the fixed split: when a call
 -- raises, a set raises or is refused, nothing answers, or a call is missing.
 -- Not called after StopWeaponTypes. onError(text) is called when the filter
 -- could not be put back. The filter is put back on every way out.

@@ -10,9 +10,10 @@ local WINDOW_TITLE = "Appearance Browser"
 
 -- Sizes and positions of layout B (appearance-browser-layout-flows v2), in
 -- panel units from the panel's top left. Tiles and gaps are Collections' own.
--- The grid is always 8 columns of 3 rows; it never moves.
+-- The grid is always 8 columns of 3 rows; it never moves. It sits 2 higher
+-- than layout B put it, at y 78 (testpass F3, F4).
 local COLUMNS, ROWS = 8, 3
-local GRID_X, GRID_Y = 28, 80
+local GRID_X, GRID_Y = 28, 78
 local TILE_WIDTH, TILE_HEIGHT = 78, 104
 local GAP_X, GAP_Y = 16, 24
 local MODEL_HEIGHT, STRIP_HEIGHT = 82, 20
@@ -43,10 +44,12 @@ local STRIP_CHECKED = { 0.12, 0.12, 0.12, 1 }
 local LIGHT = { point = { -1, 1, -1 }, ambient = 1.05, diffuse = 0 }
 -- The flyout (layout B, section 6): 232 wide, as high as its parts (head
 -- 66, which holds the summary line right of the model, rows of 40, foot 28)
--- and at most 300; four rows show, more scroll. It opens right of its tile in columns 1 to 5, left in 6 to 8, 8
--- from the tile, its top 28 above the tile's, moved up so it never passes
--- the grid's bottom (y 440). The notch stays on the tile's middle.
-local FLY_WIDTH, FLY_MAX, FLY_GAP, FLY_ABOVE, GRID_BOTTOM, RIGHT_COLUMNS = 232, 300, 8, 28, 440, 5
+-- and at most 300; four rows show, more scroll. It opens left of its tile
+-- when it fits inside the panel there, else right (testpass F7), 8 from the
+-- tile, its top 28 above the tile's, moved up so it never passes the grid's
+-- bottom. The notch stays on the tile's middle.
+local FLY_WIDTH, FLY_MAX, FLY_GAP, FLY_ABOVE = 232, 300, 8, 28
+local GRID_BOTTOM = GRID_Y + ROWS * TILE_HEIGHT + (ROWS - 1) * GAP_Y
 local FLY_HEAD, FLY_TEXT, FLY_ROW, FLY_NOTE, FLY_FOOT, FLY_ROWS = 66, 30, 40, 14, 28, 4
 local FLY_INSIDE = FLY_WIDTH - 20
 -- The head's texts start right of the model (x 62) and stop before the close mark.
@@ -98,10 +101,11 @@ local PROGRESS_COLOR = { 1, 0.82, 0, 1 }
 -- Blizzard_CollectionTemplates.xml:200).
 local ARROW_HIGHLIGHT = "Interface\\Buttons\\UI-Common-MouseHilight"
 -- The panel's background: one Collections inset under the grid, the status
--- line and paging, from y 74 to the bottom (visual pass, board 2, decision
+-- line and paging, from y 66 to the bottom (visual pass, board 2, decision
 -- 1A), CollectionsBackgroundTemplate (Blizzard_SharedXML/Mainline/
--- SharedCollectionTemplates.xml:56-202) without its corner ornaments.
-local INSET_Y = 74
+-- SharedCollectionTemplates.xml:56-202) without its corner ornaments. Its
+-- edge is 12 above the tiles (testpass F3).
+local INSET_Y = 66
 local INSET_CORNERS = { "BGCornerTopLeft", "BGCornerTopRight", "BGCornerBottomLeft", "BGCornerBottomRight" }
 -- Parts of a line 6 apart.
 local TOOLS_GAP = 6
@@ -145,13 +149,15 @@ local SLOT_ART, SLOT_SELECTED, SLOT_HIGHLIGHT = "transmog-nav-slot-%s", "transmo
 -- Search at x 642, y 9, 108 x 20; the funnel at x 757, y 4, 30 square, with
 -- the world map's filter art (Blizzard_WorldMap/Mainline/
 -- Blizzard_WorldMapTemplates.xml:7, 41) and the auction house's reset mark
--- (Blizzard_SharedXML/Mainline/SharedUIPanelTemplates.xml:867-871), 23
--- square, centred on its top right corner 3 in, as the auction house's
--- Filter button carries it (ClearFiltersButton, Blizzard_AuctionHouseUI/
--- Shared/Blizzard_AuctionHouseSearchBar.xml:21-25), while a choice differs
--- from the start (layout B, 1.3).
+-- (Blizzard_SharedXML/Mainline/SharedUIPanelTemplates.xml:867-871), as the
+-- auction house's Filter button carries it (ClearFiltersButton,
+-- Blizzard_AuctionHouseUI/Shared/Blizzard_AuctionHouseSearchBar.xml:21-25),
+-- while a choice differs from the start (layout B, 1.3). The funnel is 4
+-- from the panel's right edge, so the mark is 18 square and sits in the
+-- funnel's top right corner, its right edge on the funnel's and its top 2
+-- below the panel's, clear of the frame's border (testpass F5).
 local SEARCH_X, SEARCH_Y = 642, 9
-local FUNNEL_X, FUNNEL_Y, FUNNEL_SIZE, MARK_SIZE, MARK_X = 757, 4, 30, 23, -3
+local FUNNEL_X, FUNNEL_Y, FUNNEL_SIZE, MARK_SIZE, MARK_X, MARK_Y = 757, 4, 30, 18, -9, -7
 -- The funnel's art is the owner's choice, the settings button of
 -- Blizzard_DamageMeter/DamageMeterSettingsDropdownButton.xml:5-8, with its
 -- hover and pressed forms; without it the world map's filter art.
@@ -163,20 +169,27 @@ local FUNNEL_OPEN = "common-dropdown-a-button-settings-open-shadowless"
 local FUNNEL_FALLBACK, RESET_ATLAS = "Map-Filter-Button", "auctionhouse-ui-filter-redx"
 local FUNNEL_TEXT, FUNNEL_TIP = "Filter", "Filter: show and class"
 local CLASS_TEXT, RESET_TEXT = "Class: %s", "Reset filters"
--- The band under the header: the count at x 28, y 50, and the weapon type
+-- The band under the header: the count at x 28, y 42, and the weapon type
 -- dropdown (Collections' width, Blizzard_Wardrobe.lua:568) at x 598, its
--- vertical centre at y 58 (a 22 high box from y 47, whatever height the
--- dropdown template gives it).
-local COUNT_X, COUNT_Y = 28, 50
-local WEAPON_X, WEAPON_CENTRE, WEAPON_WIDTH, WEAPON_HEIGHT = 598, 58, 157, 22
+-- vertical centre at y 50 (a 22 high box from y 39, whatever height the
+-- dropdown template gives it); 8 higher than layout B put it, so the grid
+-- has room under it (testpass F3). The count has no width of its own.
+local COUNT_X, COUNT_Y = 28, 42
+local WEAPON_X, WEAPON_CENTRE, WEAPON_WIDTH, WEAPON_HEIGHT = 598, 50, 157, 22
 -- The bottom row sits between the grid's edges: the status button, when
 -- there is one, at the grid's left edge, always at one place and one width,
 -- the status text after it; paging ends at the grid's right edge, with the
--- wheel mark before the page text (layout B, section 8).
-local STATUS_Y, STATUS_BUTTON = 445, 110
-local PAGING_Y, WHEEL_WIDTH, WHEEL_HEIGHT = 445, 16, 16
+-- wheel mark before the page text (layout B, section 8). The row is 4 higher
+-- than layout B put it, so the status button and the arrows, on one centre
+-- line, end 6 and 5 above the panel's bottom (testpass F4). The page text is
+-- one line, as wide as its widest form for the page count and PAGE_ROOM more.
+local STATUS_Y, STATUS_BUTTON = 441, 110
+local PAGING_Y, WHEEL_WIDTH, WHEEL_HEIGHT, PAGE_ROOM = 441, 16, 16, 4
 local NEXT_TIP, PREVIOUS_TIP = "Next page", "Previous page"
 local WHEEL_TIP, ARROW_HINT = "Mouse wheel over the tiles turns pages", "Mouse wheel over the tiles turns pages too."
+-- The tile tooltip's minimum width (FrameAPITooltipDocumentation.lua:94-104):
+-- the longest sentence, the bought one, takes at most three lines at it.
+local TIP_MIN_WIDTH = 220
 
 local State = TC.BrowserState
 
@@ -731,12 +744,13 @@ local function newFlyout(panel, level, overTile)
     local again = newButton(frame, "", 90, 20, State.CheckAgain)
     again:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -8, 5)
 
-    -- Beside the tile at index of the grid, right in columns 1 to 5, left in
-    -- 6 to 8, never past the grid's bottom; the notch on the tile's middle.
+    -- Beside the tile at index of the grid, left when it fits inside the
+    -- panel there, else right, never past the grid's bottom; the notch on
+    -- the tile's middle.
     local function place(index, height)
-        local column, _, x, y = cell(index)
+        local _, _, x, y = cell(index)
         x, y = GRID_X + x, GRID_Y + y
-        local right = column < RIGHT_COLUMNS
+        local right = x - FLY_GAP - FLY_WIDTH < 0
         local top = math.max(GRID_Y, math.min(y - FLY_ABOVE, GRID_BOTTOM - height))
         frame:ClearAllPoints()
         frame:SetPoint("TOPLEFT", panel, "TOPLEFT", right and x + TILE_WIDTH + FLY_GAP or x - FLY_GAP - FLY_WIDTH, -top)
@@ -1251,7 +1265,7 @@ local function newFunnel(panel)
     end)
     local mark = CreateFrame("Button", nil, funnel)
     mark:SetSize(MARK_SIZE, MARK_SIZE)
-    mark:SetPoint("CENTER", funnel, "TOPRIGHT", MARK_X, 0)
+    mark:SetPoint("CENTER", funnel, "TOPRIGHT", MARK_X, MARK_Y)
     local markArt = mark:CreateTexture(nil, "ARTWORK")
     markArt:SetAllPoints()
     if hasAtlas(RESET_ATLAS) then markArt:SetAtlas(RESET_ATLAS) else markArt:SetColorTexture(0.7, 0.1, 0.05, 1) end
@@ -1366,6 +1380,7 @@ local function buildBrowser(panel)
     -- hides the tooltip only while it is ours: another frame may own it by now
     local function hideTip()
         if tipShown and GameTooltip and not (GameTooltip.GetOwner and GameTooltip:GetOwner() ~= tipOwner) then
+            if GameTooltip.SetMinimumWidth then GameTooltip:SetMinimumWidth(0, false) end
             GameTooltip:Hide()
         end
         tipShown = false
@@ -1374,6 +1389,11 @@ local function buildBrowser(panel)
         if not GameTooltip or tile.isOpen then return hideTip() end
         tipOwner = tile.button
         GameTooltip:SetOwner(tile.button, "ANCHOR_RIGHT")
+        -- the sentences wrap (AddLine's wrap, as GameTooltip_AddColoredLine
+        -- passes it, SharedTooltipTemplates.lua:166-172) at no less than the
+        -- minimum width, given back on hiding as the achievement frame does
+        -- (Blizzard_AchievementUI.lua:638-640, 798-799)
+        if GameTooltip.SetMinimumWidth then GameTooltip:SetMinimumWidth(TIP_MIN_WIDTH) end
         for _, line in ipairs(State.TileTooltip(tile.appearance)) do
             local c = line.color or TEXT_WHITE
             if line.right then
@@ -1381,7 +1401,7 @@ local function buildBrowser(panel)
                 GameTooltip:AddDoubleLine(line.text, line.money and moneyMarkup(line.money) or line.right,
                     c[1], c[2], c[3], r[1], r[2], r[3])
             else
-                GameTooltip:AddLine(line.text, c[1], c[2], c[3])
+                GameTooltip:AddLine(line.text, c[1], c[2], c[3], line.wrap)
             end
         end
         GameTooltip:Show()
@@ -1446,6 +1466,8 @@ local function buildBrowser(panel)
     local pageText = paging:CreateFontString(nil, "OVERLAY", GameFontWhite and "GameFontWhite" or "GameFontHighlight")
     pageText:SetPoint("RIGHT", previous, "LEFT", -TOOLS_GAP - 5, 0)
     pageText:SetJustifyH("RIGHT")
+    -- one line, never wrapped (SimpleFontStringAPIDocumentation.lua:720)
+    pageText:SetWordWrap(false)
     -- the widest form of the page text seen, whose width the text keeps
     local widestPage
     -- the wheel mark, the addon's art, with its own tooltip
@@ -1454,6 +1476,13 @@ local function buildBrowser(panel)
     wheelMark:SetPoint("RIGHT", pageText, "LEFT", -7, 0)
     wheelMark:EnableMouse(true)
     tooltip(wheelMark, WHEEL_TIP)
+    -- the page text shows the wheel mark's tooltip too (testpass F2): a font
+    -- string takes no pointer, so a frame over it does
+    local pageHover = CreateFrame("Frame", nil, paging)
+    pageHover:SetPoint("TOPLEFT", pageText, "TOPLEFT", 0, 0)
+    pageHover:SetPoint("BOTTOMRIGHT", pageText, "BOTTOMRIGHT", 0, 0)
+    pageHover:EnableMouse(true)
+    tooltip(pageHover, WHEEL_TIP)
     local wheelArt = wheelMark:CreateTexture(nil, "ARTWORK")
     wheelArt:SetAllPoints()
     wheelArt:SetTexture(MEDIA .. "wheel")
@@ -1551,7 +1580,7 @@ local function buildBrowser(panel)
             widestPage = view.pageTextWidest
             pageText:SetText(widestPage)
             local width = pageText:GetStringWidth()
-            if width and width > 0 then pageText:SetWidth(width) end
+            if width and width > 0 then pageText:SetWidth(math.ceil(width) + PAGE_ROOM) end
         end
         pageText:SetText(view.pageText)
         previous:SetEnabled(view.previousEnabled)

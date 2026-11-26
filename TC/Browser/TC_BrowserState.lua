@@ -15,6 +15,7 @@ local ALL_WEAPON_TYPES = "All weapon types"
 local TILE_COPPER_BELOW = 100 * 10000
 local STATUS_ALL = "Click an appearance to check the auction house."
 local STATUS_FAILED = "The auction house did not answer."
+local NO_APPEARANCES = "No appearances found for this slot."
 local SCAN_AGAIN = "Scan again"
 local PRICE_SLOT = "Price this slot"
 -- In All the Filter starts on "Not collected" (spec Assumption A1).
@@ -37,7 +38,9 @@ local view, listener
 -- Refresh. No list (nil) means it could not be read yet; it is never an empty
 -- slot. learnt: every class's weapon types (LearnWeaponTypes), learnt once
 -- per visit on the first weapon slot, nil before; learning: that pass runs.
-local list, lists, collected, learnt, learning
+-- noneFound: the slots whose last list read answered no appearance or raised
+-- (testpass F9); they are read again on the next Refresh.
+local list, lists, collected, learnt, learning, noneFound
 -- True while a Refresh runs: changing Collections' class filter to learn
 -- the weapon types is inferred to fire TRANSMOG_COLLECTION_UPDATED at once,
 -- which would start a Refresh inside this one.
@@ -106,7 +109,7 @@ view = startView()
 local function clearResults()
     kept, latest, checking, waitingChecks, active, known, reading, variantNames, noAnswer = {}, {}, {}, {}, nil, {}, {}, {}, {}
     scans, scan, failures, stoppedScan = {}, nil, {}, nil
-    list, lists, collected, learnt, learning = nil, {}, {}, nil, false
+    list, lists, collected, learnt, learning, noneFound = nil, {}, {}, nil, false, {}
     keyState, keyOf, keyQueue, keyTicking = {}, {}, {}, false
     keyGen = keyGen + 1
 end
@@ -510,9 +513,13 @@ local function read()
     end
     if not list then
         local result = TC.Appearances.List(slot, nil, weaponTypesOf(slot))
-        if type(result) ~= "table" or not result[1] then return changed end
+        if type(result) ~= "table" or not result[1] then
+            changed = changed or not noneFound[slot]
+            noneFound[slot] = true
+            return changed
+        end
         list, changed = result, true
-        lists[slot] = result
+        lists[slot], noneFound[slot] = result, nil
     end
     for _, appearance in ipairs(list) do
         local isCollected = TC.Appearances.IsCollected(appearance)
@@ -526,7 +533,9 @@ end
 
 -- Called when the panel is shown and when the collection changes; collected
 -- is never kept beyond that. An error from the appearance source is no list
--- yet and does not reach the player. Answers whether the listener was told.
+-- yet: the slot says no appearances were found, and the error is kept in
+-- lastError and reported once. Answers whether the listener was told.
+local readFailed = false
 function State.Refresh()
     if refreshing then return false end
     refreshing = true
@@ -534,8 +543,12 @@ function State.Refresh()
     refreshing = false
     if not ok then
         State.lastError = tostring(changed)
-        changed = list ~= nil
-        list, lists[view.slot] = nil, nil
+        if not readFailed then
+            readFailed = true
+            report(changed)
+        end
+        changed = list ~= nil or not noneFound[view.slot]
+        list, lists[view.slot], noneFound[view.slot] = nil, nil, true
     end
     changed = settle() or changed
     if clampPage() or changed then
@@ -1437,18 +1450,20 @@ local function headLines(lines, source, c, maxDrops)
     local text = rule("item", itemLine, source.itemID)
     if text then lines[#lines + 1] = { text = text, color = c.grey } end
     text = rule("bind", bindLine, source.itemID)
-    if text then lines[#lines + 1] = { text = text, color = c.white } end
+    if text then lines[#lines + 1] = { text = text, color = c.white, wrap = true } end
     text = rule("set", setLine, source.sourceID)
     if text then lines[#lines + 1] = { text = text, color = c.normal } end
     text = rule("holiday", holidayLine, source.sourceID)
     if text then lines[#lines + 1] = { text = text, color = c.lightBlue } end
     text = nonEmpty(source.useError)
-    if text then lines[#lines + 1] = { text = text, color = c.red } end
+    if text then lines[#lines + 1] = { text = text, color = c.red, wrap = true } end
 end
 
 -- The tile tooltip's lines for an appearance, each { text, color, right,
--- rightColor, money }: the head item's name and the lines about it
--- (headLines); then, with more than one item, "Other items using this
+-- rightColor, money, wrap }; wrap marks the sentences (how it binds, the
+-- pending sentence, the use error, the hints), which wrap so the short lines
+-- set the tooltip's width (testpass F6). They are the head item's name and
+-- the lines about it (headLines); then, with more than one item, "Other items using this
 -- appearance:" and every item with its short source or "Collected",
 -- collected ones included (Collections hides the list for a collected
 -- appearance, CollectionsUtil.lua:330), cut with "and N more items" so the
@@ -1477,7 +1492,7 @@ function State.TileTooltip(appearance)
     -- bought or in the bags, not collected (TC-39): how to collect it
     local waiting = pending[appearance.id]
     if waiting and not collected[appearance.id] then
-        tail[1], tail[2] = { text = " " }, { text = PENDING_TEXT[waiting], color = c.white }
+        tail[1], tail[2] = { text = " " }, { text = PENDING_TEXT[waiting], color = c.white, wrap = true }
     end
     local result = view.mode == "For sale" and forSaleResult(appearance.id) or tileResult(appearance.id)
     if result then
@@ -1490,14 +1505,14 @@ function State.TileTooltip(appearance)
             tail[#tail + 1] = { text = LOWEST_PRICE, color = c.normal, right = "Not for sale", rightColor = c.grey }
         end
         if result.at then tail[#tail + 1] = { text = age(result.at, result.scanned and "Scanned" or "Checked"), color = c.grey } end
-        tail[#tail + 1] = { text = first and SEE_ITEMS or DETAILS_HINT, color = c.grey }
+        tail[#tail + 1] = { text = first and SEE_ITEMS or DETAILS_HINT, color = c.grey, wrap = true }
     elseif checking[appearance.id] then
         -- reading: no hint
     elseif noAnswer[appearance.id] then
-        tail[#tail + 1] = { text = NO_ANSWER_TEXT, color = c.grey }
-        tail[#tail + 1] = { text = CHECK_AGAIN_HINT, color = c.grey }
+        tail[#tail + 1] = { text = NO_ANSWER_TEXT, color = c.grey, wrap = true }
+        tail[#tail + 1] = { text = CHECK_AGAIN_HINT, color = c.grey, wrap = true }
     else
-        tail[#tail + 1] = { text = CHECK_HINT, color = c.grey }
+        tail[#tail + 1] = { text = CHECK_HINT, color = c.grey, wrap = true }
     end
     -- the rows the list has room for, its blank line and header aside
     local room = MAX_LINES - #lines - #tail - 2
@@ -1517,8 +1532,7 @@ function State.TileTooltip(appearance)
             local source = sources[i]
             local name, colour = sourceName(source, c)
             local text, textColour = sourceText(source, c)
-            local mark = clientText(i == head and "WARDROBE_TOOLTIP_CYCLE_ARROW_ICON" or "WARDROBE_TOOLTIP_CYCLE_SPACER_ICON", "")
-            lines[#lines + 1] = { text = mark .. name, color = colour, right = text, rightColor = textColour }
+            lines[#lines + 1] = { text = name, color = colour, right = text, rightColor = textColour }
         end
         if shown < #sources then lines[#lines + 1] = { text = ("and %d more items"):format(#sources - shown), color = c.grey } end
     end
@@ -1526,8 +1540,8 @@ function State.TileTooltip(appearance)
     return lines
 end
 
--- What to draw now. Without a list there are no tiles and nothing that says
--- the slot has no appearance.
+-- What to draw now. Without a list there are no tiles; once a read of the
+-- slot answered nothing or raised, the empty state says so.
 function State.View()
     local forSaleMode = view.mode == "For sale"
     local filter = forSaleMode and "Not collected" or view.filter
@@ -1540,7 +1554,10 @@ function State.View()
         pageText = "", paging = false, previousEnabled = false, nextEnabled = false,
     }
     statusLine(answer)
-    if not list then return answer end
+    if not list then
+        if noneFound[view.slot] then answer.empty = { title = "No appearances", text = NO_APPEARANCES } end
+        return answer
+    end
     local appearances = shown()
     local pages = pageCount(#appearances)
     local size = PAGE_SIZE

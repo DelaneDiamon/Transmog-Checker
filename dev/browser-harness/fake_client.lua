@@ -87,9 +87,12 @@ end
 --                   category answers, with the fixed split's flags, when the
 --                   class filter's class has it in the measured table;
 --                   armor categories answer nothing)
+--   classCategories { [classID] = { category, ... } } replaces the measured
+--                   weapon categories of those classes
 --   lagByOne        a GetCategoryInfo read in the frame of a SetClassFilter
 --                   write answers for the class set one write earlier
 --   classFilter     Collections' class filter at the start (default the player's)
+--   playerClass     UnitClass's { name, class file, id } (default the Warlock)
 --   uncollectedShown, collectedShown, search: Collections' other settings
 --   listRaises      GetCategoryAppearances raises an error (true: always;
 --                   a number: on that many first reads)
@@ -457,7 +460,7 @@ function Fake.new(opts)
     -- a list of { enum, member } the client lacks
     for _, missing in ipairs(opts.noEnumMembers or {}) do Enum[missing[1]][missing[2]] = nil end
     -- A tooltip keeps its owner, anchor and lines: SetOwner starts it
-    -- over; each line is { text, r, g, b, right, rr, rg, rb }. GetItem
+    -- over; each line is { text, r, g, b, wrap, right, rr, rg, rb }. GetItem
     -- answers the item c.hoverItem showed in it.
     local function newTooltip(name)
         local t = c.newWidget("GameTooltip", name)
@@ -478,7 +481,7 @@ function Fake.new(opts)
             }
         end
         function t:AddLine(text, r, g, b, wrap)
-            self.lines[#self.lines + 1] = { text = text, r = r, g = g, b = b }
+            self.lines[#self.lines + 1] = { text = text, r = r, g = g, b = b, wrap = wrap }
             defineLeft(self, #self.lines)
             self.calls.AddLine = { text, r, g, b, wrap }
         end
@@ -822,6 +825,7 @@ function Fake.new(opts)
     end
     function UnitClass(unit)
         misuse(unit == "player", "UnitClass unit")
+        if opts.playerClass then return unpack(opts.playerClass) end
         return "Warlock", "WARLOCK", PLAYER_CLASS
     end
     -- The nine classes in the client's order, as the probe read them on
@@ -1424,7 +1428,12 @@ function Fake.new(opts)
             if opts.noCategoryInfo then return nil end
             local info = opts.categoryInfo and opts.categoryInfo[category]
             if info then return unpack(info) end
-            local has = WEAPON_CATEGORIES_OF_CLASS[lagged or col.classFilter]
+            local class = lagged or col.classFilter
+            local has = WEAPON_CATEGORIES_OF_CLASS[class]
+            if opts.classCategories and opts.classCategories[class] then
+                has = {}
+                for _, n in ipairs(opts.classCategories[class]) do has[n] = true end
+            end
             if opts.categoryInfo or not (has and has[category]) then return nil end
             local slotID = SLOT_OF_CATEGORY[category]
             return CATEGORY_NAMES[category], true, false, slotID == 16, slotID == 17, slotID == 18

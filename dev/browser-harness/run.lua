@@ -1166,40 +1166,61 @@ test("Filter Not collected with every appearance collected gives that empty stat
     equal(v.empty.button, "Show all", "empty button")
 end)
 
--- No tiles and nothing that claims the slot is empty.
-local function unavailable(v, what)
+-- No tiles and the empty state of a slot whose list read answered nothing
+-- or raised (testpass F9), distinct from the Filter's and the search's.
+local NO_APPEARANCES = "No appearances found for this slot."
+local function noneFound(v, what)
     equal(#v.tiles, 0, what .. ": tiles")
     equal(v.count, "", what .. ": count text")
-    equal(v.empty, nil, what .. ": empty state")
+    check(v.empty, what .. ": an empty state")
+    equal(v.empty.text, NO_APPEARANCES, what .. ": empty text")
+    check(v.empty.title ~= "No matches", what .. ": not the Filter's or the search's title")
+    equal(v.empty.button, nil, what .. ": no button")
     equal(v.paging, false, what .. ": paging")
     equal(v.pageText, "", what .. ": page text")
     equal(chosenSlot(v), "Head", what .. ": slot title")
 end
 
-test("a list that could not be read is shown as unavailable, not as an empty slot", function()
+test("testpass F9: a list read that answers nothing or raises says no appearances were found, without an error", function()
     for _, opts in ipairs({ { noTransmog = true }, { noList = true }, { listNil = true }, { appearances = {} },
         { listRaises = true } }) do
-        bootState(opts)
+        local c = bootState(opts)
         local ok, err = pcall(TC.BrowserState.Refresh)
         check(ok, "no error from Refresh with " .. next(opts) .. ": " .. tostring(err))
-        unavailable(TC.BrowserState.View(), next(opts))
+        noneFound(TC.BrowserState.View(), next(opts))
+        if not opts.listRaises then
+            equal(#c.errors, 0, next(opts) .. ": nothing reported")
+            equal(TC.BrowserState.lastError, nil, next(opts) .. ": no error recorded")
+        end
     end
+end)
+
+test("testpass F9: a list read that raises is recorded in lastError and reported once", function()
+    local c = bootState({ listRaises = true })
+    TC.BrowserState.Refresh()
+    TC.BrowserState.Refresh()
+    check(TC.BrowserState.lastError and TC.BrowserState.lastError:find("GetCategoryAppearances failed", 1, true),
+        "the error recorded, got " .. tostring(TC.BrowserState.lastError))
+    equal(#c.errors, 1, "reported once over two reads")
+    check(c.errors[1]:find("GetCategoryAppearances failed", 1, true), "the read's error reported, got " .. tostring(c.errors[1]))
+    noneFound(TC.BrowserState.View(), "after two failed reads")
 end)
 
 test("an empty first read is not kept: the next Refresh reads again", function()
     local c = bootState({ listEmpty = 1 })
     TC.BrowserState.Refresh()
-    unavailable(TC.BrowserState.View(), "after the empty read")
+    noneFound(TC.BrowserState.View(), "after the empty read")
     TC.BrowserState.Refresh()
     equal(c.listCalls, 2, "list reads")
     equal(TC.BrowserState.View().count, "365 of 370 appearances", "count after the second read")
+    equal(TC.BrowserState.View().empty, nil, "no empty state once read")
 end)
 
 test("a raised error from the appearance source is no list yet, and a later read fills it", function()
     local c = bootState({ listRaises = 1 })
     local ok, err = pcall(TC.BrowserState.Refresh)
     check(ok, "no error from Refresh: " .. tostring(err))
-    unavailable(TC.BrowserState.View(), "after the failed read")
+    noneFound(TC.BrowserState.View(), "after the failed read")
     TC.BrowserState.Refresh()
     equal(c.listCalls, 2, "list reads")
     equal(#TC.BrowserState.View().tiles, 24, "tiles after the later read")
@@ -2859,14 +2880,17 @@ test("slots: weapon types come from GetCategoryInfo flags when it answers, else 
     -- the pass runs one class a frame
     c.advance(1)
     check(learnt, "learnt")
-    for _, class in ipairs({ 9, 1, "every class" }) do
+    -- the character's own class (a Warlock) also gets what it can learn
+    -- (testpass F10), named by the client's subclass names; no flag fits
+    -- Ranged, so only the Warlock's wand is there
+    local own = "14=Subclass 2.7,16=Daggers,23=Subclass 2.10"
+    for _, case in ipairs({ { 9, own, "12=Subclass 2.19" }, { 1, "16=Daggers", "" }, { "every class", own, "12=Subclass 2.19" } }) do
+        local class = case[1]
         local classID, who = tonumber(class), " for " .. class
         equal(text(TC.Appearances.WeaponTypes("offhand", learnt, classID)), "16=Daggers,18=Shields,19=Held In Off-hand",
             "off hand by flags" .. who)
-        equal(text(TC.Appearances.WeaponTypes("mainhand", learnt, classID)), "16=Daggers", "main hand by flags" .. who)
-        -- no flag fits Ranged: the fixed split (F4)
-        equal(text(TC.Appearances.WeaponTypes("ranged", learnt, classID)),
-            "12=Subclass 2.19,25=Subclass 2.2,26=Subclass 2.3,27=Subclass 2.18", "ranged by flags" .. who)
+        equal(text(TC.Appearances.WeaponTypes("mainhand", learnt, classID)), case[2], "main hand by flags" .. who)
+        equal(text(TC.Appearances.WeaponTypes("ranged", learnt, classID)), case[3], "ranged by flags" .. who)
     end
     equal(text(TC.Appearances.WeaponTypes("head", learnt)), "", "an armor slot has none")
     c = boot({ noCategoryInfo = true })
@@ -2951,6 +2975,29 @@ local function slotState(opts)
     return c
 end
 local function state() return TC.BrowserState end
+
+test("testpass F9: a slot whose read raises or answers nothing leaves the other slots as they were", function()
+    for _, way in ipairs({ "raises", "answers nothing" }) do
+        local opts = { appearances = manySlots() }
+        if way == "raises" then
+            opts.listRaisesFor = CAT.Head
+        else
+            for i = #opts.appearances, 1, -1 do
+                if (opts.appearances[i].category or CAT.Head) == CAT.Head then table.remove(opts.appearances, i) end
+            end
+        end
+        local c = slotState(opts)
+        noneFound(state().View(), way .. ": head")
+        state().SelectSlot("legs")
+        local v = state().View()
+        equal(v.empty, nil, way .. ": legs has no empty state")
+        equal(#v.tiles, 24, way .. ": legs' tiles")
+        equal(v.count, "30 appearances", way .. ": legs' count")
+        state().SelectSlot("head")
+        noneFound(state().View(), way .. ": head again")
+        equal(#c.errors, way == "raises" and 1 or 0, way .. ": errors reported")
+    end
+end)
 
 test("state: the slot row answers the 14 slots in their groups with the chosen one; the start slot is Head", function()
     slotState()
@@ -3364,17 +3411,50 @@ end)
 
 test("F4: flags that fit nothing for a weapon slot leave it the fixed split", function()
     local info = { [16] = { "Daggers", true, false, true, false, false } }
-    local c = boot({ categoryInfo = info })
+    -- a Paladin, whose class learns no ranged weapon (testpass F10)
+    local paladin = { "Paladin", "PALADIN", 2 }
+    local c = boot({ categoryInfo = info, playerClass = paladin })
     local learnt = learnWeapons(c)
     local out = {}
     for i, t in ipairs(TC.Appearances.WeaponTypes("ranged", learnt, 9)) do out[i] = t.category end
     equal(table.concat(out, ","), "12,25,26,27", "ranged by the fixed split")
     equal(#TC.Appearances.WeaponTypes("mainhand", learnt, 9), 1, "main hand still by flags")
-    c = slotState({ categoryInfo = info })
+    c = slotState({ categoryInfo = info, playerClass = paladin })
     state().SelectSlot("ranged")
     c.advance(1)
     equal(#state().View().weaponTypes.entries, 5, "All weapon types and the four ranged types")
     equal(state().View().count, "5 appearances", "bows are listed")
+    equal(#c.misuse, 0, "misuse of the fake: " .. table.concat(c.misuse, "; "))
+end)
+
+test("testpass F10: the character's own class's weapon types include what it can learn; other classes keep the client's answer", function()
+    local function cats(slot, learnt, class)
+        local out = {}
+        for i, t in ipairs(TC.Appearances.WeaponTypes(slot, learnt, class)) do out[i] = t.category end
+        return table.concat(out, ",")
+    end
+    -- the measured answers (a Warlock): its own leaves out one-handed swords
+    local c = boot()
+    local learnt = learnWeapons(c)
+    equal(cats("mainhand", learnt, 9), "14,16,23", "the Warlock's main hand with one-handed swords")
+    equal(TC.Appearances.WeaponTypes("mainhand", learnt, 9)[1].name, "One-Handed Swords", "named as the client names it")
+    equal(cats("offhand", learnt, 9) .. " | " .. cats("ranged", learnt, 9), "19 | 12", "the Warlock's off hand and ranged")
+    -- every class answers daggers alone: only the own class is widened
+    local daggers = {}
+    for _, id in ipairs(Fake.CLASS_IDS) do daggers[id] = { 16 } end
+    c = boot({ classCategories = daggers })
+    learnt = learnWeapons(c)
+    equal(cats("mainhand", learnt, 9), "14,16,23", "the Warlock widened by its table")
+    equal(cats("mainhand", learnt, 8), "16", "the Mage keeps the client's answer")
+    equal(cats("mainhand", learnt, 1), "16", "the Warrior keeps the client's answer")
+    equal(cats("mainhand", learnt, nil), "14,16,23", "All classes: the union follows")
+    equal(cats("ranged", learnt, 9) .. " | " .. cats("ranged", learnt, 8), "12 | ", "ranged: the Warlock's wand, none for the Mage")
+    check(TC.Appearances.WeaponTypes("mainhand", learnt, 9)[1].name, "a widened type no class answered has a name")
+    -- a failed pass still falls back to the fixed split
+    c = boot({ setClassRaises = true })
+    learnt = learnWeapons(c)
+    equal(learnt, false, "a failed pass")
+    equal(cats("mainhand", learnt, 9), "13,14,15,16,17,20,21,22,23,24", "the fixed split")
     equal(#c.misuse, 0, "misuse of the fake: " .. table.concat(c.misuse, "; "))
 end)
 
@@ -5765,8 +5845,8 @@ test("styles: with Blizzard's menu templates the weapon type and the funnel are 
     end
     equal(weapon.width, 157, "weapon type width")
     equal(weapon.height, 25, "weapon type height is the template's own, not forced")
-    equal(weapon.points[1].point .. " " .. weapon.points[1].x .. "," .. weapon.points[1].y, "LEFT 598,-58",
-        "weapon type at x 598, centred on y 58")
+    equal(weapon.points[1].point .. " " .. weapon.points[1].x .. "," .. weapon.points[1].y, "LEFT 598,-50",
+        "weapon type at x 598, centred on y 50")
     equal(funnel.width .. "x" .. funnel.height, "30x30", "funnel size")
     equal(funnel.points[1].x .. "," .. funnel.points[1].y, "757,-4", "funnel at x 757, y 4")
     equal(funnel.Text.text, "", "the funnel has no text with its art")
@@ -6218,10 +6298,10 @@ local function hover(w)
     return GameTooltip.text, GameTooltip.calls.AddLine and GameTooltip.calls.AddLine[1]
 end
 local function texturePath(w) return w.calls.SetTexture and w.calls.SetTexture[1] end
--- The funnel's reset mark: the 14 square button on it.
+-- The funnel's reset mark: the 18 square button on it.
 local function markOf(c)
     local funnel = funnelOf(c)
-    return find(c, function(w) return w.kind == "Button" and w.parent == funnel and w.width == 23 end)
+    return find(c, function(w) return w.kind == "Button" and w.parent == funnel and w.width == 18 end)
 end
 local function arrowsOf(c)
     return findAll(c, function(w) return w.kind == "Button" and w.width == 22 and w.height == 22 and w.calls.SetNormalTexture end)
@@ -6257,7 +6337,7 @@ test("B whole: the header row: two glyph toggles at x 60 and 94, the slot row, S
     check(all.ring and visible(all.ring) and not visible(sale.ring), "the catalogue ringed at the start")
     equal(point(slotButtons(c)[1]), "136,-4", "the slot row at x 136, y 4")
     local count = countShown(c)
-    equal(point(count), "28,-50", "the count at x 28, y 50")
+    equal(point(count), "28,-42", "the count at x 28, y 42")
     equal(point(funnelOf(c)), "757,-4", "the funnel at x 757, y 4")
     -- nothing of the old header
     equal(#findAll(c, function(w) return w.template == "PanelTopTabButtonTemplate" end), 0, "no text tabs")
@@ -6303,8 +6383,15 @@ test("B whole: the funnel's mark shows while a choice differs; the mark and Rese
     local funnel = funnelOf(c)
     check(mark and not visible(mark), "no mark at the start")
     check(not funnel.highlightLocked, "the funnel's highlight is not held at the start")
-    equal(mark.width .. "x" .. mark.height, "23x23", "the mark's size, the auction house's ClearFiltersButton")
-    equal(mark.points[1].relativePoint .. " " .. point(mark), "TOPRIGHT -3,0", "the mark on the funnel's top right corner")
+    equal(mark.width .. "x" .. mark.height, "18x18", "the mark's size")
+    equal(mark.points[1].relativePoint .. " " .. point(mark), "TOPRIGHT -9,-7", "the mark in the funnel's top right corner")
+    -- testpass F5: the whole mark inside the funnel's right edge and below the
+    -- panel's top, clear of the frame's border (the panel is 791 wide)
+    local fp = funnel.points[1]
+    local cx, cy = fp.x + funnel.width + mark.points[1].x, -fp.y - mark.points[1].y
+    check(cx + mark.width / 2 <= fp.x + funnel.width, "the mark's right edge inside the funnel's")
+    check(cx + mark.width / 2 <= 791 - 4, "the mark at least 4 inside the panel's right edge")
+    check(cy - mark.height / 2 >= 2, "the mark's top at least 2 below the panel's top")
     local names, choose = classEntries(c)
     choose(names[1])
     check(visible(mark), "the mark after All classes")
@@ -6337,25 +6424,32 @@ test("B whole: 24 tiles that never move; the flyout is built on the first tile c
     local before = {}
     for i, f in ipairs(frames) do before[i] = point(f) end
     equal(before[9], "0,-128", "tile 9 starts the second row")
-    equal(point(frames[1]:GetParent()), "28,-80", "the grid at x 28, y 80")
+    equal(point(frames[1]:GetParent()), "28,-78", "the grid at x 28, y 78")
     equal(itemListFrame(c), nil, "no flyout before the first tile click")
     local function open(i) return openTile(c, frames[i]) end
     local fly = open(1)
     check(fly and visible(fly), "the flyout after the first click")
     equal(fly.width, 232, "232 wide")
-    equal(point(fly), "114,-80", "column 1: right of the tile, 8 from it, held at the grid top")
+    equal(point(fly), "114,-78", "column 1: no room on the left, so right of the tile, 8 from it, held at the grid top")
     local notch = findAll(c, function(w) return w.kind == "Texture" and w.parent == fly and w.calls.SetRotation end)
     equal(#notch, 2, "the notch's two parts")
     equal(notch[1].points[1].relativePoint .. "," .. notch[1].points[1].y, "TOPLEFT,-52", "the notch on the left edge at the tile's middle")
-    open(5)
-    equal(point(fly), "490,-80", "column 5: still right")
-    open(6)
-    equal(point(fly), "258,-80", "column 6: left of the tile")
+    -- testpass F7: left of the tile whenever it fits inside the panel
+    open(3)
+    equal(point(fly), "302,-78", "column 3: 24 short of room on the left, so right")
+    open(4)
+    equal(point(fly), "70,-78", "column 4: left of the tile")
     equal(notch[1].points[1].relativePoint, "TOPRIGHT", "the notch on the right edge")
+    open(5)
+    equal(point(fly), "164,-78", "column 5: left")
+    open(6)
+    equal(point(fly), "258,-78", "column 6: left of the tile")
     open(8)
-    equal(point(fly), "446,-80", "column 8: left")
+    equal(point(fly), "446,-78", "column 8: left")
     open(9)
-    equal(point(fly), "114,-180", "row 2: 28 above the tile")
+    equal(point(fly), "114,-178", "row 2, column 1: right, 28 above the tile")
+    open(12)
+    equal(point(fly), "70,-178", "row 2, column 4: left")
     local after = {}
     for i, f in ipairs(frames) do after[i] = point(f) end
     equal(table.concat(after, " "), table.concat(before, " "), "no tile moved")
@@ -6368,11 +6462,11 @@ test("B whole: a top-row flyout stays below the band of the count text and the w
     local c, tabs = visitTwice()
     tabs[1].scripts.OnClick(tabs[1])
     local frames = tileFrames(c)
-    local countText = find(c, function(w) return w.kind == "FontString" and w.points[1] and w.points[1].x == 28 and w.points[1].y == -50 end)
-    local weaponBox = find(c, function(w) return w.points[1] and w.points[1].x == 598 and w.points[1].y == -58 end)
+    local countText = find(c, function(w) return w.kind == "FontString" and w.points[1] and w.points[1].x == 28 and w.points[1].y == -42 end)
+    local weaponBox = find(c, function(w) return w.points[1] and w.points[1].x == 598 and w.points[1].y == -50 end)
     check(countText and weaponBox, "the count text and the weapon type dropdown found")
     -- the count text has no width of its own: it may run to the flyout's far edge
-    local bands = { { 28, 50, 1000, 50 + 14 }, { 598, 58 - (weaponBox and weaponBox.height or 22) / 2, 598 + 157, 58 + (weaponBox and weaponBox.height or 22) / 2 } }
+    local bands = { { 28, 42, 1000, 42 + 14 }, { 598, 50 - (weaponBox and weaponBox.height or 22) / 2, 598 + 157, 50 + (weaponBox and weaponBox.height or 22) / 2 } }
     for _, i in ipairs({ 1, 4, 8 }) do
         local fly = openTile(c, frames[i])
         local fx, fy = fly.points[1].x, -fly.points[1].y
@@ -6380,7 +6474,8 @@ test("B whole: a top-row flyout stays below the band of the count text and the w
         for n, b in ipairs(bands) do
             check(not (fx < b[3] and b[1] < fx2 and fy < b[4] and b[2] < fy2), "column " .. i .. ": the flyout misses band " .. n)
         end
-        check(fy >= 80, "column " .. i .. ": the top is not above the grid")
+        check(fy >= 78, "column " .. i .. ": the top is not above the grid")
+        check(fx >= 0 and fx2 <= 791, "column " .. i .. ": inside the panel")
         c.click(frames[i].button)
     end
     noErrors(c, "top row")
@@ -6417,9 +6512,9 @@ test("B whole: a bottom-row flyout is moved up to end at the grid's bottom; four
     c.click(frames[24].button)
     local fly = itemListFrame(c)
     equal(fly.height, 66 + 4 * 40 + 28, "head, four rows, foot")
-    equal(point(fly), "446,-" .. (440 - fly.height), "column 8, row 3: left, its bottom at y 440")
+    equal(point(fly), "446,-" .. (438 - fly.height), "column 8, row 3: left, its bottom at y 438")
     local notch = findAll(c, function(w) return w.kind == "Texture" and w.parent == fly and w.calls.SetRotation end)
-    equal(notch[1].points[1].y, -(336 + 52 - (440 - fly.height)), "the notch still on the tile's middle")
+    equal(notch[1].points[1].y, -(334 + 52 - (438 - fly.height)), "the notch still on the tile's middle")
     local function inFlyout(text)
         return find(c, function(w) return w.text == text and under(w, fly) and visible(w) end) ~= nil
     end
@@ -6540,6 +6635,16 @@ test("B whole: the wheel mark before the page text with its tooltip, the arrows'
     equal(#arts, 1, "the art alone")
     equal(texturePath(arts[1]), "Interface\\AddOns\\TransmogChecker\\Media\\wheel", "the wheel art")
     equal((hover(mark)), "Mouse wheel over the tiles turns pages", "the mark's tooltip")
+    -- testpass F2: the page text itself shows the same tooltip
+    local over = find(c, function(w) return w.kind == "Frame" and w.scripts.OnEnter and w ~= mark and w.points[1]
+        and w.points[1].relativeTo == pageText end)
+    check(over, "a hover frame over the page text")
+    equal(over.points[1].point .. " " .. over.points[2].point, "TOPLEFT BOTTOMRIGHT", "covering the page text")
+    equal(over.points[2].relativeTo, pageText, "both corners on the page text")
+    equal((hover(over)), "Mouse wheel over the tiles turns pages", "the page text's tooltip")
+    check(over.calls.EnableMouse and over.calls.EnableMouse[1] == true, "it takes the pointer")
+    over.scripts.OnLeave(over)
+    check(not GameTooltip:IsShown(), "the tooltip hides when the pointer leaves")
     local arrows = arrowsOf(c)
     local title, line = hover(arrows[2])
     equal(title .. " / " .. line, "Next page / Mouse wheel over the tiles turns pages too.", "the next arrow's tooltip")
@@ -6567,9 +6672,9 @@ test("B whole: Price this slot at x 28 starts one scan from the catalogue; every
     local offer = find(c, function(w) return w.kind == "Button" and w.text == "Price this slot" and visible(w) end)
     check(offer, "Price this slot shown")
     equal(offer.width .. "x" .. offer.height, "110x20", "its size")
-    equal(point(offer), "28,-447", "at the grid's left edge on the status line")
+    equal(point(offer), "28,-443", "at the grid's left edge on the status line")
     local hint = find(c, function(w) return w.text == "Click an appearance to check the auction house." end)
-    equal(point(hint), "144,-445", "the hint after it")
+    equal(point(hint), "144,-441", "the hint after it")
     check(c.click(offer), "clicked")
     c.advance(30)
     equal(#c.ah.sends, 1, "one scan")
@@ -6581,7 +6686,7 @@ test("B whole: Price this slot at x 28 starts one scan from the catalogue; every
     end
     check(not textShown(c, "Price this slot"), "not offered once scanned")
     check(textShown(c, "Scanned just now") and textShown(c, "Scan again"), "the age and Scan again")
-    equal(point(find(c, function(w) return w.text == "Scanned just now" end)), "144,-445", "the age after the button")
+    equal(point(find(c, function(w) return w.text == "Scanned just now" end)), "144,-441", "the age after the button")
     noErrors(c, "price this slot")
 end)
 
@@ -6601,7 +6706,7 @@ test("C1: the status row: its button on the grid's left edge, in one place and o
     local offer = buttonNamed("Price this slot")
     local where, width = point(offer), offer.width
     equal(offer.points[1].x, gridX, "before a scan: the button at the grid's left edge")
-    equal(point(countShown(c)), gridX .. ",-50", "the count text at the same x")
+    equal(point(countShown(c)), gridX .. ",-42", "the count text at the same x")
     equal(textAt("Click an appearance to check the auction house."), gridX + width + 6, "before a scan: the text after the button")
     c.click(offer)
     c.advance(30)
@@ -6621,6 +6726,37 @@ test("C1: the status row: its button on the grid's left edge, in one place and o
     noErrors(c, "status row")
 end)
 
+test("testpass F3, F4: room between the band and the grid; the bottom row clear of the panel's bottom; the count as wide as its text", function()
+    local PANEL_HEIGHT = 469
+    local c, tabs = visitTwice({ appearances = manySlots() })
+    tabs[1].scripts.OnClick(tabs[1])
+    local grid = tileFrames(c)[1]:GetParent()
+    local gridTop = -grid.points[1].y
+    local gridBottom = gridTop + grid.height
+    equal(grid.height, 3 * 104 + 2 * 24, "the grid keeps its three rows")
+    -- the band (the count and the weapon type dropdown) under the header row (y 4 to 35)
+    local weapon, count = selector(c, 157), countShown(c)
+    local bandTop, bandBottom = -weapon.points[1].y - weapon.height / 2, -weapon.points[1].y + weapon.height / 2
+    check(bandTop >= 35 and -count.points[1].y >= 35, "the band below the header row")
+    check(gridTop - bandBottom >= 15, "at least 15 between the band and the grid, got " .. (gridTop - bandBottom))
+    local inset = find(c, function(w) return w.template == "CollectionsBackgroundTemplate" end)
+    local insetTop = -inset.points[1].y
+    check(insetTop >= bandBottom and gridTop - insetTop >= 12, "the inset's edge between the band and the grid, 12 above the tiles")
+    equal(count.width, nil, "the count has no width of its own: it is as wide as its text")
+    -- the bottom row: the scan control and the arrows on one line, both clear of the bottom
+    local offer = find(c, function(w) return w.kind == "Button" and w.text == "Price this slot" end)
+    local paging = find(c, function(w) return w.kind == "Frame" and w.width == 200 and w.height == 24 end)
+    local offerTop, pagingTop = -offer.points[1].y, -paging.points[1].y
+    local arrow = arrowsOf(c)[2]
+    equal(offerTop + offer.height / 2, pagingTop + paging.height / 2, "the scan control and the arrows on one centre line")
+    check(PANEL_HEIGHT - (offerTop + offer.height) >= 6, "the scan control at least 6 above the panel's bottom")
+    check(PANEL_HEIGHT - (pagingTop + paging.height / 2 + arrow.height / 2) >= 5, "the arrows at least 5 above the panel's bottom")
+    local hint = find(c, function(w) return w.text == "Click an appearance to check the auction house." end)
+    check(-hint.points[1].y >= gridBottom and -hint.points[1].y + hint.height <= PANEL_HEIGHT - 4, "the hint inside the bottom row")
+    check(offerTop >= gridBottom + 3, "the bottom row under the grid")
+    noErrors(c, "layout")
+end)
+
 test("C2: the page text keeps the width of its widest form, so turning from page 9 to page 10 of 11 moves nothing", function()
     local c, tabs = visitTwice({ appearances = Fake.appearances(250, 0) })
     tabs[1].scripts.OnClick(tabs[1])
@@ -6634,7 +6770,10 @@ test("C2: the page text keeps the width of its widest form, so turning from page
     local width, textPoint, markPoint = text.width, point(text), point(mark)
     local probe = text:GetParent():CreateFontString()
     probe:SetText("Page 11 / 11")
-    equal(width, probe:GetStringWidth(), "the width is that of the widest form")
+    -- testpass F1: one line, never wrapped, with room to spare for a digit
+    -- wider than the widest form's
+    equal(width, probe:GetStringWidth() + 4, "the width is that of the widest form and 4 more")
+    equal(text.calls.SetWordWrap and text.calls.SetWordWrap[1], false, "the page text never wraps")
     TC.BrowserState.NextPage()
     check(textShown(c, "Page 10 / 11"), "page 10")
     equal(text.width, width, "the page text's width is unchanged")
@@ -6906,8 +7045,8 @@ test("TC-35 tooltip: items in Collections' order with sources, collected marked,
     enter(frames[1])
     equal(tipText(c), table.concat({ "Felcloth Boots", "Cloth, Feet",
         "Binds when equipped: equip it or sell it to a vendor to collect.", " ", "Other items using this appearance:",
-        "> Felcloth Boots | Collected", "  Abjurer's Boots | World Drop", "  Retrieving item information | Quest",
-        "Click to check the auction house." }, "\n"), "the lines")
+        "Felcloth Boots | Collected", "Abjurer's Boots | World Drop", "Retrieving item information | Quest",
+        "Click to check the auction house." }, "\n"), "the lines: no cycle arrow and no spacer, nothing cycles")
     local lines = GameTooltip.lines
     equal(lines[6].rg .. "," .. lines[6].rb, "1,0.1", "Collected in green")
     equal(lines[8].r .. "," .. lines[8].g, "1,0.125", "the loading name in red")
@@ -6917,7 +7056,7 @@ test("TC-35 tooltip: items in Collections' order with sources, collected marked,
     enter(frames[1])
     equal(requested(c, 503), 1, "a second hover asks nothing again")
     c.advance(1.1)
-    check(tipText(c):find("  Cowl of Dusk | Quest", 1, true), "the name fills in once loaded, got\n" .. tipText(c))
+    check(tipText(c):find("\nCowl of Dusk | Quest", 1, true), "the name fills in once loaded, got\n" .. tipText(c))
     -- one item: no list, its source under its name
     leave(frames[1])
     enter(frames[2])
@@ -6964,7 +7103,7 @@ test("TC-36 art: with the templates and atlases each element is built from them"
     local inset = find(c, function(w) return w.template == "CollectionsBackgroundTemplate" end)
     check(inset, "the Collections inset")
     equal(point(inset) .. " " .. inset.points[2].point .. " " .. inset.points[2].x .. "," .. inset.points[2].y,
-        "0,-74 BOTTOMRIGHT 0,0", "from y 74 to the panel's bottom")
+        "0,-66 BOTTOMRIGHT 0,0", "from y 66 to the panel's bottom")
     for _, key in ipairs({ "BGCornerTopLeft", "BGCornerTopRight", "BGCornerBottomLeft", "BGCornerBottomRight" }) do
         check(not inset[key].shown, key .. " hidden")
     end
@@ -6972,7 +7111,7 @@ test("TC-36 art: with the templates and atlases each element is built from them"
     check(f.edge and f.openGlow and f.hoverGlow, "the tile's atlases")
     local scan = find(c, function(w) return w.kind == "Button" and w.text == "Price this slot" end)
     equal(scan.glyph and scan.glyph.calls.SetAtlas[1], "UI-RefreshButton", "the scan glyph")
-    equal(scan.width .. "x" .. scan.height .. " " .. point(scan), "110x20 28,-447", "the scan button keeps its size and place")
+    equal(scan.width .. "x" .. scan.height .. " " .. point(scan), "110x20 28,-443", "the scan button keeps its size and place")
     equal(scan.glyph.width, 14, "the glyph 14 square")
     equal(point(scan:GetFontString()), "8,0", "the text moved right by half the glyph")
     local fly = openTile(c, f)
@@ -7013,7 +7152,7 @@ test("TC-36 art: each template and atlas refused in turn: the fallback, nothing 
         { noAtlases = { ["UI-RefreshButton"] = true }, see = function(c)
             local scan = find(c, function(w) return w.kind == "Button" and w.text == "Price this slot" end)
             check(scan.glyph == nil, "text only")
-            equal(scan.width .. " " .. point(scan), "110 28,-447", "same size and place") end },
+            equal(scan.width .. " " .. point(scan), "110 28,-443", "same size and place") end },
         { noAtlases = { ["lootroll-icon-transmog"] = true }, fileIDs = {}, see = function(c)
             equal(texturePath(modeTab(c, "All").Icon), "Interface\\AddOns\\TransmogChecker\\Media\\catalogue", "catalogue: Media")
             equal(texturePath(modeTab(c, "For sale").Icon), "Interface\\AddOns\\TransmogChecker\\Media\\sweep",
@@ -7086,8 +7225,8 @@ test("chosen art: the toggles' glyphs, the mark at the funnel's top right, and t
     check(visible(sale.ring) and not visible(all.ring), "the ring follows")
     equal(all.Icon.calls.SetAlpha[1], 0.45, "the other glyph dimmed")
     local mark = markOf(c)
-    equal(mark.points[1].point .. " " .. mark.points[1].relativePoint .. " " .. point(mark), "CENTER TOPRIGHT -3,0",
-        "the mark on the top right corner")
+    equal(mark.points[1].point .. " " .. mark.points[1].relativePoint .. " " .. point(mark), "CENTER TOPRIGHT -9,-7",
+        "the mark in the top right corner")
     local d, t = visitTwice({ appearances = manySlots(), noAtlases = true, fileIDs = { ["Interface\\Icons\\INV_Misc_Coin_01"] = 1 } })
     t[1].scripts.OnClick(t[1])
     equal(texturePath(modeTab(d, "All").Icon), "Interface\\AddOns\\TransmogChecker\\Media\\catalogue", "no atlas: Media")
@@ -7368,7 +7507,8 @@ end)
 ---------------------------------------------------------------- Weapon types by class (TC-38)
 
 -- The weapon types /tcprobe weapons measured on 2026-11-25, by class, and
--- their union for All classes.
+-- their union for All classes; the character's own class, the Warlock, also
+-- with what it can learn (testpass F10: the client answered 16,23 for it).
 local MEASURED = {
     [1] = { mainhand = "13,14,15,16,17,20,21,22,23,24", offhand = "18,19", ranged = "25,26,27" },
     [2] = { mainhand = "13,14,15,20,21,22,24", offhand = "18,19", ranged = "" },
@@ -7377,7 +7517,7 @@ local MEASURED = {
     [5] = { mainhand = "15,16,23", offhand = "19", ranged = "12" },
     [7] = { mainhand = "13,15,16,17,20,22,23", offhand = "18,19", ranged = "" },
     [8] = { mainhand = "14,16,23", offhand = "19", ranged = "12" },
-    [9] = { mainhand = "16,23", offhand = "19", ranged = "12" },
+    [9] = { mainhand = "14,16,23", offhand = "19", ranged = "12" },
     [11] = { mainhand = "15,16,17,22,23,24", offhand = "19", ranged = "" },
     all = { mainhand = "13,14,15,16,17,20,21,22,23,24", offhand = "18,19", ranged = "12,25,26,27" },
 }
@@ -7469,7 +7609,7 @@ test("TC-38: a Warlock under All classes gets ten main hand types and can choose
     state().SetFilter("All")
     state().SelectSlot("mainhand")
     c.advance(1)
-    equal(offered(), "16,23", "the Warlock's own at the start")
+    equal(offered(), "14,16,23", "the Warlock's own at the start, with the swords it can learn")
     state().SelectClass("all")
     local v = state().View()
     equal(#v.weaponTypes.entries, 11, "All weapon types and ten types")
@@ -7511,14 +7651,16 @@ test("TC-38: a chosen weapon type stays when the new class has it and goes back 
     state().SelectClass(1)
     equal(chosen(), "One-Handed Swords", "kept for a Warrior")
     state().SelectClass(9)
-    equal(chosen(), "All weapon types", "reset for a Warlock")
-    equal(state().View().count, "4 appearances", "the Warlock's daggers and staves")
+    equal(chosen(), "One-Handed Swords", "kept for the own Warlock, who can learn them")
+    state().SelectClass(5)
+    equal(chosen(), "All weapon types", "reset for a Priest")
+    equal(state().View().count, "6 appearances", "the Priest's maces, daggers and staves")
     state().SelectWeaponType(CAT.Dagger)
     state().SelectClass(8)
     equal(chosen(), "Daggers", "kept for a Mage")
     state().SelectClass(2)
     equal(chosen(), "All weapon types", "reset for a Paladin")
-    state().SelectWeaponType(CAT.OneHSword)
+    state().SelectWeaponType(CAT.Polearm)
     state().ResetFilters()
     equal(state().View().classes.text, "Warlock", "Reset filters: the own class")
     equal(chosen(), "All weapon types", "reset by Reset filters for a Warlock")
@@ -7550,8 +7692,10 @@ test("TC-38: after a scan a class change narrows without a new scan; a sword for
     c.advance(10)
     equal(#c.ah.sends, 1, "one scan")
     equal(tileIDs(state().View()), "1401,1602", "a sword and a dagger for sale under All classes")
+    state().SelectClass(5)
+    equal(tileIDs(state().View()), "1602", "the dagger only for a Priest")
     state().SelectClass(9)
-    equal(tileIDs(state().View()), "1602", "the dagger only for a Warlock")
+    equal(tileIDs(state().View()), "1401,1602", "both for the own Warlock, who can learn swords")
     state().SelectClass(1)
     equal(tileIDs(state().View()), "1401,1602", "both for a Warrior")
     state().SelectClass("all")
@@ -7725,7 +7869,7 @@ test("TC-38: leaving the tab, closing the window or opening Collections during a
     c.advance(1)
     equal(c.collections.classFilter, 8, "the filter after coming back")
     equal(offered(), MEASURED[9].mainhand, "the Warlock's main hand after coming back")
-    check(textShown(c, "4 appearances"), "the count drawn")
+    check(textShown(c, "6 appearances"), "the count drawn: swords, daggers and staves")
 end)
 
 test("TC-38 whole: opening the tab, the three weapon slots and every class entry send nothing to the auction house", function()
@@ -7964,7 +8108,7 @@ test("TC-35b limit: never more than 20 lines; the list is cut with and N more it
     local c, t = moreTip({ items = items }, types)
     equal(#t, 20, "20 lines")
     equal(t[19], "and 12 more items", "the cut")
-    equal(t[18], "  Item 13 | World Drop", "the last row shown")
+    equal(t[18], "Item 13 | World Drop", "the last row shown")
     equal(t[20], "Click to check the auction house.", "the hint stays last")
     -- exactly as many as fit: no cut
     types, items = {}, {}
@@ -8129,6 +8273,45 @@ test("TC-35b robustness: a rule that raises leaves only its line out, reported o
     equal(#c.errors, 0, "nothing reported")
     equal(#c.misuse, 0, "no misuse")
     sentNothing(c, "hovering")
+end)
+
+-- Each line's text, with " [wrap]" after a line drawn with wrap on.
+local function wrapText(lines)
+    local out = {}
+    for i, line in ipairs(lines) do out[i] = line.text .. (line.wrap and " [wrap]" or "") end
+    return table.concat(out, "\n")
+end
+
+test("testpass F6: the tile tooltip's sentences wrap and its short lines set its width, at least 220", function()
+    local useError = "Engineering (175) required to use this appearance."
+    local c = moreTip({ items = { [601] = item({ bindType = 2 }) }, useErrors = { [21] = useError } }, { 4 })
+    equal(wrapText(TC.BrowserState.TileTooltip(tileFrames(c)[1].appearance)), table.concat({ "Thing", "World Drop",
+        "Cloth, Feet", "Binds when equipped: equip it or sell it to a vendor to collect. [wrap]", useError .. " [wrap]",
+        "Click to check the auction house. [wrap]" }, "\n"), "the state: the sentences wrap, the name and the source do not")
+    equal(wrapText(GameTooltip.lines), table.concat({ "Thing", "World Drop", "Cloth, Feet",
+        "Binds when equipped: equip it or sell it to a vendor to collect. [wrap]", useError .. " [wrap]",
+        "Click to check the auction house. [wrap]" }, "\n"), "the panel draws them so")
+    equal(GameTooltip.calls.SetMinimumWidth and GameTooltip.calls.SetMinimumWidth[1], 220, "the tooltip's minimum width")
+    leave(tileFrames(c)[1])
+    equal(GameTooltip.calls.SetMinimumWidth[1], 0, "the minimum width given back when the tooltip hides")
+    -- a kept price: the price and age lines set the width, the hint wraps
+    c.ah.listings = { listing("Thing", 601, 500) }
+    c.click(tileFrames(c)[1].button)
+    c.advance(10)
+    local lines = TC.BrowserState.TileTooltip(tileFrames(c)[1].appearance)
+    equal(wrapText({ unpack(lines, #lines - 2) }), "Lowest price\nChecked just now\nClick to see the items for sale. [wrap]",
+        "the price line and the age do not wrap, the hint does")
+    noErrors(c, "wrap")
+    -- the pending sentence wraps
+    bootState({ bags = { [0] = { 10101 } } })
+    TC.BrowserState.SetBags(TC.Appearances.ReadBags())
+    TC.BrowserState.Refresh()
+    lines = TC.BrowserState.TileTooltip({ id = 1010, slot = "head", category = 1 })
+    local pendingLine
+    for _, line in ipairs(lines) do
+        if line.text == "In your bags: equip it or sell it to a vendor to collect." then pendingLine = line end
+    end
+    check(pendingLine and pendingLine.wrap, "the pending sentence wraps")
 end)
 
 ---------------------------------------------------------------- Bought, not collected (TC-39)
@@ -8436,7 +8619,7 @@ test("TC-39 F1 flyout head: it follows the pending sentence's height, the rows a
     check(g.rowTop > g.sentenceBottom, "the first row (" .. g.rowTop .. ") below the sentence (" .. tostring(g.sentenceBottom) .. ")")
     equal(g.rowTop - g.sentenceBottom, 66 - 38, "the gap as with one line of Collected")
     equal(g.height, g.rowTop + 40 + 28, "the rows and the foot follow")
-    check(g.top + g.height <= 440, "it ends at or above the grid's bottom")
+    check(g.top + g.height <= 438, "it ends at or above the grid's bottom")
     -- the shorter bag sentence takes fewer lines
     c.bags[0] = { 501 }
     c.fire("BAG_UPDATE_DELAYED")
