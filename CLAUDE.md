@@ -25,4 +25,4 @@ There are no automated tests; the check happens in the game client and the resul
 
 ## Releasing
 
-Every push to `main` publishes a GitHub release with the next patch tag (`.github/workflows/release-on-push.yml`), and a GitHub webhook has CurseForge package that tag. Treat a push to `main` as a release: get the user's go-ahead first, after the in-game check has passed. There is no `.pkgmeta`, so assume everything committed ships to users.
+Every push to `main` publishes a GitHub release with the next patch tag (`.github/workflows/release-on-push.yml`), and a GitHub webhook has CurseForge package that tag. Treat a push to `main` as a release: get the user's go-ahead first, after the in-game check has passed. A `.pkgmeta` at the repo root keeps `dev/`, `CLAUDE.md` and `GLOSSARY.md` out of the CurseForge package; the GitHub release still carries GitHub's own source archive of the whole tree.

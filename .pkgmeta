@@ -1,0 +1,9 @@
+# Packaging rules for CurseForge's packager (BigWigs .pkgmeta format).
+# Keeps development-only files out of the addon that players download.
+# Dotfiles and .github/ are always excluded by the packager itself.
+package-as: TransmogChecker
+
+ignore:
+  - dev
+  - CLAUDE.md
+  - GLOSSARY.md
