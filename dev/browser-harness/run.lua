@@ -611,16 +611,15 @@ end)
 
 ---------------------------------------------------------------- Appearance source
 
-test("List gives head for the player's class in Collections' order, without hidden visuals", function()
+test("List gives head in Collections' order, without hidden visuals", function()
     local c = boot({ appearances = {
         { id = 1, uiOrder = 3, sources = { 11 }, classes = { [9] = true } },
         { id = 2, uiOrder = 1, sources = { 21 }, classes = { [9] = true } },
         { id = 3, uiOrder = 5, sources = { 31 }, collectedSource = 31, classes = { [9] = true } },
         { id = 4, uiOrder = 2, sources = { 41 }, classes = { [9] = true }, hide = true },
         { id = 5, uiOrder = 4, sources = { 51, 52 }, collectedSource = 52, classes = { [9] = true } },
-        { id = 6, uiOrder = 0, sources = { 61 }, classes = { [8] = true } },
     } })
-    local list = TC.Appearances.List("head", 9)
+    local list = TC.Appearances.List("head")
     -- without minIlvl: collected first, then uiOrder descending
     equal(ids(list), "3,5,1,2", "order")
     equal(#c.misuse, 0, "misuse of the fake: " .. table.concat(c.misuse, "; "))
@@ -633,7 +632,7 @@ test("List orders by minIlvl ascending when the client gives it, as this client'
         { id = 3, uiOrder = 5, minIlvl = 20, sources = { 31 }, classes = { [9] = true } },
         { id = 4, uiOrder = 0, minIlvl = 40, sources = { 41 }, collectedSource = 41, classes = { [9] = true } },
     } })
-    equal(ids(TC.Appearances.List("head", 9)), "4,2,3,1", "order")
+    equal(ids(TC.Appearances.List("head")), "4,2,3,1", "order")
 end)
 
 test("List keeps the client's order when CollectionWardrobeUtil is absent", function()
@@ -643,13 +642,14 @@ test("List keeps the client's order when CollectionWardrobeUtil is absent", func
         { id = 3, uiOrder = 5, sources = { 31 }, classes = { [9] = true } },
     } })
     -- the fake client gives them by id, descending
-    equal(ids(TC.Appearances.List("head", 9)), "3,2,1", "order")
+    equal(ids(TC.Appearances.List("head")), "3,2,1", "order")
 end)
 
-test("List for the player's class reads the list when Collections shows another class, and puts it back", function()
+test("List reads the list when Collections shows another class and writes no class filter (TC-38)", function()
     local c = boot({ classFilter = 8 })
-    local list = TC.Appearances.List("head", 9)
-    equal(#list, 370, "appearances for class 9")
+    local list = TC.Appearances.List("head")
+    equal(#list, 370, "appearances")
+    equal(c.setClassCalls, nil, "SetClassFilter calls")
     equal(c.collections.classFilter, 8, "class filter after List")
 end)
 
@@ -665,7 +665,7 @@ test("List leaves every Collections setting as it found it, for every starting v
                         for k, v in pairs(failure) do opts[k] = v end
                         local c = boot(opts)
                         local before = c.snapshot()
-                        pcall(TC.Appearances.List, "head", 9)
+                        pcall(TC.Appearances.List, "head")
                         sameState(before, c.snapshot(), ("start %d/%s/%s/%q, failure %s"):format(classFilter,
                             tostring(uncollected), tostring(collected), search, next(failure) or "none"))
                     end
@@ -678,7 +678,7 @@ end)
 test("List with a missing API gives an empty list and no error", function()
     for _, opts in ipairs({ { noTransmog = true }, { noList = true }, { listNil = true } }) do
         boot(opts)
-        local ok, list = pcall(TC.Appearances.List, "head", 9)
+        local ok, list = pcall(TC.Appearances.List, "head")
         check(ok, "no error with " .. next(opts) .. ": " .. tostring(list))
         equal(#list, 0, "appearances with " .. next(opts))
     end
@@ -690,7 +690,7 @@ test("an appearance is collected when any of its sources is, and not otherwise",
         { id = 2, sources = { 21, 22, 23 }, uiOrder = 2, classes = { [9] = true } },
         { id = 3, sources = {}, uiOrder = 3, classes = { [9] = true } },
     } })
-    local list = TC.Appearances.List("head", 9)
+    local list = TC.Appearances.List("head")
     local byID = {}
     for _, a in ipairs(list) do byID[a.id] = a end
     equal(TC.Appearances.IsCollected(byID[1]), true, "appearance 1 (third source collected)")
@@ -701,7 +701,7 @@ end)
 
 test("DisplaySource gives the first source after Collections' sort", function()
     boot()
-    local list = TC.Appearances.List("head", 9)
+    local list = TC.Appearances.List("head")
     local a = list[1]
     -- the fake's SortSources puts the highest source id first
     equal(TC.Appearances.DisplaySource(a), a.id * 10 + 3, "display source")
@@ -709,10 +709,10 @@ end)
 
 test("DisplaySource falls back when the sorted source list is unavailable", function()
     boot({ noSortSources = true })
-    local a = TC.Appearances.List("head", 9)[1]
+    local a = TC.Appearances.List("head")[1]
     equal(TC.Appearances.DisplaySource(a), a.id * 10 + 1, "first category source without SortSources")
     boot({ sourcesNil = true })
-    a = TC.Appearances.List("head", 9)[1]
+    a = TC.Appearances.List("head")[1]
     equal(TC.Appearances.DisplaySource(a), a.id * 10 + 1, "first of all sources without category sources")
 end)
 
@@ -1157,7 +1157,8 @@ test("a raised error from the appearance source is no list yet, and a later read
 end)
 
 test("a Refresh that arrives during a Refresh reads and notifies nothing more", function()
-    local c = bootState({ classFilter = 8 })
+    -- the weapon type pass on Main hand writes the class filter (TC-38)
+    local c = bootState({ classFilter = 8, appearances = Fake.appearances(30, 0, Fake.CATEGORIES.Dagger) })
     local inner = 0
     local set = C_TransmogCollection.SetClassFilter
     C_TransmogCollection.SetClassFilter = function(id)
@@ -1165,15 +1166,16 @@ test("a Refresh that arrives during a Refresh reads and notifies nothing more", 
         inner = inner + 1
         TC.BrowserState.Refresh()
     end
-    TC.BrowserState.Refresh()
-    equal(inner, 2, "class filter set and restored")
-    equal(c.listCalls, 1, "list reads")
-    equal(c.changes, 1, "notifications")
+    TC.BrowserState.SelectSlot("mainhand")
+    c.advance(1)
+    equal(inner, 10, "class filter set for nine classes and restored")
+    equal(c.listCalls, 10, "list reads: the ten main hand types once")
+    equal(c.changes, 2, "notifications: the slot opened empty, the pass ended")
     equal(c.collections.classFilter, 8, "class filter after Refresh")
     TC.BrowserState.Refresh()
-    c.collectedSources[1370 * 10 + 1] = true
+    c.collectedSources[1030 * 10 + 1] = true
     TC.BrowserState.Refresh()
-    equal(c.changes, 2, "a later Refresh still works")
+    equal(c.changes, 3, "a later Refresh still works")
 end)
 
 test("View answers the Filter text, the arrows and the empty-state action", function()
@@ -2381,16 +2383,24 @@ test("an empty first read does not stick: the collection event and re-entering t
     check(textShown(c, "365 of 370 appearances"), "count after re-entering the tab")
 end)
 
-test("the class filter switch firing the collection event inside List gives one read and one draw", function()
-    local c, tabs = visitTwice({ classFilter = 8, setClassFires = true })
-    local views, realView = 0, TC.BrowserState.View
-    TC.BrowserState.View = function() views = views + 1; return realView() end
+test("the class filter writes of the weapon type pass firing the collection event give one read and one draw", function()
+    local apps = Fake.appearances(370, 5)
+    for _, a in ipairs(Fake.appearances(10, 0, Fake.CATEGORIES.Dagger, 3000)) do apps[#apps + 1] = a end
+    local c, tabs = visitTwice({ classFilter = 8, setClassFires = true, appearances = apps })
     local ok, err = pcall(tabs[1].scripts.OnClick, tabs[1])
     check(ok, "no error: " .. tostring(err))
-    equal(c.setClassCalls, 2, "class filter set and restored")
-    equal(c.listCalls, 1, "list reads")
-    equal(views, 1, "draws")
-    equal(c.collections.classFilter, 8, "class filter after selecting the tab")
+    equal(c.setClassCalls, nil, "no class filter write when the tab opens")
+    local views, realView = 0, TC.BrowserState.View
+    TC.BrowserState.View = function() views = views + 1; return realView() end
+    local reads = c.listCalls
+    ok, err = pcall(TC.BrowserState.SelectSlot, "mainhand")
+    c.advance(1)
+    TC.BrowserState.View = realView
+    check(ok, "no error: " .. tostring(err))
+    equal(c.setClassCalls, 10, "class filter set for nine classes and restored")
+    equal(c.listCalls - reads, 10, "list reads: the ten main hand types once")
+    equal(views, 2, "draws: the slot opened empty, the pass ended")
+    equal(c.collections.classFilter, 8, "class filter after the weapon slot")
 end)
 
 test("the empty-state button forwards its action through the panel", function()
@@ -2755,7 +2765,7 @@ test("slots: each of the 14 slots reads the categories and the inventory slot of
     for _, opts in ipairs({ {}, { noCategoryInfo = true } }) do
         for _, key in ipairs(SLOT_KEYS) do
             local c = boot(opts)
-            TC.Appearances.List(key, 9)
+            TC.Appearances.List(key)
             equal(listedText(c), expected[key], key .. " read with " .. (next(opts) or "category info"))
         end
     end
@@ -2771,7 +2781,7 @@ test("slots: a weapon slot is the union of its categories without duplicates; a 
     -- appearance 3001 is listed under one-handed swords too
     list[#list + 1] = { id = 3001, uiOrder = 9, minIlvl = 0, sources = { 30011 }, category = CAT.OneHSword, classes = { [9] = true } }
     local c = boot({ appearances = list })
-    local all = TC.Appearances.List("mainhand", 9)
+    local all = TC.Appearances.List("mainhand")
     equal(#all, 18, "nine swords with 3001 and nine more daggers, 3001 once")
     -- swords (14) come before daggers (16), each in Collections' order (minIlvl)
     equal(ids(all):sub(1, 30), "3001,4001,4002,4003,4004,4005,", "swords first, 3001 from its first category")
@@ -2779,7 +2789,7 @@ test("slots: a weapon slot is the union of its categories without duplicates; a 
     equal(all[10].id, 3002, "then the daggers")
     equal(all[10].category, CAT.Dagger, "a dagger's category")
     c.listed = {}
-    local daggers = TC.Appearances.List("mainhand", 9, CAT.Dagger)
+    local daggers = TC.Appearances.List("mainhand", CAT.Dagger)
     equal(#daggers, 10, "daggers only")
     equal(listedText(c), "16@16", "one category read for the weapon type")
     equal(#c.misuse, 0, "misuse of the fake: " .. table.concat(c.misuse, "; "))
@@ -2789,38 +2799,52 @@ test("slots: weapon types come from GetCategoryInfo flags when it answers, else 
     -- the client also lets daggers into the off hand
     local info = { [16] = { "Daggers", true, false, true, true, false }, [18] = { "Shields", true, false, false, true, false },
         [19] = { "Held In Off-hand", true, false, false, true, false }, [5] = { "Shirt", false, false, false, false, false } }
-    boot({ categoryInfo = info })
+    local c = boot({ categoryInfo = info })
     local function text(types)
         local out = {}
         for i, t in ipairs(types) do out[i] = t.category .. "=" .. t.name end
         return table.concat(out, ",")
     end
-    equal(text(TC.Appearances.WeaponTypes("offhand")), "16=Daggers,18=Shields,19=Held In Off-hand", "off hand by flags")
-    equal(text(TC.Appearances.WeaponTypes("mainhand")), "16=Daggers", "main hand by flags")
-    -- no flag fits Ranged: the fixed split (F4)
-    equal(text(TC.Appearances.WeaponTypes("ranged")), "12=Subclass 2.19,25=Subclass 2.2,26=Subclass 2.3,27=Subclass 2.18", "ranged by flags")
-    equal(text(TC.Appearances.WeaponTypes("head")), "", "an armor slot has none")
-    boot({ noCategoryInfo = true })
+    local learnt
+    TC.Appearances.LearnWeaponTypes(function(l) learnt = l end)
+    -- the pass runs one class a frame
+    c.advance(1)
+    check(learnt, "learnt")
+    for _, class in ipairs({ 9, 1, "every class" }) do
+        local classID, who = tonumber(class), " for " .. class
+        equal(text(TC.Appearances.WeaponTypes("offhand", learnt, classID)), "16=Daggers,18=Shields,19=Held In Off-hand",
+            "off hand by flags" .. who)
+        equal(text(TC.Appearances.WeaponTypes("mainhand", learnt, classID)), "16=Daggers", "main hand by flags" .. who)
+        -- no flag fits Ranged: the fixed split (F4)
+        equal(text(TC.Appearances.WeaponTypes("ranged", learnt, classID)),
+            "12=Subclass 2.19,25=Subclass 2.2,26=Subclass 2.3,27=Subclass 2.18", "ranged by flags" .. who)
+    end
+    equal(text(TC.Appearances.WeaponTypes("head", learnt)), "", "an armor slot has none")
+    c = boot({ noCategoryInfo = true })
+    TC.Appearances.LearnWeaponTypes(function(l) learnt = l end)
+    c.advance(1)
+    equal(learnt, false, "nothing answers: the fixed split")
+    equal(c.pendingTimers(), 0, "no timer left")
     -- the client's subclass names (the fake's "Subclass class.subclass")
-    equal(text(TC.Appearances.WeaponTypes("offhand")), "18=Subclass 4.6,19=Subclass 4.0", "off hand, fixed split")
-    equal(text(TC.Appearances.WeaponTypes("ranged")), "12=Subclass 2.19,25=Subclass 2.2,26=Subclass 2.3,27=Subclass 2.18",
-        "ranged, fixed split")
+    equal(text(TC.Appearances.WeaponTypes("offhand", learnt, 9)), "18=Subclass 4.6,19=Subclass 4.0", "off hand, fixed split")
+    equal(text(TC.Appearances.WeaponTypes("ranged", learnt, 2)),
+        "12=Subclass 2.19,25=Subclass 2.2,26=Subclass 2.3,27=Subclass 2.18", "ranged, fixed split")
 end)
 
-test("slots: Collections' class filter is restored after a weapon slot's several reads, also when one raises", function()
+test("slots: a weapon slot's several reads leave Collections as found and write no class filter, also when one raises", function()
     for _, opts in ipairs({ { classFilter = 8 }, { classFilter = 8, listRaisesFor = CAT.Dagger } }) do
         local c = boot(opts)
         local before = c.snapshot()
-        local ok = pcall(TC.Appearances.List, "mainhand", 9)
+        local ok = pcall(TC.Appearances.List, "mainhand")
         equal(ok, opts.listRaisesFor == nil, "List succeeds unless a read raises")
         sameState(before, c.snapshot(), "after main hand with " .. tostring(opts.listRaisesFor))
-        equal(c.setClassCalls, 2, "one switch and one restore for ten reads")
+        equal(c.setClassCalls, nil, "SetClassFilter calls for ten reads")
     end
 end)
 
 test("slots: DisplaySource of a weapon uses the category it was listed from", function()
     local c = boot({ appearances = manySlots() })
-    local dagger = TC.Appearances.List("mainhand", 9, CAT.Dagger)[1]
+    local dagger = TC.Appearances.List("mainhand", CAT.Dagger)[1]
     equal(TC.Appearances.DisplaySource(dagger), dagger.id * 10 + 3, "display source")
     equal(TC.Appearances.IsCollected(dagger), false, "collected rule for a weapon")
     c.collectedSources[dagger.id * 10 + 2] = true
@@ -2829,9 +2853,9 @@ test("slots: DisplaySource of a weapon uses the category it was listed from", fu
 end)
 
 -- One scan of the slot; answers the query sent and the done answer.
-local function scanSlot(c, slot)
+local function scanSlot(c, slot, types)
     local r = {}
-    TC.Scan.Run(slot, function() end, function(result, reason) r.result, r.reason = result, reason end)
+    TC.Scan.Run(slot, function() end, function(result, reason) r.result, r.reason = result, reason end, types)
     c.advance(30)
     r.query = c.ah.sends[#c.ah.sends] and c.ah.sends[#c.ah.sends].query
     return r
@@ -2941,7 +2965,10 @@ test("state: the weapon type dropdown is answered on weapon slots only, starts o
     c.ah.listings = { listing("Item 30011", 30011, 500), listing("Item 40011", 40011, 300) }
     equal(state().View().weaponTypes, nil, "no dropdown on head")
     state().SetFilter("All")
+    -- every class's weapon types (TC-38)
+    state().SelectClass("all")
     state().SelectSlot("mainhand")
+    c.advance(1)
     local v = state().View()
     check(v.weaponTypes, "a dropdown on main hand")
     equal(v.weaponTypes.text, "All weapon types", "starts on All weapon types")
@@ -2976,6 +3003,7 @@ test("state: the weapon type dropdown is answered on weapon slots only, starts o
     -- a weapon type with nothing
     state().SelectMode("All")
     state().SelectWeaponType(CAT.Staff)
+    state().SelectClass(9)
     v = state().View()
     equal(v.count, "0 appearances", "count with no staff")
     equal(v.empty.title, "No matches", "empty title")
@@ -3051,6 +3079,7 @@ test("state: the head's type line of a weapon is its weapon type", function()
     local c = slotState()
     state().SetFilter("All")
     state().SelectSlot("mainhand")
+    c.advance(1)
     state().SelectWeaponType(CAT.Dagger)
     state().ClickTile(state().View().tiles[1].appearance)
     c.advance(10)
@@ -3131,7 +3160,10 @@ test("whole: weapon tiles show on their own 24 model frames, made on the first w
     local buttons = slotButtons(c)
     buttons[10].scripts.OnClick(buttons[10])
     equal(models(), 24, "still no weapon model on legs")
+    -- swords are not a Warlock's (TC-38)
+    TC.BrowserState.SelectClass("all")
     buttons[12].scripts.OnClick(buttons[12])
+    c.advance(1)
     check(visible(dropdown), "the dropdown on main hand")
     equal(dropdown.text, "All weapon types", "its text")
     equal(models(), 24 + 18, "a weapon model per weapon tile shown")
@@ -3223,9 +3255,17 @@ local function offhandFlags()
     return info
 end
 
+-- Every class's weapon types, learnt over as many frames as the pass takes.
+local function learnWeapons(c)
+    local learnt
+    TC.Appearances.LearnWeaponTypes(function(l) learnt = l end)
+    c.advance(1)
+    return learnt
+end
+
 test("F2: the off-hand scan reads every weapon type the flags list, with the fixed split unchanged", function()
     local c = boot({ categoryInfo = offhandFlags() })
-    local r = scanSlot(c, "offhand")
+    local r = scanSlot(c, "offhand", TC.Appearances.WeaponTypes("offhand", learnWeapons(c)))
     check(r.result, "a result, got " .. tostring(r.reason))
     local out = {}
     for i, e in ipairs(r.query.itemClassFilters) do out[i] = e.classID .. "." .. e.subClassID .. "." .. (e.inventoryType or "-") end
@@ -3239,7 +3279,7 @@ test("F2: the off-hand scan reads every weapon type the flags list, with the fix
     local info = offhandFlags()
     info[28] = { "Warglaives", true, false, true, true, false }
     c = boot({ categoryInfo = info })
-    r = scanSlot(c, "offhand")
+    r = scanSlot(c, "offhand", TC.Appearances.WeaponTypes("offhand", learnWeapons(c)))
     check(r.result, "a scan with an unknown category, got " .. tostring(r.reason))
     equal(#r.query.itemClassFilters, 7, "entries without the unknown category")
 end)
@@ -3249,14 +3289,16 @@ test("F3: an appearance listed in two weapon categories shows under each, once u
     list[#list + 1] = { id = 3001, uiOrder = 9, minIlvl = 0, sources = { 30011 }, category = CAT.OneHSword, classes = { [9] = true } }
     local c = slotState({ appearances = list })
     state().SetFilter("All")
+    state().SelectClass("all")
     state().SelectSlot("mainhand")
+    c.advance(1)
     local function shownIDs() return tileIDs(state().View()) end
     equal(state().View().count, "18 appearances", "all weapon types")
     for _, category in ipairs({ CAT.Dagger, CAT.OneHSword }) do
         state().SelectWeaponType(category)
-        local expected = #TC.Appearances.List("mainhand", 9, category)
+        local expected = #TC.Appearances.List("mainhand", category)
         equal(state().View().count, expected .. " appearances", "count for " .. category)
-        local want = ids(TC.Appearances.List("mainhand", 9, category))
+        local want = ids(TC.Appearances.List("mainhand", category))
         equal(table.concat((function() local t = {} for _, tile in ipairs(state().View().tiles) do t[#t + 1] = tile.appearance.id end return t end)(), ","),
             want, "tiles for " .. category)
     end
@@ -3273,24 +3315,27 @@ end)
 
 test("F4: flags that fit nothing for a weapon slot leave it the fixed split", function()
     local info = { [16] = { "Daggers", true, false, true, false, false } }
-    boot({ categoryInfo = info })
+    local c = boot({ categoryInfo = info })
+    local learnt = learnWeapons(c)
     local out = {}
-    for i, t in ipairs(TC.Appearances.WeaponTypes("ranged")) do out[i] = t.category end
+    for i, t in ipairs(TC.Appearances.WeaponTypes("ranged", learnt, 9)) do out[i] = t.category end
     equal(table.concat(out, ","), "12,25,26,27", "ranged by the fixed split")
-    equal(#TC.Appearances.WeaponTypes("mainhand"), 1, "main hand still by flags")
-    local c = slotState({ categoryInfo = info })
+    equal(#TC.Appearances.WeaponTypes("mainhand", learnt, 9), 1, "main hand still by flags")
+    c = slotState({ categoryInfo = info })
     state().SelectSlot("ranged")
+    c.advance(1)
     equal(#state().View().weaponTypes.entries, 5, "All weapon types and the four ranged types")
     equal(state().View().count, "5 appearances", "bows are listed")
     equal(#c.misuse, 0, "misuse of the fake: " .. table.concat(c.misuse, "; "))
 end)
 
-test("a weapon slot click asks GetCategoryInfo once per weapon category", function()
+test("the weapon slots ask GetCategoryInfo once per weapon category and class in a visit (TC-38)", function()
     local c = slotState()
     local before = c.categoryInfoCalls
-    state().SelectSlot("mainhand")
-    local per = c.categoryInfoCalls - before
-    equal(per, 18, "calls for Main hand (categories 12 to 29), once")
+    for _, slot in ipairs({ "mainhand", "offhand", "ranged", "head", "mainhand" }) do state().SelectSlot(slot) end
+    c.advance(1)
+    equal(c.categoryInfoCalls - before, 9 * 16, "calls for categories 12 to 27 under nine classes, once")
+    equal(c.setClassCalls, 10, "class filter writes: nine classes and the restore")
 end)
 
 ---------------------------------------------------------------- Class filter (TC-32)
@@ -3383,7 +3428,7 @@ test("class: without GetItemInfoInstant nothing is hidden", function()
     equal(shownIDs(), "101,102,103,104,105,106,107", "Priest without the call")
 end)
 
-test("class: Back, Shirt, Tabard and the weapon slots are not narrowed", function()
+test("class: Back, Shirt, Tabard and the weapon slots are not narrowed by armor type", function()
     local list, items = {}, {}
     for n, cat in ipairs({ CAT.Back, CAT.Shirt, CAT.Tabard, CAT.Dagger, CAT.Shield, CAT.Bow, CAT.Head }) do
         for _, a in ipairs(Fake.appearances(3, 0, cat, n * 1000)) do
@@ -3396,14 +3441,23 @@ test("class: Back, Shirt, Tabard and the weapon slots are not narrowed", functio
             end
         end
     end
-    bootState({ appearances = list, items = items })
+    local c = bootState({ appearances = list, items = items })
     TC.BrowserState.Refresh()
     TC.BrowserState.SetFilter("All")
     TC.BrowserState.SelectClass(9)
     equal(#TC.BrowserState.View().tiles, 0, "plate head is narrowed for a Warlock")
+    -- a weapon slot only by the class's weapon types (TC-38): a Warlock has
+    -- daggers, no shields and no bows
+    local warlock = { back = 3, shirt = 3, tabard = 3, mainhand = 3, offhand = 0, ranged = 0 }
     for _, slot in ipairs({ "back", "shirt", "tabard", "mainhand", "offhand", "ranged" }) do
         TC.BrowserState.SelectSlot(slot)
-        equal(#TC.BrowserState.View().tiles, 3, slot .. " under Warlock")
+        c.advance(1)
+        equal(#TC.BrowserState.View().tiles, warlock[slot], slot .. " under Warlock")
+    end
+    TC.BrowserState.SelectClass(1)
+    for _, slot in ipairs({ "mainhand", "offhand", "ranged" }) do
+        TC.BrowserState.SelectSlot(slot)
+        equal(#TC.BrowserState.View().tiles, 3, slot .. " under Warrior")
     end
 end)
 
@@ -3456,8 +3510,9 @@ test("class: a change keeps slot, mode, Filter and search, goes to page 1, close
 end)
 
 test("class: a change keeps the weapon type", function()
-    slotState()
+    local c = slotState()
     state().SelectSlot("mainhand")
+    c.advance(1)
     local daggers
     for _, e in ipairs(state().View().weaponTypes.entries) do if e.name == "Daggers" then daggers = e.value end end
     state().SelectWeaponType(daggers)
@@ -3815,6 +3870,7 @@ test("whole: a weapon model's camera is never moved out", function()
     local frames = tileFrames(c)
     local buttons = slotButtons(c)
     buttons[12].scripts.OnClick(buttons[12])
+    c.advance(1)
     equal(frames[1].weaponModel.calls.SetCameraPosition, nil, "the weapon model's camera untouched")
 end)
 
@@ -5717,6 +5773,7 @@ test("styles: the weapon type dropdown shows the state's text, not the chosen ra
     tabs[1].scripts.OnClick(tabs[1])
     local weapon = selector(c, 157)
     slotButtons(c)[12].scripts.OnClick(slotButtons(c)[12])
+    c.advance(1)
     check(weapon.disableSelectionText, "the text is set with OverrideText")
     equal(weapon.Text.text, "All weapon types", "the state's text")
     weapon:Hide()
@@ -5732,6 +5789,7 @@ test("styles: the weapon type menu lists the slot's types, the chosen marked; a 
     tabs[1].scripts.OnClick(tabs[1])
     local weapon = selector(c, 157)
     slotButtons(c)[12].scripts.OnClick(slotButtons(c)[12])
+    c.advance(1)
     check(visible(weapon), "shown on main hand")
     equal(weapon.Text.text, "All weapon types", "its text")
     local texts = openMenu(c, weapon)
@@ -7254,6 +7312,392 @@ test("F8 tooltip: it hides when the tab is left, the auction window closes, the 
         check(not visible(f.hoverGlow), "and the hover ends when " .. way[1])
         noErrors(c, way[1])
     end
+end)
+
+---------------------------------------------------------------- Weapon types by class (TC-38)
+
+-- The weapon types /tcprobe weapons measured on 2026-11-25, by class, and
+-- their union for All classes.
+local MEASURED = {
+    [1] = { mainhand = "13,14,15,16,17,20,21,22,23,24", offhand = "18,19", ranged = "25,26,27" },
+    [2] = { mainhand = "13,14,15,20,21,22,24", offhand = "18,19", ranged = "" },
+    [3] = { mainhand = "13,14,16,17,20,21,23,24", offhand = "19", ranged = "25,26,27" },
+    [4] = { mainhand = "13,14,15,16,17", offhand = "19", ranged = "25,26,27" },
+    [5] = { mainhand = "15,16,23", offhand = "19", ranged = "12" },
+    [7] = { mainhand = "13,15,16,17,20,22,23", offhand = "18,19", ranged = "" },
+    [8] = { mainhand = "14,16,23", offhand = "19", ranged = "12" },
+    [9] = { mainhand = "16,23", offhand = "19", ranged = "12" },
+    [11] = { mainhand = "15,16,17,22,23,24", offhand = "19", ranged = "" },
+    all = { mainhand = "13,14,15,16,17,20,21,22,23,24", offhand = "18,19", ranged = "12,25,26,27" },
+}
+local CLASS_CHOICES = { 1, 2, 3, 4, 5, 7, 8, 9, 11, "all" }
+local WEAPON_SLOTS = { "mainhand", "offhand", "ranged" }
+
+-- Two appearances in every weapon category, ids category * 100 + 1 and + 2;
+-- 1601, a dagger, is listed under one-handed swords too.
+local function everyWeapon()
+    local list = {}
+    for category = 12, 27 do
+        for i = 1, 2 do
+            local id = category * 100 + i
+            list[#list + 1] = { id = id, uiOrder = 0, minIlvl = i, sources = { id * 10 + 1 }, category = category, classes = {} }
+        end
+    end
+    list[#list + 1] = { id = 1601, uiOrder = 0, minIlvl = 0, sources = { 16011 }, category = CAT.OneHSword, classes = {} }
+    return list
+end
+-- The ids everyWeapon lists under those categories, ascending.
+local function idsOf(categories)
+    local set, out = {}, {}
+    for category in categories:gmatch("%d+") do
+        set[category * 100 + 1], set[category * 100 + 2] = true, true
+        if category == "14" then set[1601] = true end
+    end
+    for id in pairs(set) do out[#out + 1] = id end
+    table.sort(out)
+    return table.concat(out, ","), #out
+end
+-- The view's tiles' ids, ascending; each appearance must show once.
+local function tilesSorted()
+    local out, seen = {}, {}
+    for _, tile in ipairs(state().View().tiles) do
+        local id = tile.appearance.id
+        check(not seen[id], "appearance " .. id .. " shown once")
+        seen[id] = true
+        out[#out + 1] = id
+    end
+    table.sort(out)
+    return table.concat(out, ",")
+end
+-- The weapon type dropdown's categories, nil without a dropdown.
+local function offered()
+    local w = state().View().weaponTypes
+    if not w then return nil end
+    local out = {}
+    for i = 2, #w.entries do out[#out + 1] = w.entries[i].value end
+    return table.concat(out, ",")
+end
+local function entriesText(query)
+    local out = {}
+    for i, e in ipairs(query.itemClassFilters) do out[i] = e.classID .. "." .. e.subClassID .. "." .. (e.inventoryType or "-") end
+    return table.concat(out, ",")
+end
+-- Every class and All classes on the three weapon slots against MEASURED.
+local function measuredOnEverySlot(c)
+    state().SetFilter("All")
+    for _, class in ipairs(CLASS_CHOICES) do
+        state().SelectClass(class)
+        for _, slot in ipairs(WEAPON_SLOTS) do
+            state().SelectSlot(slot)
+            c.advance(1)
+            local want, who = MEASURED[class][slot], slot .. " for " .. class
+            local v = state().View()
+            if want == "" then
+                equal(v.weaponTypes, nil, who .. ": no weapon type dropdown")
+            else
+                equal(offered(), want, who .. ": weapon types")
+                equal(v.weaponTypes.entries[1].name, "All weapon types", who .. ": first entry")
+            end
+            local ids, n = idsOf(want)
+            equal(tilesSorted(), ids, who .. ": tiles")
+            equal(v.count, n .. " appearances", who .. ": count")
+        end
+    end
+end
+
+test("TC-38: each class and All classes offer the measured weapon types on each weapon slot; the list is their union, each once", function()
+    local c = slotState({ appearances = everyWeapon() })
+    measuredOnEverySlot(c)
+    equal(c.setClassCalls, 10, "one pass: nine classes and the restore")
+    equal(c.collections.classFilter, 9, "the class filter after")
+    equal(#c.misuse, 0, "misuse of the fake: " .. table.concat(c.misuse, "; "))
+end)
+
+test("TC-38: a Warlock under All classes gets ten main hand types and can choose and list One-Handed Swords", function()
+    local c = slotState({ appearances = everyWeapon() })
+    state().SetFilter("All")
+    state().SelectSlot("mainhand")
+    c.advance(1)
+    equal(offered(), "16,23", "the Warlock's own at the start")
+    state().SelectClass("all")
+    local v = state().View()
+    equal(#v.weaponTypes.entries, 11, "All weapon types and ten types")
+    local sword
+    for _, e in ipairs(v.weaponTypes.entries) do if e.name == "One-Handed Swords" then sword = e.value end end
+    equal(sword, CAT.OneHSword, "One-Handed Swords offered")
+    state().SelectWeaponType(sword)
+    v = state().View()
+    equal(v.weaponTypes.text, "One-Handed Swords", "chosen")
+    equal(tileIDs(v), "1601,1401,1402", "the swords in Collections' order")
+    equal(v.count, "3 appearances", "count")
+end)
+
+test("TC-38: Paladin on Ranged shows the slot's empty state for the class and no weapon type dropdown; nothing raises", function()
+    for _, mode in ipairs({ "All", "For sale" }) do
+        local c = slotState({ appearances = everyWeapon() })
+        state().SetFilter("All")
+        local ok, err = pcall(function()
+            state().SelectClass(2)
+            state().SelectMode(mode)
+            state().SelectSlot("ranged")
+            c.advance(10)
+        end)
+        check(ok, "no error: " .. tostring(err))
+        local v = state().View()
+        equal(v.weaponTypes, nil, mode .. ": no weapon type dropdown")
+        equal(#v.tiles, 0, mode .. ": tiles")
+        equal(v.empty and v.empty.text, "No ranged appearances for Paladin.", mode .. ": the empty state")
+    end
+end)
+
+test("TC-38: a chosen weapon type stays when the new class has it and goes back to All weapon types when not", function()
+    local c = slotState({ appearances = everyWeapon() })
+    state().SelectClass("all")
+    state().SelectSlot("mainhand")
+    c.advance(1)
+    local function chosen() return state().View().weaponTypes.text end
+    state().SelectWeaponType(CAT.OneHSword)
+    state().SelectClass(1)
+    equal(chosen(), "One-Handed Swords", "kept for a Warrior")
+    state().SelectClass(9)
+    equal(chosen(), "All weapon types", "reset for a Warlock")
+    equal(state().View().count, "4 appearances", "the Warlock's daggers and staves")
+    state().SelectWeaponType(CAT.Dagger)
+    state().SelectClass(8)
+    equal(chosen(), "Daggers", "kept for a Mage")
+    state().SelectClass(2)
+    equal(chosen(), "All weapon types", "reset for a Paladin")
+    state().SelectWeaponType(CAT.OneHSword)
+    state().ResetFilters()
+    equal(state().View().classes.text, "Warlock", "Reset filters: the own class")
+    equal(chosen(), "All weapon types", "reset by Reset filters for a Warlock")
+end)
+
+test("TC-38: a weapon slot's scan sends every class's weapon types whatever class is chosen", function()
+    local expected = { mainhand = "2.0.-,2.7.-,2.4.-,2.15.-,2.13.-,2.1.-,2.8.-,2.5.-,2.10.-,2.6.-",
+        offhand = "4.6.-,4.0.23", ranged = "2.19.-,2.2.-,2.3.-,2.18.-" }
+    local c = slotState({ appearances = everyWeapon() })
+    for _, class in ipairs(CLASS_CHOICES) do
+        state().SelectClass(class)
+        for _, slot in ipairs(WEAPON_SLOTS) do
+            state().SelectSlot(slot)
+            local sends = #c.ah.sends
+            state().ScanAgain()
+            c.advance(30)
+            equal(#c.ah.sends, sends + 1, slot .. " for " .. class .. ": one browse")
+            equal(entriesText(c.ah.sends[#c.ah.sends].query), expected[slot], slot .. " for " .. class .. ": entries")
+        end
+    end
+end)
+
+test("TC-38: after a scan a class change narrows without a new scan; a sword for sale shows under All classes", function()
+    local c = slotState({ appearances = everyWeapon() })
+    c.ah.listings = { listing("Item 14011", 14011, 300), listing("Item 16021", 16021, 500) }
+    state().SelectClass("all")
+    state().SelectSlot("mainhand")
+    state().SelectMode("For sale")
+    c.advance(10)
+    equal(#c.ah.sends, 1, "one scan")
+    equal(tileIDs(state().View()), "1401,1602", "a sword and a dagger for sale under All classes")
+    state().SelectClass(9)
+    equal(tileIDs(state().View()), "1602", "the dagger only for a Warlock")
+    state().SelectClass(1)
+    equal(tileIDs(state().View()), "1401,1602", "both for a Warrior")
+    state().SelectClass("all")
+    c.advance(10)
+    equal(#c.ah.sends, 1, "no scan for the class changes")
+end)
+
+test("TC-38: the class filter is as found after the weapon slots, never written on the tab or an armor slot, learnt once a visit", function()
+    for _, start in ipairs({ 9, 8, 1 }) do
+        local c = slotState({ appearances = everyWeapon(), classFilter = start })
+        local before = c.snapshot()
+        state().SelectSlot("legs")
+        state().Refresh()
+        equal(c.setClassCalls, nil, start .. ": no write on opening or an armor slot")
+        state().SelectSlot("mainhand")
+        c.advance(1)
+        sameState(before, c.snapshot(), start .. ": after the first weapon slot")
+        equal(c.setClassCalls, 10, start .. ": nine classes and the restore")
+        for _, slot in ipairs({ "offhand", "ranged", "head", "mainhand" }) do state().SelectSlot(slot) end
+        for _, class in ipairs({ 1, "all", 9 }) do state().SelectClass(class) end
+        state().Refresh()
+        c.advance(5)
+        equal(c.setClassCalls, 10, start .. ": one pass in the visit")
+        sameState(before, c.snapshot(), start .. ": after the visit")
+        state().Reset()
+        state().Refresh()
+        state().SelectSlot("ranged")
+        c.advance(1)
+        equal(c.setClassCalls, 20, start .. ": a new visit learns again")
+        sameState(before, c.snapshot(), start .. ": after the second visit")
+    end
+end)
+
+test("TC-38: a raise on the fourth class, a refused class or no answer gives the fixed split and leaves the filter as found", function()
+    local cases = { { "raise", { setClassRaisesFor = 4 } }, { "refused", { setClassIgnoredFor = 3 } },
+        { "no answer", { noCategoryInfo = true } } }
+    for _, case in ipairs(cases) do
+        local opts = case[2]
+        opts.appearances, opts.classFilter = everyWeapon(), 8
+        local c = slotState(opts)
+        local before = c.snapshot()
+        state().SetFilter("All")
+        state().SelectSlot("mainhand")
+        c.advance(1)
+        sameState(before, c.snapshot(), case[1] .. ", a second later")
+        -- the fixed split for every class
+        equal(offered(), MEASURED.all.mainhand, case[1] .. ": a Warlock's main hand")
+        state().SelectClass(2)
+        state().SelectSlot("ranged")
+        equal(offered(), MEASURED.all.ranged, case[1] .. ": a Paladin's ranged")
+        local calls = c.setClassCalls
+        state().SelectSlot("offhand")
+        equal(c.setClassCalls, calls, case[1] .. ": not learnt again in the visit")
+    end
+end)
+
+test("TC-38: nothing is read in the frame of a write: with reads lagging one write behind, the pass ends on the measured table", function()
+    local c = slotState({ appearances = everyWeapon(), lagByOne = true, classFilter = 8 })
+    local before = c.snapshot()
+    state().SetFilter("All")
+    state().SelectSlot("mainhand")
+    equal(state().View().count, "", "no list while the pass runs")
+    equal(c.setClassCalls, 1, "the first class set in the frame of the call")
+    c.frame()
+    equal(c.setClassCalls, 2, "one class on the next frame")
+    c.advance(1)
+    equal(c.setClassCalls, 10, "nine classes and the restore, one write a frame")
+    sameState(before, c.snapshot(), "after the pass")
+    equal(c.pendingTimers(), 0, "no timer left")
+    measuredOnEverySlot(c)
+    equal(c.setClassCalls, 10, "no further pass")
+end)
+
+test("TC-38 F2: a second pass started in the middle of a pass leaves the filter as the first call found it", function()
+    for _, start in ipairs({ 8, 1 }) do
+        local c = slotState({ appearances = everyWeapon(), classFilter = start })
+        local before = c.snapshot()
+        state().SelectSlot("mainhand")
+        for _ = 1, 4 do c.frame() end
+        check(c.collections.classFilter ~= start, start .. ": the first pass runs")
+        local first, second
+        TC.Appearances.LearnWeaponTypes(function(l) second = l end)
+        c.advance(1)
+        check(type(second) == "table", start .. ": the second pass ends on a table")
+        equal(c.collections.classFilter, start, start .. ": the filter as the first call found it")
+        sameState(before, c.snapshot(), start .. ": after both")
+        equal(c.pendingTimers(), 0, start .. ": no timer left")
+        noErrors(c, "F2 " .. start)
+    end
+end)
+
+test("TC-38 F3: a refused restore is tried once more on the next frame, then recorded", function()
+    local c = slotState({ appearances = everyWeapon(), classFilter = 8, setClassIgnoredAt = { 10 } })
+    state().SelectSlot("mainhand")
+    c.advance(1)
+    equal(c.collections.classFilter, 8, "the second try puts the filter back")
+    equal(c.setClassCalls, 11, "nine classes, the refused restore and one more try")
+    equal(state().lastError, nil, "nothing recorded")
+    equal(offered(), MEASURED[9].mainhand, "the pass still ended on the measured table")
+    noErrors(c, "one refused restore")
+    c = slotState({ appearances = everyWeapon(), classFilter = 8, setClassIgnoredAt = { 10, 11 } })
+    state().SelectSlot("mainhand")
+    c.advance(5)
+    equal(c.setClassCalls, 11, "no third try")
+    equal(c.pendingTimers(), 0, "no timer left")
+    check(tostring(state().lastError):find("class filter"), "recorded, got " .. tostring(state().lastError))
+    noErrors(c, "both restores refused")
+end)
+
+test("TC-38 F4: a raise in GetClassFilter or GetAllClassIDs before the pass gives the fixed split and no write", function()
+    for _, what in ipairs({ "getClassFilterRaises", "classListRaises" }) do
+        local opts = { appearances = everyWeapon(), classFilter = 8, getClassFilterRaises = what == "getClassFilterRaises" or nil }
+        local c = slotState(opts)
+        local before = c.snapshot()
+        state().SetFilter("All")
+        local raised = what == "getClassFilterRaises"
+        if what == "classListRaises" then
+            -- the first call after this one is the pass's; the state's own class list is called again by View
+            local real = C_SpecializationInfo.GetAllClassIDs
+            C_SpecializationInfo.GetAllClassIDs = function()
+                C_SpecializationInfo.GetAllClassIDs, raised = real, true
+                error("fake: GetAllClassIDs failed")
+            end
+        end
+        state().SelectSlot("mainhand")
+        c.advance(1)
+        check(raised, what .. ": the call raised")
+        equal(offered(), MEASURED.all.mainhand, what .. ": the fixed split")
+        local _, n = idsOf(MEASURED.all.mainhand)
+        equal(state().View().count, n .. " appearances", what .. ": the list shows")
+        equal(c.setClassCalls, nil, what .. ": no filter write")
+        sameState(before, c.snapshot(), what)
+        noErrors(c, what)
+    end
+end)
+
+test("TC-38: leaving the tab, closing the window or opening Collections during a pass over frames puts the filter back at once", function()
+    local ways = {
+        { "the tab is left", function(c, tabs) tabs[1].frameRef:Hide() end },
+        { "the auction window closes", function(c) c.closeAuction() end },
+        { "Collections opens", function() CollectionsJournal = { IsShown = function() return true end } end },
+    }
+    for _, way in ipairs(ways) do
+        local c, tabs = visitTwice({ appearances = everyWeapon(), lagByOne = true, classFilter = 8 })
+        tabs[1].scripts.OnClick(tabs[1])
+        local before = c.snapshot()
+        local b = slotButtons(c)[12]
+        b.scripts.OnClick(b)
+        c.frame()
+        c.frame()
+        check(c.collections.classFilter ~= 8, way[1] .. ": the pass runs")
+        way[2](c, tabs)
+        if way[1] == "Collections opens" then c.frame() end
+        sameState(before, c.snapshot(), way[1] .. ": at once")
+        local calls = c.setClassCalls
+        c.advance(1)
+        CollectionsJournal = nil
+        equal(c.setClassCalls, calls, way[1] .. ": nothing written after")
+        sameState(before, c.snapshot(), way[1] .. ": a second later")
+        noErrors(c, way[1])
+    end
+    -- coming back to the tab learns again and ends with the Warlock's types
+    local c, tabs = visitTwice({ appearances = everyWeapon(), lagByOne = true, classFilter = 8 })
+    tabs[1].scripts.OnClick(tabs[1])
+    local b = slotButtons(c)[12]
+    b.scripts.OnClick(b)
+    c.frame()
+    tabs[1].frameRef:Hide()
+    selectBuy()
+    tabs[1].scripts.OnClick(tabs[1])
+    c.advance(1)
+    equal(c.collections.classFilter, 8, "the filter after coming back")
+    equal(offered(), MEASURED[9].mainhand, "the Warlock's main hand after coming back")
+    check(textShown(c, "4 appearances"), "the count drawn")
+end)
+
+test("TC-38 whole: opening the tab, the three weapon slots and every class entry send nothing to the auction house", function()
+    local c, tabs = visitTwice({ appearances = everyWeapon() })
+    tabs[1].scripts.OnClick(tabs[1])
+    local entries = { "All classes", "|cffWARRIORWarrior|r", "|cffPALADINPaladin|r", "|cffHUNTERHunter|r",
+        "|cffROGUERogue|r", "|cffPRIESTPriest|r", "|cffSHAMANShaman|r", "|cffMAGEMage|r",
+        "|cffWARLOCKWarlock (this character)|r", "|cffDRUIDDruid|r" }
+    local buttons, dropdown = slotButtons(c), selector(c, 157)
+    for i, slot in ipairs(WEAPON_SLOTS) do
+        buttons[11 + i].scripts.OnClick(buttons[11 + i])
+        c.advance(1)
+        for n, entry in ipairs(entries) do
+            openMenu(c, funnelOf(c))
+            check(c.choose(entry), "the entry " .. entry)
+            local class = n == 1 and "all" or CLASS_CHOICES[n - 1]
+            equal(visible(dropdown), MEASURED[class][slot] ~= "",
+                slot .. ", " .. entry .. ": the weapon type dropdown")
+        end
+    end
+    c.advance(5)
+    sentNothing(c, "weapon slots and classes")
+    noErrors(c, "weapon slots and classes")
 end)
 
 ---------------------------------------------------------------- run

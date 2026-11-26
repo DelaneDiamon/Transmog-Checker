@@ -1,6 +1,7 @@
--- The appearance source: the game's appearances for a slot and class, in the
--- order Collections shows them, whether each is collected, the item a tile
--- shows it with, and the items that carry it. It hides the Collections category of each slot and
+-- The appearance source: the game's appearances for a slot, in the order
+-- Collections shows them, each class's weapon types, whether each is
+-- collected, the item a tile shows it with, and the items that carry it. It
+-- hides the Collections category of each slot and
 -- leaves Collections' own settings as it found them.
 TC = TC or {}
 TC.Appearances = {}
@@ -71,43 +72,181 @@ end
 -- canMainHand, canOffHand, canRanged) fits a weapon slot's inventory slot.
 local FLAG_OF_SLOT = { [16] = 4, [17] = 5, [18] = 6 }
 
--- The weapon types of a weapon slot, in Collections' order: a list of
--- { category, name }. When the client answers GetCategoryInfo for the weapon
--- categories, they are the categories from Wand upward whose flag fits the
--- slot, as Blizzard lists them (Blizzard_Wardrobe.lua:853-888); otherwise the
--- fixed split of spec 4.3 (open point 4), named by the client's subclass
--- names. GetCategoryInfo gave nothing for feet in game; what it gives for a
--- weapon category on Forever is unverified. An armor slot has none.
-function Appearances.WeaponTypes(slot)
-    local entry = TC.Slots[slot]
-    local types = {}
-    if not (entry and entry.weapon) then return types end
-    local TCol = C_TransmogCollection
-    local info = TCol and TCol.GetCategoryInfo
-    local answered = false
-    if info then
-        local meta = Enum and Enum.TransmogCollectionTypeMeta
-        local first = FIRST_TRANSMOG_COLLECTION_WEAPON_TYPE or enum("TransmogCollectionType", "Wand", 12)
-        local last = LAST_TRANSMOG_COLLECTION_WEAPON_TYPE or (meta and meta.NumValues and meta.NumValues - 1) or 29
-        local flag = FLAG_OF_SLOT[entry.slotID]
-        for category = first, last do
-            -- answer[1] is pcall's own result
-            local answer = { pcall(info, category) }
-            if answer[1] and type(answer[2]) == "string" then
-                answered = true
-                if answer[3] and answer[flag + 1] then
-                    types[#types + 1] = { category = category, name = answer[2] }
+-- Every weapon slot's categories in the slot table, ascending, each once:
+-- the categories the weapon types are learnt from.
+local function weaponCategories()
+    local list, seen = {}, {}
+    for _, entry in ipairs(TC.Slots) do
+        if entry.weapon then
+            for _, category in ipairs(entry.categories) do
+                local value = categoryValue(category)
+                if not seen[value] then
+                    seen[value] = true
+                    list[#list + 1] = value
                 end
             end
         end
     end
-    -- flags that fit nothing leave the slot the fixed split (open point 4)
-    if answered and types[1] then return types end
-    types = {}
-    for _, category in ipairs(entry.categories) do
-        types[#types + 1] = { category = categoryValue(category), name = subclassName(category[3]) or category[1] }
+    table.sort(list)
+    return list
+end
+
+-- Whether any class learnt has a weapon type in the slot.
+local function anyType(learnt, slot)
+    for _, has in pairs(learnt) do
+        if next(has[slot]) then return true end
+    end
+    return false
+end
+
+-- The weapon types of a weapon slot, in Collections' order (ascending, as
+-- Blizzard_Wardrobe.lua:884 walks them): a list of { category, name }.
+-- learnt is what LearnWeaponTypes gave: for classID, the categories that
+-- class has in the slot; for nil (every class) or a class it did not learn,
+-- those any class has. false, or a slot no class has a weapon type in: the
+-- fixed split of spec 4.3 (open point 4) for every class, named by the
+-- client's subclass names. An armor slot has none.
+function Appearances.WeaponTypes(slot, learnt, classID)
+    local entry = TC.Slots[slot]
+    local types = {}
+    if not (entry and entry.weapon) then return types end
+    if not (learnt and anyType(learnt, slot)) then
+        for _, category in ipairs(entry.categories) do
+            types[#types + 1] = { category = categoryValue(category), name = subclassName(category[3]) or category[1] }
+        end
+        return types
+    end
+    local own = classID ~= nil and learnt[classID]
+    for _, category in ipairs(weaponCategories()) do
+        local name
+        if own then
+            name = own[slot][category]
+        else
+            for _, has in pairs(learnt) do name = name or has[slot][category] end
+        end
+        if name then types[#types + 1] = { category = category, name = name } end
     end
     return types
+end
+
+-- The weapon types Collections' class filter gives now (TC-38): by weapon
+-- slot key, the weapon categories GetCategoryInfo answers with the slot's
+-- flag, each with its name; and whether it answered for any category.
+local function readTypes()
+    local info = C_TransmogCollection.GetCategoryInfo
+    local has, answered = {}, false
+    for _, entry in ipairs(TC.Slots) do
+        if entry.weapon then has[entry.key] = {} end
+    end
+    for _, category in ipairs(weaponCategories()) do
+        local answer = { info(category) }
+        if type(answer[1]) == "string" then
+            answered = true
+            for _, entry in ipairs(TC.Slots) do
+                if entry.weapon and answer[FLAG_OF_SLOT[entry.slotID]] then
+                    has[entry.key][category] = answer[1]
+                end
+            end
+        end
+    end
+    return has, answered
+end
+
+-- The one place that writes Collections' class filter: sets it to classID
+-- and answers whether the client took it (read back).
+local function setClassFilter(classID)
+    local TCol = C_TransmogCollection
+    if not (TCol and TCol.SetClassFilter and TCol.GetClassFilter) then return false end
+    return pcall(TCol.SetClassFilter, classID) and TCol.GetClassFilter() == classID
+end
+
+-- The classes the weapon types are learnt for: the client's class list
+-- (C_SpecializationInfo.GetAllClassIDs), else the character's own.
+local function classIDs()
+    local Spec = C_SpecializationInfo
+    local ids = Spec and Spec.GetAllClassIDs and Spec.GetAllClassIDs()
+    if type(ids) == "table" and ids[1] then return ids end
+    local id = UnitClass and select(3, UnitClass("player"))
+    return { id }
+end
+
+-- The pass that runs, or nil.
+local pass
+
+-- Reads what the filter gives for classID into run, after checking the
+-- filter is still on it.
+local function learnClass(run, classID)
+    if C_TransmogCollection.GetClassFilter() ~= classID then error("the class filter moved", 0) end
+    local has, answered = readTypes()
+    run.learnt[classID], run.answered = has, run.answered or answered
+end
+
+-- Puts the filter back as it was found (read back). A refused write is
+-- tried once more on the next frame, unless a new pass runs by then; when
+-- that is refused too, onError gets the text.
+local function restore(run)
+    if setClassFilter(run.was) then return end
+    local function refused()
+        if run.onError then run.onError("the class filter was not put back to " .. tostring(run.was)) end
+    end
+    if not (C_Timer and C_Timer.After) then return refused() end
+    C_Timer.After(0, function()
+        if not pass and not setClassFilter(run.was) then refused() end
+    end)
+end
+
+-- Ends a pass: the filter back as it was found, then done gets learnt, or
+-- false (the fixed split) when nothing answered.
+local function finish(run, learnt)
+    if pass == run then pass = nil end
+    restore(run)
+    run.done(learnt and run.answered and learnt or false)
+end
+
+-- One frame of the pass, as the probe read: the class set on the frame
+-- before is read, then the next class is set, so nothing is read in the
+-- frame of a write. Collections opened in the middle ends the pass on the
+-- fixed split.
+local function step(run, i)
+    if pass ~= run then return end
+    local ok = pcall(function()
+        if CollectionsJournal and CollectionsJournal.IsShown and CollectionsJournal:IsShown() then
+            error("Collections is open", 0)
+        end
+        if i > 1 then learnClass(run, run.classes[i - 1]) end
+        if run.classes[i] and not setClassFilter(run.classes[i]) then error("the class filter was refused", 0) end
+    end)
+    if not ok then return finish(run, false) end
+    if not run.classes[i] then return finish(run, run.learnt) end
+    C_Timer.After(0, function() step(run, i + 1) end)
+end
+
+-- Learns which weapon categories each class has in each weapon slot (TC-38,
+-- measured with /tcprobe weapons on 2026-11-25): Collections' class filter
+-- is set to each class in turn, one class per frame, and GetCategoryInfo
+-- read on the frame after the set, then put back as it was found. done(learnt)
+-- is called once, at the end of the pass, with { [classID] = { [slot key] =
+-- { [category] = name } } }, or false for the fixed split: when a call
+-- raises, a set raises or is refused, nothing answers, or a call is missing.
+-- Not called after StopWeaponTypes. onError(text) is called when the filter
+-- could not be put back. The filter is put back on every way out.
+function Appearances.LearnWeaponTypes(done, onError)
+    if pass then Appearances.StopWeaponTypes() end
+    local TCol = C_TransmogCollection
+    local ok, was, classes = pcall(function()
+        return TCol and TCol.GetCategoryInfo and TCol.GetClassFilter and TCol.GetClassFilter(), classIDs()
+    end)
+    if not (ok and was and classes[1] and C_Timer and C_Timer.After) then return done(false) end
+    pass = { was = was, classes = classes, done = done, onError = onError, learnt = {} }
+    step(pass, 1)
+end
+
+-- Stops a pass spread over frames (the tab was left or the visit ended):
+-- the filter is put back at once and done is not called.
+function Appearances.StopWeaponTypes()
+    local run = pass
+    pass = nil
+    if run then restore(run) end
 end
 
 -- The scan filter entry the slot table gives a weapon category, or nil when
@@ -123,44 +262,33 @@ function Appearances.CategoryFilter(category)
 end
 
 -- The categories List reads for the slot: an armor slot's one; a weapon
--- slot's weapon types (types, when the caller has them), or the one
--- weaponType picks.
+-- slot's weapon types (types, when the caller has them, else the fixed
+-- split), or the one weaponType picks.
 local function categoriesOf(slot, entry, weaponType, types)
     if not entry.weapon then return { categoryValue(entry.categories[1]) } end
     local categories = {}
-    for _, weapon in ipairs(types or Appearances.WeaponTypes(slot)) do
+    for _, weapon in ipairs(types or Appearances.WeaponTypes(slot, false)) do
         if weaponType == nil or weapon.category == weaponType then categories[#categories + 1] = weapon.category end
     end
     return categories
 end
 
--- The appearances of a slot that class can use, in Collections' order, each
--- { id, slot, category, categories }. A weapon slot is the union of its weapon types'
+-- The appearances of a slot, in Collections' order, each { id, slot,
+-- category, categories }. A weapon slot is the union of its weapon types'
 -- lists, each in Collections' order, in the order of the weapon types, each
 -- appearance once; weaponType (a category) narrows it to one. types: the
--- slot's WeaponTypes when the caller has them already. Collections
--- lists them for its own class filter, so when that is another class it is
--- switched to this one for the reads and put back once they end, also when
--- one fails. Writing the class filter from an addon was never run in game
--- (unverified; open point 2 of the spec).
-function Appearances.List(slot, class, weaponType, types)
+-- slot's WeaponTypes when the caller has them. A category's list is the
+-- same under every class filter (measured in game on 2026-11-25), so the
+-- filter is not touched.
+function Appearances.List(slot, weaponType, types)
     local entry = TC.Slots[slot]
     local TCol = C_TransmogCollection
     if not (entry and TCol and TCol.GetCategoryAppearances) then return {} end
-    local categories = categoriesOf(slot, entry, weaponType, types)
-    local was = TCol.GetClassFilter and TCol.GetClassFilter()
-    local switch = was ~= nil and class ~= nil and was ~= class and TCol.SetClassFilter ~= nil
-    local ok, result = pcall(function()
-        if switch then TCol.SetClassFilter(class) end
-        local list, seen = {}, {}
-        for _, category in ipairs(categories) do readCategory(list, seen, slot, entry.slotID, category) end
-        return list
-    end)
-    if switch then
-        pcall(TCol.SetClassFilter, was)
+    local list, seen = {}, {}
+    for _, category in ipairs(categoriesOf(slot, entry, weaponType, types)) do
+        readCategory(list, seen, slot, entry.slotID, category)
     end
-    if not ok then error(result, 0) end
-    return result
+    return list
 end
 
 -- Collected when the account has the appearance from any of its sources.

@@ -4,7 +4,7 @@
 -- art for its button, its Collections categories, the inventory slot its
 -- appearances are listed for, and its scan filter entries. anyClass: the
 -- class filter does not narrow the slot (cloaks, shirts and tabards; weapon
--- slots are not narrowed either, TC-32). zoom: how much farther out than
+-- slots are narrowed by each class's weapon types instead, TC-38). zoom: how much farther out than
 -- Collections' own camera the slot's models are framed (1 when absent), so a
 -- cloak is not cut off. Values are names
 -- of the client's enums, read where they are used; a category also carries
@@ -31,8 +31,8 @@ for _, entry in ipairs(armorTypes("IndexRobeType")) do chest[#chest + 1] = entry
 
 -- A weapon slot's categories in Collections' order (ascending, as
 -- Blizzard_Wardrobe.lua:884 walks them), each the fixed split of spec 4.3
--- used when the client does not answer GetCategoryInfo (open point 4), with
--- its own filter entry.
+-- used when the weapon types cannot be learnt from GetCategoryInfo (open
+-- point 4), with its own filter entry.
 TC.Slots = {
     { key = "head", name = "Head", group = 1, art = "head", slotID = 1,
         categories = { { "Head", 1 } }, filters = armorTypes("IndexHeadType") },

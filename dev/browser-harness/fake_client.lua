@@ -32,11 +32,30 @@ local CATEGORY_NAMES = { [12] = "Wands", [13] = "One-Handed Axes", [14] = "One-H
     [15] = "One-Handed Maces", [16] = "Daggers", [17] = "Fist Weapons", [18] = "Shields", [19] = "Held In Off-hand",
     [20] = "Two-Handed Axes", [21] = "Two-Handed Swords", [22] = "Two-Handed Maces", [23] = "Staves",
     [24] = "Polearms", [25] = "Bows", [26] = "Guns", [27] = "Crossbows", [28] = "Warglaives" }
+-- The weapon categories GetCategoryInfo answers for under each class filter,
+-- as /tcprobe weapons measured them on 2026-11-25 (main hand, off hand,
+-- ranged); 28 and 29 answer for no class.
+local WEAPON_CATEGORIES_OF_CLASS = {}
+for classID, categories in pairs({
+    [1] = { 13, 14, 15, 16, 17, 20, 21, 22, 23, 24, 18, 19, 25, 26, 27 },
+    [2] = { 13, 14, 15, 20, 21, 22, 24, 18, 19 },
+    [3] = { 13, 14, 16, 17, 20, 21, 23, 24, 19, 25, 26, 27 },
+    [4] = { 13, 14, 15, 16, 17, 19, 25, 26, 27 },
+    [5] = { 15, 16, 23, 19, 12 },
+    [7] = { 13, 15, 16, 17, 20, 22, 23, 18, 19 },
+    [8] = { 14, 16, 23, 19, 12 },
+    [9] = { 16, 23, 19, 12 },
+    [11] = { 15, 16, 17, 22, 23, 24, 19 },
+}) do
+    WEAPON_CATEGORIES_OF_CLASS[classID] = {}
+    for _, category in ipairs(categories) do WEAPON_CATEGORIES_OF_CLASS[classID][category] = true end
+end
 
--- A fixture of one category (default Head): total appearances for the
--- player's class from id `first` + 1 on (default 1000), the first `collected`
--- of them (by id) collected through one of their three sources, two hidden
--- visuals, and one appearance only another class lists.
+-- A fixture of one category (default Head): total appearances from id
+-- `first` + 1 on (default 1000), the first `collected` of them (by id)
+-- collected through one of their three sources, and two hidden visuals.
+-- classes is not read by the fake: a category's list is the same under
+-- every class filter (measured in game on 2026-11-25).
 function Fake.appearances(total, collected, category, first)
     local list = {}
     first = first or 1000
@@ -54,8 +73,6 @@ function Fake.appearances(total, collected, category, first)
         classes = { [PLAYER_CLASS] = true } }
     list[#list + 1] = { id = extra + 1, uiOrder = 0, sources = { extra * 10 + 11 }, hide = true, category = category,
         classes = { [PLAYER_CLASS] = true } }
-    list[#list + 1] = { id = extra + 2, uiOrder = 0, sources = { extra * 10 + 21 }, category = category,
-        classes = { [8] = true } }
     return list
 end
 
@@ -66,8 +83,12 @@ end
 --                   it did for feet in game
 --   categoryInfo    { [category] = { name, isWeapon, canHaveIllusions,
 --                   canMainHand, canOffHand, canRanged } } replaces the fake's
---                   answers (by default the weapon categories answer with the
---                   fixed split's flags; armor categories answer nothing)
+--                   answers under every class filter (by default a weapon
+--                   category answers, with the fixed split's flags, when the
+--                   class filter's class has it in the measured table;
+--                   armor categories answer nothing)
+--   lagByOne        a GetCategoryInfo read in the frame of a SetClassFilter
+--                   write answers for the class set one write earlier
 --   classFilter     Collections' class filter at the start (default the player's)
 --   uncollectedShown, collectedShown, search: Collections' other settings
 --   listRaises      GetCategoryAppearances raises an error (true: always;
@@ -79,6 +100,12 @@ end
 --   listEmpty       the first that many reads of GetCategoryAppearances
 --                   return an empty table
 --   setClassRaises  SetClassFilter changes the filter and then raises
+--   setClassRaisesFor  SetClassFilter for that class changes the filter and
+--                   then raises
+--   setClassIgnoredFor SetClassFilter for that class changes nothing
+--   setClassIgnoredAt  a list of call numbers (the first call is 1) of
+--                   SetClassFilter that change nothing
+--   getClassFilterRaises  GetClassFilter raises an error
 --   setClassFires   SetClassFilter fires TRANSMOG_COLLECTION_UPDATED at once
 --   noTransmog      C_TransmogCollection is nil
 --   noList          C_TransmogCollection.GetCategoryAppearances is nil
@@ -1213,6 +1240,9 @@ function Fake.new(opts)
         return function() c.forbidden[#c.forbidden + 1] = name end
     end
     local col = c.collections
+    -- the class filter before the latest write, while that write is in this
+    -- frame: what GetCategoryInfo answers by under lagByOne
+    local lagged
     local T = {
         GetCategoryAppearances = function(category, location)
             c.listCalls = c.listCalls + 1
@@ -1230,7 +1260,7 @@ function Fake.new(opts)
             -- the client's own order is by id, descending: not Collections' order
             for i = #appearances, 1, -1 do
                 local a = appearances[i]
-                if a.category == category and a.classes[col.classFilter] then
+                if a.category == category then
                     -- the fields of TransmogCategoryAppearanceInfo
                     -- (TransmogItemsDocumentation.lua:1190-1207)
                     result[#result + 1] = { visualID = a.id, uiOrder = a.uiOrder, minIlvl = a.minIlvl,
@@ -1299,16 +1329,29 @@ function Fake.new(opts)
             if opts.noCategoryInfo then return nil end
             local info = opts.categoryInfo and opts.categoryInfo[category]
             if info then return unpack(info) end
-            if opts.categoryInfo or not CATEGORY_NAMES[category] or category == CATEGORIES.Warglaives then return nil end
+            local has = WEAPON_CATEGORIES_OF_CLASS[lagged or col.classFilter]
+            if opts.categoryInfo or not (has and has[category]) then return nil end
             local slotID = SLOT_OF_CATEGORY[category]
             return CATEGORY_NAMES[category], true, false, slotID == 16, slotID == 17, slotID == 18
         end,
-        GetClassFilter = function() return col.classFilter end,
+        GetClassFilter = function()
+            if opts.getClassFilterRaises then error("fake: GetClassFilter failed") end
+            return col.classFilter
+        end,
         SetClassFilter = function(classID)
-            col.classFilter = classID
             c.setClassCalls = (c.setClassCalls or 0) + 1
+            if opts.setClassIgnoredFor == classID then return end
+            for _, n in ipairs(opts.setClassIgnoredAt or {}) do
+                if n == c.setClassCalls then return end
+            end
+            -- a read in this frame answers for the class set one write earlier
+            if opts.lagByOne then
+                lagged = col.classFilter
+                after(c.FRAME, function() lagged = nil end)
+            end
+            col.classFilter = classID
             if opts.setClassFires then c.fire("TRANSMOG_COLLECTION_UPDATED") end
-            if opts.setClassRaises then error("fake: SetClassFilter failed") end
+            if opts.setClassRaises or opts.setClassRaisesFor == classID then error("fake: SetClassFilter failed") end
         end,
         GetUncollectedShown = function() return col.uncollectedShown end,
         SetUncollectedShown = function(v) col.uncollectedShown = v end,

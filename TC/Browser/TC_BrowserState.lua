@@ -29,11 +29,12 @@ local view, listener
 -- The current slot's appearances under the class, read once per visit and
 -- kept per slot in lists, and whether each is collected, read again on every
 -- Refresh. No list (nil) means it could not be read yet; it is never an empty
--- slot. weaponTypes: a weapon slot's weapon types, read once per visit.
-local list, lists, collected, weaponTypes
--- True while a Refresh runs: changing Collections' class filter in List is
--- inferred to fire TRANSMOG_COLLECTION_UPDATED at once, which would start a
--- Refresh inside this one.
+-- slot. learnt: every class's weapon types (LearnWeaponTypes), learnt once
+-- per visit on the first weapon slot, nil before; learning: that pass runs.
+local list, lists, collected, learnt, learning
+-- True while a Refresh runs: changing Collections' class filter to learn
+-- the weapon types is inferred to fire TRANSMOG_COLLECTION_UPDATED at once,
+-- which would start a Refresh inside this one.
 local refreshing
 -- The checks of the visit, by appearance id. kept: the newest result that
 -- is found, not for sale or cannot be sold, which the tile carries (A7).
@@ -90,7 +91,7 @@ view = startView()
 local function clearResults()
     kept, latest, checking, waitingChecks, active, known, reading, variantNames, noAnswer = {}, {}, {}, {}, nil, {}, {}, {}, {}
     scans, scan, failures, stoppedScan = {}, nil, {}, nil
-    list, lists, collected, weaponTypes = nil, {}, {}, {}
+    list, lists, collected, learnt, learning = nil, {}, {}, nil, false
     keyState, keyOf, keyQueue, keyTicking = {}, {}, {}, false
     keyGen = keyGen + 1
 end
@@ -121,6 +122,13 @@ local function classInfo(classID)
     if type(info) == "table" and info.className then return info.className, info.classFile end
     local id, name, file = ownClass()
     if id == classID then return name, file end
+end
+
+-- A weapon slot's weapon types for the class (nil: every class), once they
+-- are learnt in this visit; nil before and on an armor slot.
+local function weaponTypesOf(slot, class)
+    if learnt == nil or not TC.Slots[slot].weapon then return nil end
+    return TC.Appearances.WeaponTypes(slot, learnt, class)
 end
 
 local function keyText(key)
@@ -201,20 +209,36 @@ local function forSaleResult(id)
 end
 
 -- The list narrowed to the weapon type and the class filter, on the client
--- (A3): the appearances the weapon type lists, an appearance of two weapon
--- types under each, in that weapon type's own order, that the class can use.
+-- (A3). An armor slot: the appearances the class can use. A weapon slot:
+-- those of the chosen weapon type, else of the class's weapon types (TC-38),
+-- each weapon type's in its own order, in the order of the weapon types, an
+-- appearance once; an appearance of two weapon types shows under each.
 local function typed()
-    local class, kind = chosenClass(), view.weaponType
-    if kind == nil and class == nil then return list or {} end
+    local class = chosenClass()
+    local kinds = view.weaponType and { view.weaponType }
+    if not kinds and class ~= nil and TC.Slots[view.slot].weapon then
+        kinds = {}
+        for i, weapon in ipairs(weaponTypesOf(view.slot, class) or {}) do kinds[i] = weapon.category end
+    end
+    if kinds == nil and class == nil then return list or {} end
     local out = {}
-    for _, appearance in ipairs(list or {}) do
-        if (kind == nil or appearance.categories[kind])
-            and (class == nil or TC.Appearances.UsableBy(appearance, class)) then
+    if kinds == nil then
+        for _, appearance in ipairs(list or {}) do
+            if TC.Appearances.UsableBy(appearance, class) then out[#out + 1] = appearance end
+        end
+        return out
+    end
+    local seen = {}
+    for _, kind in ipairs(kinds) do
+        local own = {}
+        for _, appearance in ipairs(list or {}) do
+            if appearance.categories[kind] and not seen[appearance] then own[#own + 1] = appearance end
+        end
+        table.sort(own, function(a, b) return a.categories[kind] < b.categories[kind] end)
+        for _, appearance in ipairs(own) do
+            seen[appearance] = true
             out[#out + 1] = appearance
         end
-    end
-    if kind ~= nil then
-        table.sort(out, function(a, b) return a.categories[kind] < b.categories[kind] end)
     end
     return out
 end
@@ -389,19 +413,32 @@ function State.SetListener(fn)
     listener = fn
 end
 
+-- Starts learning every class's weapon types; a pass that ends on a later
+-- frame refreshes.
+local function learnWeaponTypes()
+    learning = true
+    local mine, now = visit, true
+    TC.Appearances.LearnWeaponTypes(function(types)
+        if mine ~= visit then return end
+        learnt, learning = types, false
+        if not now then State.Refresh() end
+    end, function(text) State.lastError = text end)
+    now = false
+end
+
 -- Reads the list if there is none and whether each appearance is collected;
 -- answers whether anything changed. An empty or failed read keeps no list,
--- so the next Refresh reads again.
+-- so the next Refresh reads again. A weapon slot waits for its weapon types.
 local function read()
     local changed = false
     local slot = view.slot
-    if TC.Slots[slot].weapon and not weaponTypes[slot] then
-        weaponTypes[slot] = TC.Appearances.WeaponTypes(slot)
+    if TC.Slots[slot].weapon and learnt == nil then
+        if not learning then learnWeaponTypes() end
+        if learnt == nil then return changed end
         changed = true
     end
     if not list then
-        local classID = UnitClass and select(3, UnitClass("player"))
-        local result = classID and TC.Appearances.List(slot, classID, nil, weaponTypes[slot])
+        local result = TC.Appearances.List(slot, nil, weaponTypesOf(slot))
         if type(result) ~= "table" or not result[1] then return changed end
         list, changed = result, true
         lists[slot] = result
@@ -482,6 +519,7 @@ function State.Reset()
         or scan ~= nil or next(failures) ~= nil or view.search ~= "" or view.class ~= nil
     if TC.Buy then TC.Buy.Close() end
     stopReads()
+    TC.Appearances.StopWeaponTypes()
     visit = visit + 1
     view = startView()
     clearResults()
@@ -499,6 +537,10 @@ function State.Leave()
     away = true
     dropKeys()
     TC.Appearances.StopLoads()
+    -- a weapon type pass puts the class filter back at once and runs again
+    -- on the next need
+    TC.Appearances.StopWeaponTypes()
+    learning = false
     if not next(checking) and not scan then return end
     batch(function()
         stopReads(true)
@@ -542,7 +584,7 @@ local function startScan()
         if result and slot == view.slot then startSearch() end
         notify()
     end
-    local ok, err = pcall(TC.Scan.Run, slot, onProgress, onDone, weaponTypes[slot])
+    local ok, err = pcall(TC.Scan.Run, slot, onProgress, onDone, weaponTypesOf(slot))
     if not ok then onDone(nil, err) end
 end
 
@@ -599,13 +641,24 @@ function State.SelectWeaponType(category)
     notify()
 end
 
+-- The weapon type goes back to all weapon types when the chosen class has
+-- not got it (TC-38).
+local function fitWeaponType()
+    if view.weaponType == nil then return end
+    for _, weapon in ipairs(weaponTypesOf(view.slot, chosenClass()) or {}) do
+        if weapon.category == view.weaponType then return end
+    end
+    view.weaponType = nil
+end
+
 -- The funnel's class choice: a class id, or ALL_CLASSES. It narrows on the client
 -- in both modes (A3), keeps the slot, the mode, the Filter, the weapon type
--- and the search, goes to page 1 and reads nothing.
+-- when the class has it, and the search, goes to page 1 and reads nothing.
 function State.SelectClass(value)
     local was = view.class == ALL_CLASSES and ALL_CLASSES or chosenClass()
     if value == nil or value == was then return end
     view.class, view.page = value, 1
+    fitWeaponType()
     settle()
     notify()
 end
@@ -699,6 +752,7 @@ end
 function State.ResetFilters()
     if filtersAtStart() then return end
     view.filter, view.class, view.page = START_FILTER, nil, 1
+    fitWeaponType()
     settle()
     notify()
 end
@@ -906,7 +960,7 @@ local function itemList()
     }
     if slot.weapon then
         -- a weapon's type is its weapon type (spec 2.6)
-        for _, weapon in ipairs(weaponTypes[appearance.slot] or {}) do
+        for _, weapon in ipairs(weaponTypesOf(appearance.slot) or {}) do
             if weapon.category == appearance.category then
                 out.typeText = weapon.name
                 break
@@ -999,11 +1053,14 @@ local function slotRow()
 end
 
 -- The weapon type dropdown of a weapon slot: its text and its entries, "All
--- weapon types" first (value nil), then the slot's weapon types.
+-- weapon types" first (value nil), then the chosen class's weapon types in
+-- the slot; nil while they are not learnt or when the class has none.
 local function weaponDropdown()
+    local types = weaponTypesOf(view.slot, chosenClass())
+    if not (types and types[1]) then return nil end
     local entries = { { name = ALL_WEAPON_TYPES, selected = view.weaponType == nil } }
     local text = ALL_WEAPON_TYPES
-    for _, weapon in ipairs(weaponTypes[view.slot] or {}) do
+    for _, weapon in ipairs(types) do
         local selected = weapon.category == view.weaponType
         entries[#entries + 1] = { name = weapon.name, value = weapon.category, selected = selected }
         if selected then text = weapon.name end
@@ -1203,7 +1260,7 @@ function State.View()
     local slot = TC.Slots[view.slot]
     local answer = {
         mode = view.mode, filter = filter, page = view.page, slots = slotRow(),
-        weaponTypes = slot.weapon and weaponDropdown() or nil, classes = classDropdown(), search = view.search,
+        weaponTypes = weaponDropdown(), classes = classDropdown(), search = view.search,
         filters = showEntries(filter), filterFixed = forSaleMode, filtersChanged = not filtersAtStart(),
         status = STATUS_ALL, tiles = {}, count = "",
         pageText = "", paging = false, previousEnabled = false, nextEnabled = false,

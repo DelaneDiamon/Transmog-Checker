@@ -13,10 +13,10 @@ local MAX_PAGES = 60
 
 -- The scan filter entries of a slot, from TC.Slots (spec 4.3): every entry
 -- names its subclass, or the server returns the whole class (spec 4.5). A
--- weapon slot's entries cover every weapon type its dropdown lists (A3), one
--- per category the client lists for the slot, from the slot table's entry of
--- that category; a category the table has none for is left out. types: the
--- slot's WeaponTypes when the caller has them. Enum values are read when a
+-- weapon slot's entries cover every weapon type any class has in the slot
+-- (TC-38), one per category, from the slot table's entry of that category;
+-- a category the table has none for is left out. types: the slot's
+-- WeaponTypes for every class, else the fixed split. Enum values are read when a
 -- scan runs; nil when the slot is unknown or the client lacks one of its
 -- members, which fails that slot's scan only.
 local function filterEntries(slot, types)
@@ -25,7 +25,7 @@ local function filterEntries(slot, types)
     local filters = entry.filters
     if entry.weapon then
         filters = {}
-        for _, weapon in ipairs(types or TC.Appearances.WeaponTypes(slot)) do
+        for _, weapon in ipairs(types or TC.Appearances.WeaponTypes(slot, false)) do
             filters[#filters + 1] = TC.Appearances.CategoryFilter(weapon.category)
         end
         if not filters[1] then return nil end
@@ -128,8 +128,8 @@ end
 -- pages read. done is called once: done({ appearances = found, pages = n })
 -- when every page was read, or done(nil, reason) when a query failed, the
 -- scan was cut off at 60 pages, or a call it needs is missing. Neither is
--- called after the queue's CancelAll. types: a weapon slot's WeaponTypes when
--- the caller has them already.
+-- called after the queue's CancelAll. types: a weapon slot's WeaponTypes for
+-- every class, when the caller has them.
 function Scan.Run(slot, onProgress, done, types)
     local entries, sorts = filterEntries(slot, types), priceThenName()
     if not (C_TransmogCollection and C_TransmogCollection.GetItemInfo) then
