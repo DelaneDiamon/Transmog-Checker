@@ -3,6 +3,12 @@
 # Dotfiles and .github/ are always excluded by the packager itself.
 package-as: TransmogChecker
 
+# The CurseForge file's changelog is our text, not commit subjects.
+# The packager reads it from the source tree, so the ignore entry below still keeps it out of the zip.
+manual-changelog:
+  filename: CHANGELOG.md
+  markup-type: markdown
+
 ignore:
   - dev
   - CLAUDE.md

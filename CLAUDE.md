@@ -25,4 +25,4 @@ WoW addon that annotates item tooltips with transmog collection status and with 
 
 ## Releasing
 
-Every push to `main` publishes a GitHub release with the next patch tag (`.github/workflows/release-on-push.yml`), and a GitHub webhook has CurseForge package that tag. Treat a push to `main` as a release: get the user's go-ahead first, after the in-game check has passed. A `.pkgmeta` at the repo root keeps `dev/`, `docs/`, `CLAUDE.md`, `GLOSSARY.md` and `CHANGELOG.md` out of the CurseForge package; the GitHub release still carries GitHub's own source archive of the whole tree.
+Every push to `main` publishes a GitHub release with the next patch tag, never below the workflow's `MIN_VERSION` (`1.0.0`), and the top `CHANGELOG.md` entry as its notes (`.github/workflows/release-on-push.yml`), and a GitHub webhook has CurseForge package that tag. Treat a push to `main` as a release: get the user's go-ahead first, after the in-game check has passed. A `.pkgmeta` at the repo root keeps `dev/`, `docs/`, `CLAUDE.md`, `GLOSSARY.md` and `CHANGELOG.md` out of the CurseForge package; the GitHub release still carries GitHub's own source archive of the whole tree.

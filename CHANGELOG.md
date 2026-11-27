@@ -1,6 +1,6 @@
 # Changelog
 
-## Next release (after 0.0.22)
+## 1.0.0 (2026-11-27)
 
 - New: an Appearances tab on the auction house window. It shows every appearance of a slot as tiles and which of them are for sale, with the lowest price on each tile.
 - New: Scan slot reads the auction house for the chosen slot; by default it runs when the tab opens.
