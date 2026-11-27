@@ -1502,6 +1502,29 @@ local function sourceEntriesOf()
     return entries
 end
 
+-- The Source menu's entries (slice E, E4), as sourceEntriesOf: an entry
+-- only when an appearance of the slot's list (the class and weapon type
+-- chosen, before Show, For sale only, Source and Search) has a source of
+-- its type, or when it is unticked, so it can be ticked again. Every entry
+-- while the list is not read or a source type of it is not known yet. The
+-- funnel asks at each opening: one GetAppearanceSources call per
+-- appearance whose types sourceKeys has not kept (kept for the visit; an
+-- unknown one until the next Refresh or item names), none after.
+function State.SourceEntries()
+    local entries = sourceEntriesOf()
+    if not list or partial[view.slot] then return entries end
+    local has = {}
+    for _, appearance in ipairs(typed()) do
+        for key in pairs(sourceKeys(appearance)) do has[key] = true end
+        if unsure[appearance.id] then return entries end
+    end
+    local out = {}
+    for _, entry in ipairs(entries) do
+        if has[entry.value] or not entry.selected then out[#out + 1] = entry end
+    end
+    return out
+end
+
 -- The funnel's sort entries, the chosen one marked.
 local function sortEntries()
     local entries = {}

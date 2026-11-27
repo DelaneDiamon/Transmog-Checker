@@ -1,8 +1,9 @@
-"""Writes Media/funnel.tga: the funnel glyph of the addon-settings design mock.
+"""Writes Media/funnel.tga: the funnel glyph of the appearance browser's filter button.
 
-The mock's FUNNEL SVG (addon-settings.html): viewBox 0 0 14 14, path
-M1 2h12L8.3 7.6V12L5.7 13V7.6Z, fill #ffd100, black stroke 0.8 with round
-joins. Drawn at 64 x 64 as an uncompressed 32-bit TGA with alpha (image type
+Slice E (E2) reshaped the design mock's funnel (addon-settings.html, path
+M1 2h12L8.3 7.6V12L5.7 13V7.6Z) to read as a funnel at 20 units: a wide
+rim, a short cone and a clear square stem, centred in a viewBox of 0 0 14
+14, fill #ffd100, black stroke 0.8 with round joins. Drawn at 64 x 64 as an uncompressed 32-bit TGA with alpha (image type
 2, 8 alpha bits, bottom-left origin), the format of Media/wheel.tga. Edges
 are antialiased by 8 x 8 samples per pixel. Usage, from the repo root:
 python3 dev/media/funnel_tga.py [out]
@@ -12,7 +13,8 @@ import struct
 import sys
 
 SIZE, SAMPLES, VIEW = 64, 8, 14.0
-POINTS = [(1, 2), (13, 2), (8.3, 7.6), (8.3, 12), (5.7, 13), (5.7, 7.6)]
+# the rim (y 1.6 to 3.4), the cone down to the stem (y 7.8), the stem (x 5.5 to 8.5)
+POINTS = [(0.9, 1.6), (13.1, 1.6), (13.1, 3.4), (8.5, 7.8), (8.5, 12.6), (5.5, 12.6), (5.5, 7.8), (0.9, 3.4)]
 FILL, STROKE, HALF_STROKE = (0xFF, 0xD1, 0x00), (0, 0, 0), 0.4
 
 

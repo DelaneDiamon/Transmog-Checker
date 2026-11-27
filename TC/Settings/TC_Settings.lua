@@ -2,10 +2,10 @@
 -- in the game's Options > AddOns, made with the client's settings API
 -- (Blizzard_Settings_Shared/Blizzard_Settings.lua). A preview of the item
 -- tooltip at the top, then "Item tooltip" with six settings and "Appearances
--- tab" with Scan when shown. Each setting is a proxy setting
--- (Settings.RegisterProxySetting(category, variable, variableType, name,
--- defaultValue, getValue, setValue), Blizzard_Settings.lua:178-180) over the
--- addon's own stored value: TC.Setting / TC.SetSetting, and for Scan when
+-- tab" with Scan prices when the tab opens (labels: slice E, E3). Each
+-- setting is a proxy setting (Settings.RegisterProxySetting(category,
+-- variable, variableType, name, defaultValue, getValue, setValue),
+-- Blizzard_Settings.lua:178-180) over the addon's own stored value: TC.Setting / TC.SetSetting, and for Scan when
 -- shown the browser state's accessor, so each value has one place; a change
 -- made elsewhere (a slash shortcut, the funnel menu) is told to the page
 -- through TC.WatchSettings and the setting's NotifyUpdate
@@ -23,23 +23,24 @@ local Page = TC.Settings
 local NAME = "TransmogChecker"
 local SECTION_TOOLTIP, SECTION_BROWSER = "Item tooltip", "Appearances tab"
 -- The rows of "Item tooltip" (addon-settings v1, "Every setting"): label,
--- tooltip and, for a dropdown, its choices. Grey and white items is the
--- inverse of the stored skipPoorAndCommon.
+-- tooltip and, for a dropdown, its choices. "Show collection status on grey
+-- and white items" is the inverse of the stored skipPoorAndCommon: ticked,
+-- the lines show on them.
 local ROWS = {
-    { key = "tooltipShow", label = "Show on item tooltips",
+    { key = "tooltipShow", label = "Show collection status on item tooltips",
         tip = "Show on every item tooltip whether you have collected its appearance." },
-    { key = "tooltipStyle", label = "Style",
+    { key = "tooltipStyle", label = "Tooltip style",
         tip = "Full: the status, how to collect it, the lowest price and other items. Compact: the status on the item's name line.",
         choices = { { "full", "Full" }, { "compact", "Compact" } } },
-    { key = "notCollectedColor", label = "Not collected color", tip = "The color of \"Not collected\" on item tooltips.",
+    { key = "notCollectedColor", label = "\"Not collected\" text color", tip = "The color of \"Not collected\" on item tooltips.",
         choices = { { "orange", "|cFFFF7F00Orange|r" }, { "lightBlue", "|cFF87ABFFLight blue|r" }, { "white", "White" } } },
-    { key = "otherItems", label = "Other items",
+    { key = "otherItems", label = "Other items with the same appearance",
         tip = "Other items with the same appearance, and where they come from. Compact shows only how many.",
-        choices = { { "notCollected", "When not collected" }, { "always", "Always" }, { "off", "Off" } } },
-    { key = "lowestPrice", label = "Lowest price", tip = "The lowest price the Appearances tab found this session. Full style only." },
-    { key = "skipPoorAndCommon", label = "Grey and white items", tip = "Also show the status on grey and white items.", inverted = true },
+        choices = { { "notCollected", "Only when not collected" }, { "always", "Always" }, { "off", "Never" } } },
+    { key = "lowestPrice", label = "Lowest auction price seen this session", tip = "The lowest price the Appearances tab found this session. Full style only." },
+    { key = "skipPoorAndCommon", label = "Show collection status on grey and white items", tip = "Also show the status on grey and white items.", inverted = true },
 }
-local SCAN = { key = "scanWhenShown", label = "Scan when shown",
+local SCAN = { key = "scanWhenShown", label = "Scan prices when the tab opens",
     tip = "Scan the slot when the Appearances tab opens. This reads the auction house." }
 
 local category
@@ -70,6 +71,13 @@ end
 -- is written: the list reads them in its own code (Blizzard_SettingsList.lua:57-71).
 local PREVIEW_X, PREVIEW_Y, SAMPLE_GAP, SAMPLE_WIDTH = 37, -8, 16, 290
 local PAD, HEAD_HEIGHT, LINE_HEIGHT = 9, 17, 15
+-- A sample is as wide as its widest line that does not wrap, a line's left
+-- text, TEXT_GAP and its right text, as the game's tooltip sizes itself to
+-- its lines (slice E, E1; the gap is inferred from the 40 between a line's
+-- two texts in SharedTooltipTemplates.xml:36-39), at least SAMPLE_WIDTH;
+-- the two stay inside the row, ROW_EDGE from its right edge. Where the row
+-- is too narrow, a left text wraps before it would reach its right text.
+local TEXT_GAP, ROW_EDGE = 40, 8
 local CAPTION = "Preview: a sample item, not your collection"
 local UNCOMMON, WHITE = "FF1EFF00", "FFFFFFFF"
 local OTHERS = { "Ivycloth Boots of Intellect", "Ivycloth Boots of the Owl", "Ivycloth Boots of Spirit" }
@@ -104,36 +112,69 @@ local function rowOf(sample, i)
     return row
 end
 
--- Draws a sample's lines (descriptions as TC.Tooltip.Lines gives them) and
--- sizes it to them.
-local function drawSample(sample, lines)
-    local inner, y = SAMPLE_WIDTH - 2 * PAD, -PAD
+-- Writes a sample's lines (descriptions as TC.Tooltip.Lines gives them)
+-- and answers the width they ask for.
+local function fillSample(sample, lines)
+    local wanted = SAMPLE_WIDTH
     for i, line in ipairs(lines) do
         local row = rowOf(sample, i)
-        local indent = line.indent or 0
         local left, right, color, rightColor = TC.Tooltip.Texts(line)
-        row:ClearAllPoints()
-        row:SetPoint("TOPLEFT", sample, "TOPLEFT", PAD + indent, y)
-        row:SetWidth(inner - indent)
-        row.left:SetWidth(line.wrap and inner - indent or 0)
-        row.left:SetWordWrap(line.wrap == true)
+        row.left:SetWidth(0)
         row.left:SetText(left)
         row.left:SetTextColor(unpack(color or { 1, 1, 1 }))
         row.right:SetText(right or "")
         row.right:SetShown(right ~= nil)
         if rightColor then row.right:SetTextColor(unpack(rightColor)) end
+        if not line.wrap then
+            local width = row.left:GetStringWidth() + (right and TEXT_GAP + row.right:GetStringWidth() or 0)
+            wanted = math.max(wanted, math.ceil(2 * PAD + (line.indent or 0) + width))
+        end
+    end
+    for i = #lines + 1, #sample.rows do sample.rows[i]:Hide() end
+    return wanted
+end
+
+-- Lays a sample's lines out in its width and sizes it to them.
+local function placeSample(sample, lines, width)
+    local inner, y = width - 2 * PAD, -PAD
+    sample:SetWidth(width)
+    for i, line in ipairs(lines) do
+        local row = rowOf(sample, i)
+        local indent = line.indent or 0
+        row:ClearAllPoints()
+        row:SetPoint("TOPLEFT", sample, "TOPLEFT", PAD + indent, y)
+        row:SetWidth(inner - indent)
+        local room = inner - indent
+        if row.right:IsShown() then room = room - TEXT_GAP - row.right:GetStringWidth() end
+        local wrap = line.wrap == true or row.left:GetStringWidth() > room
+        row.left:SetWidth(wrap and room or 0)
+        row.left:SetWordWrap(wrap)
         local height = i == 1 and HEAD_HEIGHT or LINE_HEIGHT
-        if line.wrap then height = math.max(height, row.left:GetStringHeight()) end
+        if wrap then height = math.max(height, row.left:GetStringHeight()) end
         row:SetHeight(height)
         row:Show()
         y = y - height
     end
-    for i = #lines + 1, #sample.rows do sample.rows[i]:Hide() end
     sample:SetHeight(PAD - y)
+end
+
+-- The two samples' widths inside the row: each as wide as it asks, unless
+-- the two do not fit; then the narrower keeps its width, up to half the
+-- room, and the other takes the rest. A row of no width yet limits nothing
+-- (the preview draws again when its size changes).
+local function widthsIn(rowWidth, first, second)
+    if not (rowWidth and rowWidth > 0) then return first, second end
+    local room = math.floor(rowWidth - PREVIEW_X - SAMPLE_GAP - ROW_EDGE)
+    if first + second <= room then return first, second end
+    local half = math.floor(room / 2)
+    if first <= half then return first, room - first end
+    if second <= half then return room - second, second end
+    return half, room - half
 end
 
 local function draw()
     if not (preview and preview:IsShown()) then return end
+    local all, wanted = {}, {}
     for i, spec in ipairs(SAMPLES) do
         local item = sampleItem(spec.collected)
         local name = { text = spec.name, color = UNCOMMON }
@@ -145,7 +186,16 @@ local function draw()
             if out.nameRight then name.right, name.rightColor = (TC.Tooltip.Texts(out.nameRight)), out.nameRight.color end
             for _, line in ipairs(out.lines) do lines[#lines + 1] = line end
         end
-        drawSample(preview.samples[i], lines)
+        all[i], wanted[i] = lines, fillSample(preview.samples[i], lines)
+    end
+    local parent = preview:GetParent()
+    local widths = { widthsIn(parent and parent:GetWidth(), wanted[1], wanted[2]) }
+    local x = PREVIEW_X
+    for i, sample in ipairs(preview.samples) do
+        sample:ClearAllPoints()
+        sample:SetPoint("TOPLEFT", preview, "TOPLEFT", x, PREVIEW_Y)
+        placeSample(sample, all[i], widths[i])
+        x = x + widths[i] + SAMPLE_GAP
     end
 end
 
@@ -154,8 +204,6 @@ local function build(parent)
     preview.samples = {}
     for i = 1, #SAMPLES do
         local sample = CreateFrame("Frame", nil, preview)
-        sample:SetWidth(SAMPLE_WIDTH)
-        sample:SetPoint("TOPLEFT", preview, "TOPLEFT", PREVIEW_X + (i - 1) * (SAMPLE_WIDTH + SAMPLE_GAP), PREVIEW_Y)
         local background = sample:CreateTexture(nil, "BACKGROUND")
         background:SetAllPoints()
         background:SetColorTexture(0.03, 0.03, 0.04, 0.94)
@@ -165,6 +213,8 @@ local function build(parent)
     local caption = preview:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
     caption:SetPoint("BOTTOMRIGHT", preview, "BOTTOMRIGHT", -24, 8)
     caption:SetText(CAPTION)
+    -- the row's width is the list's: the samples are placed again in it
+    preview:SetScript("OnSizeChanged", draw)
 end
 
 local function showPreview(frame)

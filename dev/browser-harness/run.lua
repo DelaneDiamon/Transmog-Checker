@@ -2913,7 +2913,7 @@ test("whole: selecting For sale makes one browse and a page request per further 
     equal(#findAll(c, function(w) return w.model and w.button and visible(w) end), 5, "tiles shown")
     -- ledger (slice B): the sweep view's rescan on coming back is Scan when
     -- shown's, ticked here
-    funnelPick(c, "Scan when shown")
+    funnelPick(c, "Scan prices when the tab opens")
     equal(TC.BrowserState.View().scanWhenShown, true, "Scan when shown on")
     -- leaving the tab and coming back after a finished scan reads nothing
     selectBuy()
@@ -3389,7 +3389,7 @@ test("whole: clicking through all 14 slots with Scan when shown off sends nothin
     equal(#c.ah.sends, 0, "browses in All")
     equal(#c.auctionTouches, 0, "C_AuctionHouse accesses in All")
     buttons[1].scripts.OnClick(buttons[1])
-    funnelPick(c, "Scan when shown")
+    funnelPick(c, "Scan prices when the tab opens")
     panelSweep(c)
     c.advance(10)
     for i = 2, 14 do buttons[i].scripts.OnClick(buttons[i]); c.advance(10) end
@@ -6133,7 +6133,7 @@ test("styles: the funnel lists Show, For sale only, Source, Class, the sort, Sca
     local funnel = funnelOf(c)
     local texts = openMenu(c, funnel)
     equal(table.concat(texts, "|"), "All|Collected|Not collected|-|For sale only|Source|Class: |cffWARLOCKWarlock|r|-|Sort"
-        .. "|Collections order|Price: low to high|Price: high to low|-|Scan when shown|-|Reset filters", "entries at the start")
+        .. "|Collections order|Price: low to high|Price: high to low|-|Scan prices when the tab opens|-|Reset filters", "entries at the start")
     equal(selectedTexts(c), "Not collected|Collections order", "Not collected and Collections order marked")
     check(c.choose("Collected"), "a Collected entry")
     check(textShown(c, "5 appearances"), "count after Collected")
@@ -6216,9 +6216,11 @@ test("styles: without the menu templates, or without the menu API, the funnel an
         equal(weapon.height, 22, what .. ": the fallback weapon type button keeps its own height")
         -- ledger (slice B): the list holds slice B's entries, each checkbox
         -- marked by its text; Show is not greyed with For sale only (it was)
+        -- ledger (slice E, E4): the fixture's appearances are all World Drop,
+        -- so Source lists that one entry (it listed all seven)
         local texts = openMenu(c, funnel)
-        equal(table.concat({ texts[1], texts[4], texts[5], texts[11], texts[12], texts[22], texts[25], #texts }, "|"),
-            "All|[ ] For sale only|[x] Source: Boss Drop|[x] Source: Other|All classes|Sort: Collections order|[ ] Scan when shown|25",
+        equal(table.concat({ texts[1], texts[4], texts[5], texts[6], texts[16], texts[19], #texts }, "|"),
+            "All|[ ] For sale only|[x] Source: World Drop|All classes|Sort: Collections order|[ ] Scan prices when the tab opens|19",
             what .. ": Show, For sale only, Source, the classes, the sort, Scan when shown")
         funnel.close()
         sentNothing(c, what)
@@ -6927,7 +6929,7 @@ test("C1: the status row: its button on the grid's left edge, in one place and o
     equal(again.width, width, "in the sweep view after a scan: the same width")
     check(textAt("Scanned just now") > gridX + width, "in the sweep view: the text after the button")
     -- while a scan runs: the same button, off, the text after it
-    funnelPick(c, "Scan when shown")
+    funnelPick(c, "Scan prices when the tab opens")
     TC.BrowserState.SelectSlot("legs")
     again = scanControl(c)
     equal(point(again), where, "while the scan runs: the same place")
@@ -9782,15 +9784,15 @@ test("D1 slash: /tc alts and /tc skipgreys flip their setting and print it; /tc 
         for i = from + 1, #c.printed do out[#out + 1] = plain(c.printed[i]) end
         return table.concat(out, "\n")
     end
-    equal(said("alts"), "TC: Other items on item tooltips: always", "alts")
+    equal(said("alts"), "TC: Other items with the same appearance: always", "alts")
     equal(TransmogCheckerDB.otherItems, "always", "alts flipped")
-    equal(said("alts"), "TC: Other items on item tooltips: when not collected", "alts back")
+    equal(said("alts"), "TC: Other items with the same appearance: only when not collected", "alts back")
     TC.SetSetting("otherItems", "off")
     said("alts")
     equal(TransmogCheckerDB.otherItems, "always", "from off")
-    equal(said("skipgreys"), "TC: Skip grey/white items disabled", "skipgreys")
+    equal(said("skipgreys"), "TC: Show collection status on grey and white items: on", "skipgreys")
     equal(TransmogCheckerDB.skipPoorAndCommon, false, "skipgreys flipped")
-    equal(said("skipgreys"), "TC: Skip grey/white items enabled", "skipgreys back")
+    equal(said("skipgreys"), "TC: Show collection status on grey and white items: off", "skipgreys back")
     local before = tooltipSettings()
     equal(said("blizz"), "TC: Blizzard's \"not collected\" line is now always hidden while TransmogChecker's lines show.", "blizz")
     equal(tooltipSettings(), before, "blizz changes nothing")
@@ -10452,11 +10454,13 @@ test("slice B the funnel: For sale only, a Source entry and Scan when shown are 
     check(c.menu ~= nil, "the menu stays open")
     equal(entry("For sale only").selected, true, "asked again, it reads the state: ticked")
     equal(TC.BrowserState.View().forSaleOnly, true, "the state")
+    -- ledger (slice E, E4): manySlots' appearances are all World Drop, the
+    -- one entry Source lists now (this ticked Quest)
     local source = entry("Source")
-    equal(entry("Quest", source.submenu).selected, true, "Quest ticked")
-    check(c.choose("Quest"), "Quest unticked")
-    equal(entry("Quest", entry("Source").submenu).selected, false, "asked again: unticked")
-    check(c.choose("Scan when shown"), "Scan when shown ticked")
+    equal(entry("World Drop", source.submenu).selected, true, "World Drop ticked")
+    check(c.choose("World Drop"), "World Drop unticked")
+    equal(entry("World Drop", entry("Source").submenu).selected, false, "asked again: unticked")
+    check(c.choose("Scan prices when the tab opens"), "Scan when shown ticked")
     equal(TransmogCheckerDB.browser.scanWhenShown, true, "saved")
     equal(#c.ah.sends, 0, "ticking it starts no scan")
     funnel:CloseMenu()
@@ -11056,8 +11060,10 @@ local function optionsText(r)
     for i, o in ipairs(r.options) do out[i] = o.value .. "=" .. o.label end
     return table.concat(out, "|")
 end
-local LABELS = { "Show on item tooltips", "Style", "Not collected color", "Other items", "Lowest price",
-    "Grey and white items", "Scan when shown" }
+-- slice E, E3: the labels reworded
+local LABELS = { "Show collection status on item tooltips", "Tooltip style", "\"Not collected\" text color",
+    "Other items with the same appearance", "Lowest auction price seen this session",
+    "Show collection status on grey and white items", "Scan prices when the tab opens" }
 -- The stored values the seven controls stand for, in the page's order.
 local function stored()
     local db = TransmogCheckerDB
@@ -11107,9 +11113,10 @@ test("D2 page: one AddOns category with the preview, two sections and the seven 
     equal(category(c).name, "TransmogChecker", "named for the addon")
     local kinds = {}
     for i, r in ipairs(page(c)) do kinds[i] = r.kind .. ":" .. tostring(r.name) end
-    equal(table.concat(kinds, "|"), "panel:nil|header:Item tooltip|checkbox:Show on item tooltips|dropdown:Style|"
-        .. "dropdown:Not collected color|dropdown:Other items|checkbox:Lowest price|checkbox:Grey and white items|"
-        .. "header:Appearances tab|checkbox:Scan when shown", "the rows in the page's order")
+    equal(table.concat(kinds, "|"), "panel:nil|header:Item tooltip|checkbox:Show collection status on item tooltips|"
+        .. "dropdown:Tooltip style|dropdown:\"Not collected\" text color|dropdown:Other items with the same appearance|"
+        .. "checkbox:Lowest auction price seen this session|checkbox:Show collection status on grey and white items|"
+        .. "header:Appearances tab|checkbox:Scan prices when the tab opens", "the rows in the page's order")
     local tips = {
         "Show on every item tooltip whether you have collected its appearance.",
         "Full: the status, how to collect it, the lowest price and other items. Compact: the status on the item's name line.",
@@ -11126,10 +11133,10 @@ test("D2 page: one AddOns category with the preview, two sections and the seven 
         equal(r.init.data.setting:GetDefaultValue(), defaults[i], label .. ": default")
         equal(r.value, defaults[i], label .. ": first-run value")
     end
-    equal(optionsText(row(c, "Style")), "full=Full|compact=Compact", "Style's choices")
-    equal(optionsText(row(c, "Not collected color")), "orange=|cFFFF7F00Orange|r|lightBlue=|cFF87ABFFLight blue|r|white=White",
+    equal(optionsText(row(c, "Tooltip style")), "full=Full|compact=Compact", "Style's choices")
+    equal(optionsText(row(c, "\"Not collected\" text color")), "orange=|cFFFF7F00Orange|r|lightBlue=|cFF87ABFFLight blue|r|white=White",
         "the colour presets, each in its colour")
-    equal(optionsText(row(c, "Other items")), "notCollected=When not collected|always=Always|off=Off", "Other items' choices")
+    equal(optionsText(row(c, "Other items with the same appearance")), "notCollected=Only when not collected|always=Always|off=Never", "Other items' choices")
     equal(stored(), FIRST_RUN, "the stored values")
     noErrors(c, "page")
     sentNothing(c, "page")
@@ -11143,34 +11150,34 @@ test("D2 page: a change on the page reaches the stored value and the next toolti
         return out
     end
     equal(lines(505)[2], "Not collected", "full: the status after the blank line")
-    settingOf(c, "Style"):SetValue("compact")
+    settingOf(c, "Tooltip style"):SetValue("compact")
     equal(TransmogCheckerDB.tooltipStyle, "compact", "stored")
     local compact = lines(505)
     equal(compact[1] .. " (" .. #compact .. ")", "Not collected +2 items (1)", "the next tooltip is compact")
-    check(not row(c, "Lowest price").enabled, "Lowest price greyed in Compact")
-    check(row(c, "Style").enabled, "the others stay enabled")
-    local styleVariable = settingOf(c, "Style"):GetVariable()
-    local on = row(c, "Lowest price").init.evaluateOn or {}
+    check(not row(c, "Lowest auction price seen this session").enabled, "Lowest price greyed in Compact")
+    check(row(c, "Tooltip style").enabled, "the others stay enabled")
+    local styleVariable = settingOf(c, "Tooltip style"):GetVariable()
+    local on = row(c, "Lowest auction price seen this session").init.evaluateOn or {}
     check(on[1] == styleVariable or on[2] == styleVariable, "Lowest price re-evaluated when the style changes")
-    settingOf(c, "Style"):SetValue("full")
-    settingOf(c, "Not collected color"):SetValue("white")
+    settingOf(c, "Tooltip style"):SetValue("full")
+    settingOf(c, "\"Not collected\" text color"):SetValue("white")
     c.hoverItem(itemLink(505))
     local status = GameTooltip.lines[2]
     equal(status.r .. "," .. status.g .. "," .. status.b, "1,1,1", "the next status in white")
-    settingOf(c, "Other items"):SetValue("off")
+    settingOf(c, "Other items with the same appearance"):SetValue("off")
     equal(TransmogCheckerDB.otherItems, "off", "Other items stored")
-    settingOf(c, "Lowest price"):SetValue(false)
+    settingOf(c, "Lowest auction price seen this session"):SetValue(false)
     equal(TransmogCheckerDB.lowestPrice, false, "Lowest price stored")
     equal(#lines(701), 0, "a grey item: no line")
-    settingOf(c, "Grey and white items"):SetValue(true)
+    settingOf(c, "Show collection status on grey and white items"):SetValue(true)
     equal(TransmogCheckerDB.skipPoorAndCommon, false, "Grey and white items on: skipped no longer")
     check(#lines(701) > 0, "the grey item gets its lines")
-    settingOf(c, "Show on item tooltips"):SetValue(false)
+    settingOf(c, "Show collection status on item tooltips"):SetValue(false)
     equal(TransmogCheckerDB.tooltipShow, false, "Show stored")
     equal(#lines(505), 0, "Show off: no line")
     for i = 2, 6 do check(not row(c, LABELS[i]).enabled, LABELS[i] .. " greyed with Show off") end
-    check(row(c, "Show on item tooltips").enabled and row(c, "Scan when shown").enabled, "Show and Scan stay enabled")
-    settingOf(c, "Scan when shown"):SetValue(false)
+    check(row(c, "Show collection status on item tooltips").enabled and row(c, "Scan prices when the tab opens").enabled, "Show and Scan stay enabled")
+    settingOf(c, "Scan prices when the tab opens"):SetValue(false)
     equal(TransmogCheckerDB.browser.scanWhenShown, false, "Scan when shown stored in the browser's table")
     noErrors(c, "page changes")
     sentNothing(c, "page changes")
@@ -11180,29 +11187,29 @@ test("D2 one source of truth: /tc alts, /tc skipgreys and the funnel's Scan when
     local c, tabs = visitTwice({ appearances = manySlots(), settings = true, saved = { scanWhenShown = false } })
     tabs[1].scripts.OnClick(tabs[1])
     local function signals(name) return c.settings.notified[settingOf(c, name):GetVariable()] or 0 end
-    local before = signals("Other items")
+    local before = signals("Other items with the same appearance")
     said(c, "alts")
-    equal(row(c, "Other items").value, "always", "/tc alts: the page's value")
-    check(signals("Other items") > before, "/tc alts: the shown control told")
-    before = signals("Grey and white items")
+    equal(row(c, "Other items with the same appearance").value, "always", "/tc alts: the page's value")
+    check(signals("Other items with the same appearance") > before, "/tc alts: the shown control told")
+    before = signals("Show collection status on grey and white items")
     said(c, "skipgreys")
-    equal(row(c, "Grey and white items").value, true, "/tc skipgreys: the page's value")
-    check(signals("Grey and white items") > before, "/tc skipgreys: the shown control told")
-    equal(row(c, "Scan when shown").value, false, "Scan when shown off as saved")
-    before = signals("Scan when shown")
-    check(funnelPick(c, "Scan when shown"), "the funnel's checkbox")
-    equal(row(c, "Scan when shown").value, true, "the funnel's tick: the page's value")
-    check(signals("Scan when shown") > before, "the funnel's tick: the shown control told")
-    settingOf(c, "Scan when shown"):SetValue(false)
+    equal(row(c, "Show collection status on grey and white items").value, true, "/tc skipgreys: the page's value")
+    check(signals("Show collection status on grey and white items") > before, "/tc skipgreys: the shown control told")
+    equal(row(c, "Scan prices when the tab opens").value, false, "Scan when shown off as saved")
+    before = signals("Scan prices when the tab opens")
+    check(funnelPick(c, "Scan prices when the tab opens"), "the funnel's checkbox")
+    equal(row(c, "Scan prices when the tab opens").value, true, "the funnel's tick: the page's value")
+    check(signals("Scan prices when the tab opens") > before, "the funnel's tick: the shown control told")
+    settingOf(c, "Scan prices when the tab opens"):SetValue(false)
     openMenu(c, funnelOf(c))
     local ticked
-    for _, e in ipairs(c.menuEntries()) do if e ~= "-" and e.text == "Scan when shown" then ticked = e.selected end end
+    for _, e in ipairs(c.menuEntries()) do if e ~= "-" and e.text == "Scan prices when the tab opens" then ticked = e.selected end end
     funnelOf(c):CloseMenu()
     equal(ticked, false, "the page's change: the funnel's checkbox")
     -- a change made through the page itself is told once, by the setting
-    before = signals("Style")
-    settingOf(c, "Style"):SetValue("compact")
-    equal(signals("Style") - before, 1, "one signal for a change on the page")
+    before = signals("Tooltip style")
+    settingOf(c, "Tooltip style"):SetValue("compact")
+    equal(signals("Tooltip style") - before, 1, "one signal for a change on the page")
     noErrors(c, "one source of truth")
     sentNothing(c, "one source of truth")
 end)
@@ -11247,7 +11254,7 @@ test("D2 the funnel menu's last entry Settings… opens the page at Scan when sh
         if not opts.noMenuTemplates then equal(texts[#texts - 1], "-", "after a divider") end
         check(choose("Settings…"), "chosen")
         equal(#c.settings.opened, 1, "the page opens")
-        equal(c.settings.opened[1].element, "Scan when shown", "scrolled to Appearances tab's setting")
+        equal(c.settings.opened[1].element, "Scan prices when the tab opens", "scrolled to Appearances tab's setting")
         check(AuctionHouseFrame:IsShown(), "the auction window stays open")
         sentNothing(c, "settings from the funnel")
         noErrors(c, "settings from the funnel")
@@ -11271,7 +11278,7 @@ test("D2 a client without the settings API: nothing raises, /tc prints the help,
     equal(said(c, "help"), OLD_HELP, "/tc help too")
     local texts = openMenu(c, funnelOf(c))
     funnelOf(c):CloseMenu()
-    equal(texts[#texts], "Scan when shown", "no Settings… entry")
+    equal(texts[#texts], "Scan prices when the tab opens", "no Settings… entry")
     local from = #c.printed
     check(c.compartmentClick(repo).called, "the addon-list entry")
     equal(plain(c.printed[from + 1] or ""), "TC: /tc lists these commands.", "prints the help")
@@ -11300,12 +11307,12 @@ test("D2 preview: nothing before the page shows; two samples from the tooltip's 
     check(previewTexts(c)[2]:find("Other items using this appearance:", 1, true), "Always: the collected sample lists them")
     TC.SetSetting("lowestPrice", false)
     check(not previewTexts(c)[1]:find("Lowest price", 1, true), "no price line")
-    settingOf(c, "Style"):SetValue("compact")
+    settingOf(c, "Tooltip style"):SetValue("compact")
     shown = previewTexts(c)
     equal(shown[1], "Ivycloth Boots of the Eagle | Not collected +5 items\nBinds when equipped\nFeet | Cloth\n"
         .. "[bag]In your bags: equip it or sell it to a vendor to collect.", "Compact, not collected")
     equal(shown[2], "Runecloth Boots | [check]Collected\nBinds when equipped\nFeet | Cloth", "Compact, collected")
-    settingOf(c, "Show on item tooltips"):SetValue(false)
+    settingOf(c, "Show collection status on item tooltips"):SetValue(false)
     shown = previewTexts(c)
     equal(shown[1] .. "\n" .. shown[2], "Ivycloth Boots of the Eagle\nBinds when equipped\nFeet | Cloth\n"
         .. "Runecloth Boots\nBinds when equipped\nFeet | Cloth", "Show off: the items' own lines")
@@ -11421,9 +11428,11 @@ test("D2 funnel art: the funnel from Media on the filter button's own plate, the
     tabs[1].scripts.OnClick(tabs[1])
     local funnel = funnelOf(c)
     equal(texturePath(funnel.icon), FUNNEL_FILE, "the funnel file")
-    equal(funnel.icon.width .. "x" .. funnel.icon.height .. " " .. funnel.icon.points[1].point, "16x16 CENTER", "16 square, centred")
+    -- ledger (slice E, E2): the glyph is 20 square (was 16) and the
+    -- template's plate gives way to the funnel's own (it stayed)
+    equal(funnel.icon.width .. "x" .. funnel.icon.height .. " " .. funnel.icon.points[1].point, "20x20 CENTER", "20 square, centred")
     check(funnel.icon.calls.SetAtlas == nil, "no atlas on it")
-    check(funnel.Background.calls.SetAlpha == nil, "the template's plate stays")
+    equal(funnel.Background.calls.SetAlpha and funnel.Background.calls.SetAlpha[1], 0, "the template's plate hidden")
     equal(funnel.text, "", "no text")
     local mark = markOf(c)
     equal(mark.points[1].point .. " " .. mark.points[1].relativePoint .. " " .. point(mark), "CENTER TOPRIGHT 2,-9", "the mark where it was")
@@ -11434,8 +11443,257 @@ test("D2 funnel art: the funnel from Media on the filter button's own plate, the
     noErrors(d, "funnel fallback")
 end)
 
+-- Slice E, E1: the preview's lines never overlap. Each shown line of each
+-- sample as { row, left extent, right extent, sample }: the left text's
+-- width (its set width when it wraps), the right text's (0 when hidden).
+local function previewRows(c)
+    local frame = c.settings.frames[#c.settings.frames].frame
+    local out = {}
+    for _, sample in ipairs(frame.children[1].children) do
+        if sample.kind == "Frame" and visible(sample) then
+            for _, r in ipairs(sample.children) do
+                if r.kind == "Frame" and visible(r) then
+                    local left, right = r.children[1], r.children[2]
+                    local lw = left:GetStringWidth()
+                    if left.width and left.width > 0 then lw = math.min(lw, left.width) end
+                    local rw = (right.shown and right.text and right.text ~= "") and right:GetStringWidth() or 0
+                    out[#out + 1] = { row = r, left = lw, right = rw, sample = sample, text = plain(left.text or "") }
+                end
+            end
+        end
+    end
+    return frame, out
+end
+-- Every shown line: its left text, a gap of 40 and its right text inside
+-- its row, its row inside its sample, the samples side by side inside the
+-- preview's row (width given, else unchecked).
+local function noOverlap(c, what, rowWidth)
+    local frame, rows = previewRows(c)
+    check(#rows > 0, what .. ": lines shown")
+    for _, r in ipairs(rows) do
+        if r.right > 0 then
+            check(r.left + 40 + r.right <= r.row.width, ("%s: %q: left %d, gap 40, right %d within %d"):format(what,
+                r.text, r.left, r.right, r.row.width))
+        else
+            check(r.left <= r.row.width, what .. ": " .. r.text .. " within its row")
+        end
+        check(r.row.points[1].x + r.row.width <= r.sample.width - 9, what .. ": " .. r.text .. " inside its sample")
+    end
+    local samples = {}
+    for _, s in ipairs(frame.children[1].children) do if s.kind == "Frame" and visible(s) then samples[#samples + 1] = s end end
+    check(samples[1].points[1].x + samples[1].width < samples[2].points[1].x, what .. ": the samples apart")
+    if rowWidth then
+        check(samples[2].points[1].x + samples[2].width <= rowWidth, what .. ": inside the row of " .. rowWidth)
+    end
+end
+
+test("E1 preview: in every style and colour the name and its right text never overlap; the sample widens for them", function()
+    local c = d2()
+    said(c, "")
+    page(c)
+    for _, style in ipairs({ "full", "compact" }) do
+        for _, color in ipairs({ "orange", "lightBlue", "white" }) do
+            for _, others in ipairs({ "notCollected", "always", "off" }) do
+                TC.SetSetting("tooltipStyle", style)
+                TC.SetSetting("notCollectedColor", color)
+                TC.SetSetting("otherItems", others)
+                noOverlap(c, style .. "/" .. color .. "/" .. others)
+            end
+        end
+    end
+    TC.SetSetting("otherItems", "notCollected")
+    TC.SetSetting("tooltipStyle", "compact")
+    local _, rows = previewRows(c)
+    check(rows[1].sample.width > 290, "Compact: the first sample wider than 290 for its name line, got " .. rows[1].sample.width)
+    equal(rows[1].left, ("Ivycloth Boots of the Eagle"):len() * 6, "the name on one line when there is room")
+    noErrors(c, "preview overlap")
+end)
+
+test("E1 preview: in a narrow row the samples stay inside it and the name wraps before it would meet its right text", function()
+    local c = d2()
+    said(c, "")
+    page(c)
+    local frame = c.settings.frames[#c.settings.frames].frame
+    frame:SetWidth(560)
+    TC.SetSetting("tooltipStyle", "compact")
+    noOverlap(c, "compact in 560", 560)
+    local _, rows = previewRows(c)
+    check(rows[1].row.height > 17, "the name wrapped: its line taller, got " .. rows[1].row.height)
+    TC.SetSetting("tooltipStyle", "full")
+    noOverlap(c, "full in 560", 560)
+    noErrors(c, "narrow preview")
+end)
+
+-- Slice E, E2: the template's plate art (a wide button's, MenuTemplates.xml:
+-- 91, drawn 4 past each edge) gives way to a square plate of the funnel's
+-- own size; the glyph is 20 square, centred; the mark stays.
+test("E2 funnel: a square 30 plate of its own, the template's art hidden, the glyph 20 square and centred, the mark where it was", function()
+    local c, tabs = visitTwice({ appearances = manySlots() })
+    tabs[1].scripts.OnClick(tabs[1])
+    local funnel = funnelOf(c)
+    equal(funnel.width .. "x" .. funnel.height, "30x30", "the button square")
+    equal(funnel.Background.calls.SetAlpha and funnel.Background.calls.SetAlpha[1], 0, "the template's plate art hidden")
+    local plates = findAll(c, function(w)
+        return w.kind == "Texture" and w.parent == funnel and w.layer == "BACKGROUND" and w.color ~= nil
+    end)
+    check(#plates >= 1, "a plate of its own")
+    for _, p in ipairs(plates) do
+        local square = p.calls.SetAllPoints ~= nil or (#p.points == 2 and p.points[1].x == -p.points[2].x
+            and p.points[1].y == -p.points[2].y)
+        check(square, "the plate on the button, as square as it")
+    end
+    equal(funnel.icon.width .. "x" .. funnel.icon.height .. " " .. funnel.icon.points[1].point, "20x20 CENTER",
+        "the glyph two thirds of the button, centred")
+    equal(texturePath(funnel.icon), FUNNEL_FILE, "the funnel file")
+    local mark = markOf(c)
+    equal(mark.width .. " " .. mark.points[1].relativePoint .. " " .. point(mark), "22 TOPRIGHT 2,-9", "the mark where it was")
+    noErrors(c, "square funnel")
+end)
+
 end
 sliceD2()
+
+---------------------------------------------------------------- Slice E: the owner's third in-game pass
+
+-- in a function of its own, called at once: the main chunk is at its limit of 200 locals
+;(function()
+
+-- E4: the Source menu lists a type only when the slot's list has it. A
+-- slot's appearances, each with its sources' types (two sources each).
+local function typedSlot(category, first, types)
+    local list = {}
+    for i, t in ipairs(types) do
+        local id = first + i
+        list[i] = { id = id, uiOrder = i, sources = { id * 10 + 1, id * 10 + 2 }, sourceTypes = t, category = category }
+    end
+    return list
+end
+local function headAndLegs(head, legs)
+    local list = typedSlot(CAT.Head, 100, head)
+    for _, a in ipairs(typedSlot(CAT.Legs, 200, legs)) do list[#list + 1] = a end
+    return list
+end
+-- The Source menu's entries as the state answers them, the ticked marked.
+local function sourceMenu()
+    local out = {}
+    for i, e in ipairs(TC.BrowserState.SourceEntries()) do out[i] = e.name .. (e.selected and "*" or "") end
+    return table.concat(out, "|")
+end
+
+test("E4 Source menu: a slot whose appearances come from Quest and Vendor only lists Quest and Vendor", function()
+    local c = bootState({ appearances = headAndLegs({ { 2, 2 }, { 3, 3 }, { 2, 3 } }, { { 1, 4 } }),
+        saved = { scanWhenShown = false } })
+    TC.BrowserState.Refresh()
+    equal(sourceMenu(), "Quest*|Vendor*", "Head's types only, no Boss Drop, no Other")
+    TC.BrowserState.SelectSlot("legs")
+    equal(sourceMenu(), "Boss Drop*|World Drop*", "Legs' types")
+    sentNothing(c, "source menu")
+    noErrors(c, "source menu")
+end)
+
+test("E4 Source menu: a ticked-off type the new slot lacks stays listed so it can be ticked again", function()
+    local c = bootState({ appearances = headAndLegs({ { 1, 4 } }, { { 2, 2 }, { 3, 3 } }),
+        saved = { scanWhenShown = false } })
+    local S = TC.BrowserState
+    S.Refresh()
+    S.SetSource(1, false)
+    S.SelectSlot("legs")
+    equal(sourceMenu(), "Boss Drop|Quest*|Vendor*", "Boss Drop unticked, listed though Legs has none")
+    S.SetSource(1, true)
+    equal(sourceMenu(), "Quest*|Vendor*", "ticked again, it goes")
+    noErrors(c, "ticked off")
+end)
+
+-- a source type the client does not give yet (Nilable,
+-- AppearanceSourceDocumentation.lua:21): unloaded[id] true for all of the
+-- appearance's sources
+local function withUnloaded(unloaded)
+    local real = C_TransmogCollection.GetAppearanceSources
+    C_TransmogCollection.GetAppearanceSources = function(id, ...)
+        local r = real(id, ...)
+        for _, s in ipairs(r or {}) do if unloaded[id] then s.sourceType = nil end end
+        return r
+    end
+end
+
+test("E4 Source menu: while a source type of the slot is unknown (nil), nothing is hidden", function()
+    local c = bootState({ appearances = headAndLegs({ { 2, 2 }, { 3, 3 } }, {}), saved = { scanWhenShown = false } })
+    withUnloaded({ [102] = true })
+    TC.BrowserState.Refresh()
+    equal(sourceMenu(), "Boss Drop*|Quest*|Vendor*|World Drop*|Achievement*|Profession*|Other*", "every entry")
+    noErrors(c, "unknown type")
+end)
+
+test("E4 Source menu: while the slot's list is not final (Collections shown, narrowed), nothing is hidden", function()
+    -- the Head appearances Collections filters out are Boss Drop; the visible ones World Drop
+    local appearances = narrowedFixture()
+    for _, a in ipairs(appearances) do
+        if a.filteredOut then a.sourceTypes = { 1, 1, 1 } end
+    end
+    local c = narrowedState({ appearances = appearances })
+    CollectionsJournal = { IsShown = function() return true end }
+    local ok, err = pcall(function()
+        TC.BrowserState.Refresh()
+        equal(TC.BrowserState.View().count, "4 appearances", "the narrowed list")
+        equal(sourceMenu(), "Boss Drop*|Quest*|Vendor*|World Drop*|Achievement*|Profession*|Other*", "every entry")
+    end)
+    CollectionsJournal = nil
+    check(ok, tostring(err))
+    noErrors(c, "not final")
+end)
+
+test("E4 Source menu: before the list is read nothing is hidden; types appear once known; the reads it costs", function()
+    local c = bootState({ appearances = headAndLegs({ { 2, 2 }, { 3, 3 }, { 3, 3 } }, {}), saved = { scanWhenShown = false } })
+    local S = TC.BrowserState
+    local all = "Boss Drop*|Quest*|Vendor*|World Drop*|Achievement*|Profession*|Other*"
+    equal(sourceMenu(), all, "no list yet: every entry")
+    local unloaded = { [102] = true, [103] = true }
+    withUnloaded(unloaded)
+    S.Refresh()
+    equal(sourceMenu(), all, "Vendor's types not given yet: every entry")
+    unloaded[102], unloaded[103] = nil, nil
+    S.Refresh()
+    local base = c.sourcesCalls or 0
+    equal(sourceMenu(), "Quest*|Vendor*", "once known, Quest and Vendor")
+    -- the earlier openings stopped at the first unknown one, in the list's order (103 first)
+    equal((c.sourcesCalls or 0) - base, 3, "the menu read each of the three once")
+    for _ = 1, 5 do sourceMenu() end
+    S.View()
+    equal((c.sourcesCalls or 0) - base, 3, "later openings and redraws read nothing")
+    noErrors(c, "types known")
+end)
+
+test("E4 Source menu: the funnel's Source submenu lists what the state answers, with and without Blizzard's menu", function()
+    for _, opts in ipairs({ {}, { noMenuTemplates = true } }) do
+        opts.appearances = headAndLegs({ { 2, 2 }, { 3, 3 } }, {})
+        opts.saved = { scanWhenShown = false }
+        local c, tabs = visitTwice(opts)
+        tabs[1].scripts.OnClick(tabs[1])
+        local funnel = funnelOf(c)
+        local texts = openMenu(c, funnel)
+        local names = {}
+        if funnel.kind == "DropdownButton" then
+            for _, e in ipairs(c.menuEntries()) do
+                if e ~= "-" and e.text == "Source" then
+                    for _, s in ipairs(e.submenu or {}) do names[#names + 1] = s.text end
+                end
+            end
+            funnel:CloseMenu()
+        else
+            for _, text in ipairs(texts) do
+                if text:find("Source: ", 1, true) then names[#names + 1] = text end
+            end
+            funnel.close()
+        end
+        local what = funnel.kind == "DropdownButton" and "Blizzard's menu" or "own list"
+        equal(table.concat(names, "|"), funnel.kind == "DropdownButton" and "Quest|Vendor"
+            or "[x] Source: Quest|[x] Source: Vendor", what)
+        sentNothing(c, what)
+        noErrors(c, what)
+    end
+end)
+
+end)()
 
 test("TC-15 no forbidden collection call was made in the whole run", function()
     equal(Fake.forbiddenTotal or 0, 0, "forbidden calls across every test")

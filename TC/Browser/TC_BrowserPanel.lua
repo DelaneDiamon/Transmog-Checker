@@ -140,13 +140,17 @@ local SLOT_ART, SLOT_SELECTED, SLOT_HIGHLIGHT = "transmog-nav-slot-%s", "transmo
 -- frame's border (testpass F5); it covers the funnel's right 9 and top 20.
 local SEARCH_X, SEARCH_Y = 628, 9
 local FUNNEL_X, FUNNEL_Y, FUNNEL_SIZE, MARK_SIZE, MARK_X, MARK_Y = 743, 4, 30, 22, 2, -9
--- The funnel's art is the funnel of the design mock (addon-settings v1, the
--- FUNNEL drawing, rendered by dev/media/funnel_tga.py), 16 square on the
--- button's own plate (the filter template's Background, MenuTemplates.xml:
--- 91); when its file fails to load, the owner's earlier choice, the settings
--- button of Blizzard_DamageMeter/DamageMeterSettingsDropdownButton.xml:5-8,
+-- The funnel's art is a funnel (dev/media/funnel_tga.py renders it), 20
+-- square, two thirds of the button, on a square plate of the button's own
+-- size (slice E, E2): the filter template's plate (its Background,
+-- MenuTemplates.xml:91, drawn 4 past each edge) is the art of a wide
+-- "Filter" button, which squeezed into a square read wider than tall with a
+-- thin bright sliver at its right, so it is hidden. The plate is the price
+-- strip's dark fill inside a 1 line of the tiles' border, lit on hover and
+-- while a choice differs (LockHighlight); when its file fails to load, the
+-- owner's earlier choice, the settings button of Blizzard_DamageMeter/DamageMeterSettingsDropdownButton.xml:5-8,
 -- with its hover and pressed forms; without that the world map's filter art.
-local FUNNEL_GLYPH = 16
+local FUNNEL_GLYPH = 20
 local FUNNEL_ATLAS = "common-dropdown-a-button-settings-shadowless"
 local FUNNEL_HOVER = "common-dropdown-a-button-settings-hover-shadowless"
 local FUNNEL_PRESSED = "common-dropdown-a-button-settings-pressed-shadowless"
@@ -155,7 +159,7 @@ local FUNNEL_OPEN = "common-dropdown-a-button-settings-open-shadowless"
 local FUNNEL_FALLBACK, RESET_ATLAS = "Map-Filter-Button", "auctionhouse-ui-filter-redx"
 local FUNNEL_TEXT, FUNNEL_TIP = "Filter", "Filter and sort"
 local CLASS_TEXT, RESET_TEXT = "Class: %s", "Reset filters"
-local FOR_SALE_TEXT, SOURCE_TEXT, SORT_TEXT, SCAN_SHOWN_TEXT = "For sale only", "Source", "Sort", "Scan when shown"
+local FOR_SALE_TEXT, SOURCE_TEXT, SORT_TEXT, SCAN_SHOWN_TEXT = "For sale only", "Source", "Sort", "Scan prices when the tab opens"
 local SETTINGS_TEXT = "Settings…"
 -- A checkbox's mark in the panel's own list menu, without Blizzard's menu.
 local TICKED, UNTICKED = "[x] ", "[ ] "
@@ -1066,7 +1070,9 @@ local function newDropdown(panel, width, pick)
 end
 
 -- The funnel (layout B, 1.3, slice B): the Show choices (the Filter); For
--- sale only; the Source entries and the class as submenus; the sort's
+-- sale only; the Source entries the state answers at each opening
+-- (State.SourceEntries: the types the slot has) and the class as
+-- submenus; the sort's
 -- three choices; Scan when shown; then "Reset filters" while Reset would
 -- change something. Blizzard's filter dropdown
 -- (WowStyle1FilterDropdownTemplate) drawn with the world map's filter art
@@ -1108,7 +1114,7 @@ local function newFunnel(panel)
             root:CreateDivider()
             root:CreateCheckbox(FOR_SALE_TEXT, forSaleOnly, toggleForSale)
             local sources = root:CreateButton(SOURCE_TEXT)
-            for _, entry in ipairs(current.sources) do sources:CreateCheckbox(entry.name, sourceTicked, toggleSource, entry.value) end
+            for _, entry in ipairs(State.SourceEntries()) do sources:CreateCheckbox(entry.name, sourceTicked, toggleSource, entry.value) end
             local classes = current.classes
             local submenu = root:CreateButton(CLASS_TEXT:format(inClassColour(classes.text, classes.classFile)))
             for i, entry in ipairs(classes.entries) do
@@ -1131,7 +1137,10 @@ local function newFunnel(panel)
         end)
     local menu
     if not funnel then
-        funnel = newButton(panel, "", FUNNEL_SIZE, FUNNEL_SIZE, function() menu:SetShown(not menu:IsShown()) end)
+        funnel = newButton(panel, "", FUNNEL_SIZE, FUNNEL_SIZE, function()
+            menu:SetShown(not menu:IsShown())
+            if menu:IsShown() and current then funnel.draw(current) end
+        end)
         menu = listMenu(panel, funnel, 170, "RIGHT")
     end
     funnel:SetPoint("TOPLEFT", panel, "TOPLEFT", FUNNEL_X, -FUNNEL_Y)
@@ -1145,6 +1154,20 @@ local function newFunnel(panel)
     local art
     if glyph:SetTexture(MEDIA .. "funnel") ~= false then
         funnel.icon = glyph
+        -- Blizzard's dropdown (the own button keeps its panel button art)
+        if not menu and funnel.Background then
+            funnel.Background:SetAlpha(0)
+            local edge = funnel:CreateTexture(nil, "BACKGROUND")
+            edge:SetAllPoints()
+            edge:SetColorTexture(unpack(BORDER))
+            local fill = funnel:CreateTexture(nil, "BACKGROUND", nil, 1)
+            fill:SetPoint("TOPLEFT", 1, -1)
+            fill:SetPoint("BOTTOMRIGHT", -1, 1)
+            fill:SetColorTexture(unpack(STRIP_TOP))
+            local lit = funnel:CreateTexture(nil, "HIGHLIGHT")
+            lit:SetAllPoints(fill)
+            lit:SetColorTexture(1, 0.82, 0, 0.15)
+        end
     else
         glyph:Hide()
         art = hasAtlas(FUNNEL_ATLAS) and FUNNEL_ATLAS or hasAtlas(FUNNEL_FALLBACK) and FUNNEL_FALLBACK or nil
@@ -1216,14 +1239,15 @@ local function newFunnel(panel)
         if funnel.LockHighlight then
             if view.filtersChanged then funnel:LockHighlight() else funnel:UnlockHighlight() end
         end
-        if not menu then return end
+        -- the own list is filled while it is shown: at its opening and on a change
+        if not (menu and menu:IsShown()) then return end
         local function mark(on) return on and TICKED or UNTICKED end
         local items = {}
         for _, entry in ipairs(view.filters) do
             items[#items + 1] = { text = entry.name, action = function() State.SetFilter(entry.value) end }
         end
         items[#items + 1] = { text = mark(view.forSaleOnly) .. FOR_SALE_TEXT, line = true, action = toggleForSale }
-        for _, entry in ipairs(view.sources) do
+        for _, entry in ipairs(State.SourceEntries()) do
             items[#items + 1] = { text = mark(entry.selected) .. SOURCE_TEXT .. ": " .. entry.name,
                 action = function() State.SetSource(entry.value, not entry.selected) end }
         end

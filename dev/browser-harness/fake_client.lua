@@ -328,8 +328,12 @@ function Fake.new(opts)
     function methods:ClearFocus() self.focus = false end
     function methods:HasFocus() return self.focus == true end
     function methods:GetText() return self.text end
-    -- a font string's text width: 6 for each character
-    function methods:GetStringWidth() return #(self.text or "") * 6 end
+    -- a font string's text width: 6 for each character shown; a colour code
+    -- draws nothing and a texture's markup (|T...|t) draws one 12 wide (slice E)
+    function methods:GetStringWidth()
+        local shown = (self.text or ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("|T.-|t", "..")
+        return #shown * 6
+    end
     -- a font string's text height: 12 for each line of 6 per character wrapped
     -- at its width (one line without a width), none for no text
     function methods:GetStringHeight()

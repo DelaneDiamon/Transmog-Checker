@@ -45,12 +45,12 @@ The appearance browser's filter that keeps only appearances with a known price, 
 _Avoid_: Available, on AH, collectable mode, For sale mode
 
 **Source filter**:
-The appearance browser's filter by how an appearance's items are obtained, one entry per source type the game names and Other; an appearance passes when any of its items comes from a ticked type.
+The appearance browser's filter by how an appearance's items are obtained, one entry per source type the game names and Other, each listed once the slot's appearances are known to have it (or while it is unticked); an appearance passes when any of its items comes from a ticked type.
 _Avoid_: Origin filter, drop filter
 
-**Scan when shown**:
+**Scan prices when the tab opens**:
 The appearance browser's setting that scans the slot when the tab is shown or the slot is selected, unless the slot has a scan from this visit. Off, only a click reads the auction house.
-_Avoid_: Auto-scan, auto-refresh
+_Avoid_: Scan when shown, auto-scan, auto-refresh
 
 **Check**:
 One lookup of the auction house for the items that carry a single appearance, started by a click on its tile.
