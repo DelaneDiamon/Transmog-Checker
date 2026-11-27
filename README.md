@@ -46,6 +46,10 @@ Options > AddOns > TransmogChecker. The page starts with a preview of the toolti
 
 The settings page.
 
+### Languages
+
+TransmogChecker is available in English, German, French, Italian, Spanish (EU and Latin America), Portuguese (Brazil), Russian, Korean, Simplified Chinese and Traditional Chinese. It follows the game's language; the Language setting on the settings page overrides it, and a change applies after the interface reloads. The translations are new, and corrections are welcome.
+
 ## Slash commands
 
 - `/tc` opens the settings page.

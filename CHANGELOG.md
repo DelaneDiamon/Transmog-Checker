@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.1 (2026-11-27)
+
+- New: TransmogChecker is available in German, French, Italian, Spanish (EU and Latin America), Portuguese (Brazil), Russian, Korean, Simplified Chinese and Traditional Chinese.
+- New: it follows the game's language. The Language setting on the settings page overrides it; a change applies after the interface reloads.
+- Changed: the Buy button in the item list fits longer words.
+- The translations are new, and corrections are welcome.
+
 ## 1.0.0 (2026-11-27)
 
 - New: an Appearances tab on the auction house window. It shows every appearance of a slot as tiles and which of them are for sale, with the lowest price on each tile.
