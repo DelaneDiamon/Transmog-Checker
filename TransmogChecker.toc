@@ -1,6 +1,7 @@
 ## Interface: 16001
 ## Title: TransmogChecker
-## Notes: Transmog Checker Addon for Classic
+## Notes: Shows on item tooltips and in an Appearances tab on the auction house which appearances you have collected. For WoW: Forever.
+## Version: @project-version@
 ## Author: DelaneDiamon
 ## SavedVariables: TransmogCheckerDB
 ## OptionalDeps: LibStub, LibAHTab

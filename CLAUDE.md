@@ -13,7 +13,7 @@ WoW addon that annotates item tooltips with transmog collection status and with 
 
 ## Verifying a change
 
-There are no automated tests; the check happens in the game client and the results are read back from disk.
+`dev/browser-harness/run.lua` runs the addon's files against a fake client outside the game (in WSL: `lua5.1 dev/browser-harness/run.lua` from the repo root); it must end with 0 failed. It does not replace the in-game check, which happens in the game client with the results read back from disk.
 
 1. Copy `TransmogChecker.toc`, `TransmogChecker.lua`, `TC/`, `Libs/` and `Media/` into `C:\Games\World of Warcraft\_forever_\Interface\AddOns\TransmogChecker`.
 2. The user types `/reload`; a reload also picks up a brand-new addon folder. Desktop control cannot target the game window, so every in-game step is the user's.
@@ -25,4 +25,4 @@ There are no automated tests; the check happens in the game client and the resul
 
 ## Releasing
 
-Every push to `main` publishes a GitHub release with the next patch tag (`.github/workflows/release-on-push.yml`), and a GitHub webhook has CurseForge package that tag. Treat a push to `main` as a release: get the user's go-ahead first, after the in-game check has passed. A `.pkgmeta` at the repo root keeps `dev/`, `CLAUDE.md` and `GLOSSARY.md` out of the CurseForge package; the GitHub release still carries GitHub's own source archive of the whole tree.
+Every push to `main` publishes a GitHub release with the next patch tag (`.github/workflows/release-on-push.yml`), and a GitHub webhook has CurseForge package that tag. Treat a push to `main` as a release: get the user's go-ahead first, after the in-game check has passed. A `.pkgmeta` at the repo root keeps `dev/`, `docs/`, `CLAUDE.md`, `GLOSSARY.md` and `CHANGELOG.md` out of the CurseForge package; the GitHub release still carries GitHub's own source archive of the whole tree.

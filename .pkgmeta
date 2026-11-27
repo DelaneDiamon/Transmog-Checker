@@ -7,3 +7,5 @@ ignore:
   - dev
   - CLAUDE.md
   - GLOSSARY.md
+  - CHANGELOG.md
+  - docs
