@@ -21,7 +21,7 @@ Six screenshots, in the order they appear in `docs/curseforge-description.md`. E
 - Setup: Tooltip style Compact. Hover a not-collected item with other items, then (for a second crop, optional) a collected one.
 - Visible: "Not collected +N items" (or "Collected" with its check) on the right of the name line.
 - Crop: the tooltip only.
-- Caption: Compact style puts the status on the item's name line.
+- Caption: Compact style puts the status and the count of other items on the name line.
 
 ## 3. The Appearances tab
 
@@ -33,16 +33,16 @@ Six screenshots, in the order they appear in `docs/curseforge-description.md`. E
 ## 4. A tile's items for sale
 
 - Setup: on the same page, click a tile with a price, wait for the check, click it again so its list opens.
-- Visible: the open list beside its tile, the item rows with prices and their Buy buttons.
+- Visible: the open list beside its tile, with the cheapest item's icon at its top left beside the type and "N items, cheapest first", the item rows with prices and their Buy buttons.
 - Crop: the auction house window, or the list and its tile with some grid around them.
-- Caption: Click a look to see each item for sale and buy it in one step.
+- Caption: Click a look to see each item for sale, cheapest first, with a Buy button.
 
 ## 5. The Filter menu
 
 - Setup: click the Filter button and open the Source or Class submenu.
 - Visible: Show, For sale only, Source, Class, Sort, the open submenu.
 - Crop: the upper half of the window with the menu.
-- Caption: Filter by collected, for sale, source and class; sort by price.
+- Caption: Filter by collection status, for sale, source and class; sort by price.
 
 ## 6. The settings page
 

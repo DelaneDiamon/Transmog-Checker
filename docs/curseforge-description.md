@@ -16,14 +16,14 @@ If an item in your bags, or one you just bought, would add a look you do not hav
 
 ## The Appearances tab
 
-Open the auction house and click its **Appearances** tab. It shows every appearance of one slot as tiles, like the game's Collections window, and which of them are for sale right now.
+Open the auction house and click its **Appearances** tab (the window's title then reads Appearance Browser). It shows every appearance of one slot as tiles, like the game's Collections window, and which of them are for sale right now.
 
 A typical visit:
 
 1. Open the tab. It starts on the looks you have not collected, sorted by price, low to high, for your own class, and scans the slot.
 2. Pick a slot in the slot row: Head, Shoulder, Back, Chest, Shirt, Tabard, Wrist, Hands, Waist, Legs, Feet, Main hand, Off hand or Ranged.
 3. Hover a tile to see its lowest price and where its items come from.
-4. Click a tile to check the auction house for that look. Click it again to see the items for sale.
+4. Click a tile to check the auction house for that look. Click it again to see the items for sale, cheapest first, under the cheapest item's icon.
 5. Click **Buy** on a row. A small dialog finds the cheapest auction and buys it at its buyout when you confirm.
 
 [Screenshot 3: the Appearances tab]
@@ -32,12 +32,14 @@ A typical visit:
 
 The **Filter** button holds the filters and the sort:
 
-- Show: All, Collected or Not collected.
+- Show: All, Collected or Not collected, and Bought, not collected while something you bought or have in your bags would add a look.
 - For sale only.
-- Source: how the items are obtained, as the game names it.
-- Class: your class, another class, or All classes.
+- Source: how the items are obtained, as the game names it, listing only the source types the slot's looks have, plus Other.
+- Class: All classes, your class or another class.
 - Sort: Collections order, Price: low to high, Price: high to low.
-- Reset filters, and Settings….
+- Scan prices when the tab opens.
+- Reset filters, while a filter or the sort differs from the start.
+- Settings….
 
 Weapon slots also have a weapon type dropdown, and the Search box narrows the tiles by item name. **Scan slot** reads the slot again whenever you want fresh prices.
 
@@ -67,7 +69,7 @@ Open Options > AddOns > TransmogChecker, type `/tc`, or use the addon list on th
 
 - Made for WoW: Forever only. Releases up to 0.0.21 were for Mists of Pandaria Classic and get no new work.
 - Opening the settings page closes the auction house window, because the game's Options window does.
-- The game reports no boss-drop sources, so the Source filter lists only the source types the game knows; the rest are under Other.
+- The Source filter lists only the source types the slot's looks have. The game reports no boss-drop sources, so those items are under Other.
 - Prices are what the last scan or check saw. The lowest price on tooltips lasts for the session and is gone after a reload or logout.
 - In combat, the settings page opens once combat ends.
 

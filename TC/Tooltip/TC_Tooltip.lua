@@ -220,11 +220,15 @@ local function leftText(line)
     return line.mark and ("|T" .. MARKS[line.mark] .. ":0|t " .. line.text) or line.text
 end
 
--- A price as numbers each followed by a small coin, as the browser draws it.
+-- A price as numbers each followed by a coin, marked up and spaced as the
+-- game's money formatter does: a 14 square coin 2 right of its number, the
+-- parts one space apart (Blizzard_SharedXML/MoneyFormatter.lua:63-67, 172,
+-- 252); the browser's 12 square coin without the offset touched the next
+-- number in the tooltip (testpass 1).
 local function moneyMarkup(parts)
     local words = {}
     for i, part in ipairs(parts) do
-        local coin = CreateAtlasMarkup and CreateAtlasMarkup(COIN_ATLAS[part.coin], 12, 12) or COIN_LETTERS[part.coin]
+        local coin = CreateAtlasMarkup and CreateAtlasMarkup(COIN_ATLAS[part.coin], 14, 14, 2, 0) or COIN_LETTERS[part.coin]
         words[i] = part.amount .. coin
     end
     return table.concat(words, " ")

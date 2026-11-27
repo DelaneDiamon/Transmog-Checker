@@ -1357,7 +1357,8 @@ end
 -- state is "checking", "found", "not for sale", "cannot be sold", "could not
 -- check", or "not checked" after a check was stopped by leaving the tab,
 -- which lists the items it had learnt. The body comes from the newest read,
--- a check or the slot's scan. A row's name is nil while it has not loaded.
+-- a check or the slot's scan. A row's name is nil while it has not loaded;
+-- a found row carries its item's id, for the head's icon.
 -- The foot's button is off while a check runs.
 local function itemList()
     local appearance = view.open
@@ -1403,7 +1404,8 @@ local function itemList()
     end
     local itemsLeftOut = result.leftOut and ("Could not check %d of %d items."):format(result.leftOut, result.total)
     if result.outcome == "found" then
-        out.title = plural(#result.rows, "item variant", "item variants") .. ", cheapest first"
+        -- short enough for one line beside the icon (testpass 1)
+        out.title = plural(#result.rows, "item", "items") .. ", cheapest first"
         -- every found row offers Buy when the client has the calls for it
         -- (TC_Buy); it is off while a check or a scan runs
         local buyable = TC.Buy ~= nil and TC.Buy.Available()
@@ -1411,7 +1413,7 @@ local function itemList()
             local parts = money(row.minPrice)
             local name, quality = row.name, row.quality
             if not name then name, quality = itemOwn(row.itemKey.itemID, know) end
-            out.rows[i] = { name = variantName(row.itemKey) or name, quality = quality,
+            out.rows[i] = { name = variantName(row.itemKey) or name, quality = quality, itemID = row.itemKey.itemID,
                 forSale = "x" .. row.totalQuantity, money = parts, price = moneyText(parts) }
             if buyable then
                 out.rows[i].buy = { enabled = not readsRunning(), variant = { itemKey = row.itemKey,

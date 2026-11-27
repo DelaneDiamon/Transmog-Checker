@@ -43,7 +43,7 @@ local STRIP_CHECKED = { 0.12, 0.12, 0.12, 1 }
 -- SharedScriptObjectModelLightDocumentation.lua:6-17).
 local LIGHT = { point = { -1, 1, -1 }, ambient = 1.05, diffuse = 0 }
 -- The flyout (layout B, section 6): 232 wide, as high as its parts (head
--- 66, which holds the summary line right of the model, rows of 40, foot 28)
+-- 66, which holds the summary line right of the icon, rows of 40, foot 28)
 -- and at most 300; four rows show, more scroll. It opens left of its tile
 -- when it fits inside the panel there, else right (testpass F7), 8 from the
 -- tile, its top 28 above the tile's, moved up so it never passes the grid's
@@ -52,8 +52,8 @@ local FLY_WIDTH, FLY_MAX, FLY_GAP, FLY_ABOVE = 232, 300, 8, 28
 local GRID_BOTTOM = GRID_Y + ROWS * TILE_HEIGHT + (ROWS - 1) * GAP_Y
 local FLY_HEAD, FLY_TEXT, FLY_ROW, FLY_NOTE, FLY_FOOT, FLY_ROWS = 66, 30, 40, 14, 28, 4
 local FLY_INSIDE = FLY_WIDTH - 20
--- The head's texts start right of the model (x 62) and stop before the close mark.
-local HEAD_TEXT_X = 62
+-- The head's texts start 8 right of the icon (x 50) and stop before the close mark.
+local HEAD_TEXT_X = 50
 local HEAD_TEXT_WIDTH = FLY_WIDTH - HEAD_TEXT_X - 28
 local FLY_EDGE = { 0.54, 0.45, 0.30, 1 }
 local FLY_FILL = { 0.04, 0.035, 0.03, 0.97 }
@@ -69,7 +69,15 @@ local ROW_STRIPE_ATLAS, ROW_HIGHLIGHT_ATLAS = "auctionhouse-rowstripe-1", "aucti
 local ROW_STRIPE, ROW_HOVER = { 1, 1, 1, 0.045 }, { 1, 0.839, 0.471, 0.13 }
 -- The fade over the last row when more rows follow below.
 local FADE_HEIGHT = 16
-local HEAD_MODEL_WIDTH, HEAD_MODEL_HEIGHT = 44, 58
+-- The head's item icon (testpass 1): the icon of the list's first row in the
+-- auction house's item icon border, 14 in 16 there
+-- (Blizzard_AuctionHouseUI/Shared/Blizzard_AuctionHouseTableBuilder.xml:
+-- 127-141), here 28 in 32. Without a row's icon the slot row's art for the
+-- slot, without that the question mark
+-- (Blizzard_EncounterJournal/Mainline/Blizzard_EncounterJournal.lua:239).
+local ICON_SIZE, ICON_BORDER_SIZE = 28, 32
+local ICON_BORDER_ATLAS = "auctionhouse-itemicon-small-border"
+local QUESTION_MARK = "Interface\\Icons\\INV_Misc_QuestionMark"
 -- A found row's Buy button.
 local BUY_WIDTH, BUY_HEIGHT = 40, 18
 -- Texture paths are inferred from mainline clients, not read for Forever.
@@ -247,8 +255,13 @@ end
 -- camera. That a zoom of 1.236 frames a cloak whole is the owner's wish, to be
 -- seen in game.
 
+-- The view is rebuilt for the frame's current place and size first, as
+-- Blizzard does before it applies a UI camera again
+-- (Blizzard_Collections/Mainline/Blizzard_Wardrobe.lua:757-763,
+-- Blizzard_FrameXML/TalkingHeadUI.lua:264-269).
 local function applyCamera(model)
     if not (model.tcCamera and Model_ApplyUICamera) then return end
+    if model.RefreshCamera then model:RefreshCamera() end
     Model_ApplyUICamera(model, model.tcCamera)
     local fit = model.tcZoom
     -- Model_ApplyUICamera moved the camera only when the camera has a position
@@ -287,8 +300,20 @@ local function newModel(parent, x, y, width, height)
     model:SetUnit("player", false)
     model:SetKeepModelOnHide(true)
     -- Blizzard applies the camera again once the model is in
-    -- (ItemModelBaseMixin:OnModelLoaded).
-    model:SetScript("OnModelLoaded", applyCamera)
+    -- (ItemModelBaseMixin:OnModelLoaded), and puts the piece on again once
+    -- the figure is ready (Blizzard_Wardrobe.lua:734, 1013-1019, 1078-1086):
+    -- a piece tried on before the figure loaded can be lost (inferred from
+    -- an empty item list preview in game). Once per piece, so a load that
+    -- TryOn itself may cause cannot loop.
+    model:SetScript("OnModelLoaded", function(self)
+        applyCamera(self)
+        local sourceID = self.tcRetry
+        self.tcRetry = nil
+        if sourceID then self:TryOn(sourceID) end
+    end)
+    -- the view is built for the frame's size, so a size change (the first
+    -- layout too) builds it again
+    model:SetScript("OnSizeChanged", applyCamera)
     return model
 end
 
@@ -304,6 +329,7 @@ local function newWeaponModel(parent, x, y, width, height)
     light(model)
     model:SetKeepModelOnHide(true)
     model:SetScript("OnModelLoaded", applyCamera)
+    model:SetScript("OnSizeChanged", applyCamera)
     return model
 end
 
@@ -326,6 +352,14 @@ end
 local function aim(model, appearance)
     if model.tcAppearance == appearance.id then return false end
     model.tcAppearance = appearance.id
+    -- a reused frame drops the last appearance's view first
+    -- (Model_ApplyUICamera sets these only when the camera has a position,
+    -- Blizzard_SharedXML/Mainline/ModelFrames.lua:73-82)
+    if model.RefreshCamera then model:RefreshCamera() end
+    if model.SetPosition then model:SetPosition(0, 0, 0) end
+    if model.SetFacing then model:SetFacing(0) end
+    if model.SetPitch then model:SetPitch(0) end
+    if model.SetRoll then model:SetRoll(0) end
     -- the camera is applied again even when it is the same, as before
     model.tcCamera = nil
     frame(model, appearance)
@@ -342,6 +376,7 @@ local function dress(model, appearance)
     if model.tcSlot and model.tcSlot ~= appearance.slot and model.Undress then model:Undress() end
     model.tcSlot = appearance.slot
     local sourceID = TC.Appearances.DisplaySource(appearance)
+    model.tcRetry = sourceID
     if sourceID then
         model:TryOn(sourceID)
     end
@@ -516,7 +551,7 @@ end
 -- (FrameAPIDressUpModelDocumentation.lua:240) and not run in game.
 local function undress(model)
     if model.tcAppearance == nil then return end
-    model.tcAppearance, model.tcSlot = nil, nil
+    model.tcAppearance, model.tcSlot, model.tcRetry = nil, nil, nil
     if model.Undress then model:Undress() end
 end
 
@@ -629,21 +664,16 @@ local function newFlyout(panel, level, overTile)
     end
     local notch = { notchPart("BACKGROUND", NOTCH_SIZE + 2, FLY_EDGE), notchPart("BORDER", NOTCH_SIZE - 1, FLY_FILL) }
 
-    -- head: the model, the type and, when collected, "Collected" with the
-    -- tile's check
-    local model = newModel(frame, 10, -8, HEAD_MODEL_WIDTH, HEAD_MODEL_HEIGHT)
-    -- the tile's border around the small model, on a frame above it
-    -- (visual pass, board 8); without the atlases none, as before
-    local modelEdge
-    if hasAtlas(EDGE_ATLAS) and hasAtlas(EDGE_COLLECTED_ATLAS) then
-        local over = CreateFrame("Frame", nil, frame)
-        over:SetFrameLevel(frame:GetFrameLevel() + 5)
-        over:SetPoint("TOPLEFT", frame, "TOPLEFT", 10, -8)
-        over:SetSize(HEAD_MODEL_WIDTH, HEAD_MODEL_HEIGHT)
-        modelEdge = over:CreateTexture(nil, "OVERLAY")
-        modelEdge:SetPoint("TOPLEFT", over, "TOPLEFT", -3, 3)
-        modelEdge:SetPoint("BOTTOMRIGHT", over, "BOTTOMRIGHT", 3, -3)
-    end
+    -- head: the item icon, the type and, when collected, "Collected" with
+    -- the tile's check. The icon in its border, as the auction house's rows
+    -- draw theirs; without the border's atlas the icon alone.
+    frame.iconBorder = frame:CreateTexture(nil, "ARTWORK", nil, 2)
+    frame.iconBorder:SetSize(ICON_BORDER_SIZE, ICON_BORDER_SIZE)
+    frame.iconBorder:SetPoint("TOPLEFT", frame, "TOPLEFT", 10, -10)
+    if hasAtlas(ICON_BORDER_ATLAS) then setAtlas(frame.iconBorder, ICON_BORDER_ATLAS) end
+    frame.icon = frame:CreateTexture(nil, "ARTWORK", nil, 1)
+    frame.icon:SetSize(ICON_SIZE, ICON_SIZE)
+    frame.icon:SetPoint("CENTER", frame.iconBorder, "CENTER")
     -- hairlines under the head and over the foot (layout B, board 6.1)
     local function hairline()
         local line = frame:CreateTexture(nil, "ARTWORK")
@@ -678,7 +708,7 @@ local function newFlyout(panel, level, overTile)
     close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -4, -4)
     close:SetScript("OnClick", State.CloseList)
 
-    -- the summary line, under the type (and "Collected"), right of the model
+    -- the summary line, under the type (and "Collected"), right of the icon
     -- SpinnerTemplate: Blizzard_SharedXML/Spinner.xml:3
     local spinner = templated("Frame", frame, "SpinnerTemplate")
     if spinner then spinner:SetSize(16, 16) end
@@ -765,6 +795,21 @@ local function newFlyout(panel, level, overTile)
         end
     end
 
+    -- The first row's item icon (C_Item.GetItemIconByID,
+    -- ItemDocumentation.lua:611-623; no auction house read), else the slot
+    -- row's art for the slot, else the question mark.
+    local function drawIcon(list)
+        local first = list.rows[1]
+        local icon = first and first.itemID and C_Item and C_Item.GetItemIconByID
+            and C_Item.GetItemIconByID(first.itemID)
+        local art = SLOT_ART:format(TC.Slots[list.appearance.slot].art)
+        if hasAtlas(art) and not icon then return setAtlas(frame.icon, art) end
+        frame.icon:SetTexture(icon or QUESTION_MARK)
+        -- the whole file, not the corner an atlas drawn before left set
+        -- (inferred, unverified in game)
+        frame.icon:SetTexCoord(0, 1, 0, 1)
+    end
+
     local shownID, current, currentIndex
     local function drawList(list, index)
         current, currentIndex = list, index
@@ -794,10 +839,7 @@ local function newFlyout(panel, level, overTile)
         count = #list.rows
         offset = math.max(0, math.min(offset, count - shown))
         place(index, height)
-        show(frame, "weaponModel", model, list.appearance, list.weapon, function()
-            return newWeaponModel(frame, 10, -8, HEAD_MODEL_WIDTH, HEAD_MODEL_HEIGHT)
-        end)
-        if modelEdge then setAtlas(modelEdge, list.collected and EDGE_COLLECTED_ATLAS or EDGE_ATLAS) end
+        drawIcon(list)
         headLine:ClearAllPoints()
         headLine:SetPoint("TOPLEFT", frame, "TOPLEFT", 10, -(head - 1))
         text:ClearAllPoints()

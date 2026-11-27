@@ -1423,7 +1423,7 @@ test("state: a click on a tile with nothing kept opens no flyout and starts one 
     click(tiles[1])
     v = TC.BrowserState.View()
     equal(v.list.state, "found", "the second click opens the list")
-    equal(v.list.title, "1 item variant, cheapest first", "found title")
+    equal(v.list.title, "1 item, cheapest first", "found title")
     equal(v.list.rows[1].forSale, "x1", "for sale text")
     equal(v.list.typeText, "Head, cloth", "head type")
     equal(#c.ah.sends, 3, "opening a kept result sends nothing")
@@ -1557,7 +1557,7 @@ test("state: money text on the tile and in the list, with zero parts left out", 
     equal(v.tiles[4].price, "88g 75c", "88g 0s 75c on a tile keeps copper below 100 gold")
     click(tiles[2])
     v = TC.BrowserState.View()
-    equal(v.list.title, "3 item variants, cheapest first", "found title")
+    equal(v.list.title, "3 items, cheapest first", "found title")
     equal(v.list.rows[1].price, "1g 5c", "row 1")
     equal(v.list.rows[2].price, "50g", "row 2")
     equal(v.list.rows[3].price, "487g 63s 12c", "487g 63s 12c in full in the list")
@@ -1987,7 +1987,7 @@ test("state: a click on a tile after a scan opens the list from the scan's rows 
     local l = TC.BrowserState.View().list
     equal(l.appearance.id, 1020, "the list on the clicked tile")
     equal(l.state, "found", "list state")
-    equal(l.title, "1 item variant, cheapest first", "found title")
+    equal(l.title, "1 item, cheapest first", "found title")
     equal(l.rows[1].price, "3s", "the row's price")
     equal(l.foot.age, "Scanned just now", "foot age")
     equal(l.foot.button, "Check again", "foot button")
@@ -2004,10 +2004,10 @@ test("state: a click on a tile found while the first scan runs reads nothing; th
     c.advance(0.26)
     click(TC.BrowserState.View().tiles[1])
     equal(#c.ah.sends, 1, "browses: the scan's only")
-    equal(TC.BrowserState.View().list.title, "1 item variant, cheapest first", "rows known so far")
+    equal(TC.BrowserState.View().list.title, "1 item, cheapest first", "rows known so far")
     c.advance(10)
     equal(#c.ah.sends, 1, "browses after the scan")
-    equal(TC.BrowserState.View().list.title, "2 item variants, cheapest first", "rows after the scan")
+    equal(TC.BrowserState.View().list.title, "2 items, cheapest first", "rows after the scan")
 end)
 
 test("state: the status line in each state of 2.8, and the progress never above 95 percent before the last page", function()
@@ -2674,7 +2674,7 @@ test("whole: a click on a tile whose appearance has two tradeable names makes ex
     equal(#c.ah.sends, 2, "browses")
     frames[2].button.scripts.OnClick(frames[2].button)
     check(textShown(c, "Head, cloth"), "head type on screen")
-    check(textShown(c, "2 item variants, cheapest first"), "found title on screen")
+    check(textShown(c, "2 items, cheapest first"), "found title on screen")
     check(textShown(c, "Willow Boots"), "a found row's name")
     check(textShown(c, "x2"), "a found row's quantity")
     check(textShown(c, "Checked just now"), "the foot's age")
@@ -2727,7 +2727,7 @@ test("whole: the collection event during a check and with the list open ends the
     c.advance(10)
     equal(#c.ah.sends, 3, "browses: one per item name")
     frames[1].button.scripts.OnClick(frames[1].button)
-    check(textShown(c, "1 item variant, cheapest first"), "the check ended as found")
+    check(textShown(c, "1 item, cheapest first"), "the check ended as found")
     c.fire("TRANSMOG_COLLECTION_UPDATED")
     c.advance(10)
     check(textShown(c, "Check again"), "the list still open after an event that changes nothing")
@@ -2756,7 +2756,7 @@ test("whole: a found row's name follows the variant's name the client sends by i
     frames[1].button.scripts.OnClick(frames[1].button)
     c.advance(0.26)
     frames[1].button.scripts.OnClick(frames[1].button)
-    check(textShown(c, "1 item variant, cheapest first"), "found")
+    check(textShown(c, "1 item, cheapest first"), "found")
     check(textShown(c, "Willow Boots"), "the item's name before the variant's arrives")
     -- the event at 0.012 s; the panel redraws on the next frame (TC-32)
     c.advance(0.012 + c.FRAME)
@@ -3427,14 +3427,13 @@ test("whole: weapon tiles show on their own 24 model frames, made on the first w
     check(textShown(c, "10 appearances"), "count after choosing daggers")
     equal(dropdown.text, "Daggers", "dropdown text")
     equal(#c.ah.sends, sends, "no browse for the weapon type")
-    -- the head's small model is a weapon model too
+    -- the item list's head names the weapon type; it has no model
     frames[1].button.scripts.OnClick(frames[1].button)
     c.advance(10)
     frames[1].button.scripts.OnClick(frames[1].button)
     check(find(c, function(w) return w.text == "Daggers" and visible(w) and under(w, itemListFrame(c)) end),
         "the head's type line")
-    local list = itemListFrame(c)
-    check(list.weaponModel and visible(list.weaponModel), "the head's weapon model")
+    equal(models(), 24 + 18, "no model made for the item list")
     buttons[1].scripts.OnClick(buttons[1])
     check(not visible(dropdown), "the dropdown hidden on head")
     check(visible(frames[1].model) and not visible(frames[1].weaponModel), "armor model back on head")
@@ -3457,27 +3456,18 @@ local function undressCalls(c)
     return n
 end
 
-test("F1: after Head, the Legs page carries only the Legs piece, in the tiles and in the item list's head", function()
+test("F1: after Head, the Legs page carries only the Legs piece in the tiles", function()
     local c, tabs = visitTwice({ appearances = manySlots() })
     tabs[1].scripts.OnClick(tabs[1])
     local buttons = slotButtons(c)
     local frames = tileFrames(c)
     check(carried(frames[1].model):find("^1="), "Head's piece on tile 1, got " .. carried(frames[1].model))
-    frames[1].button.scripts.OnClick(frames[1].button)
-    c.advance(10)
-    frames[1].button.scripts.OnClick(frames[1].button)
-    local headModel = find(c, function(w) return w.kind == "DressUpModel" and w.parent == itemListFrame(c) end)
-    check(carried(headModel):find("^1="), "Head's piece on the list's head model, got " .. carried(headModel))
     buttons[10].scripts.OnClick(buttons[10])
     local legs = TC.BrowserState.View().tiles[1].appearance
     check(carried(frames[1].model):find("^7=%d+$"), "only a Legs piece on tile 1, got " .. carried(frames[1].model))
     for i = 1, 24 do
         check(not carried(frames[i].model):find("1="), "no Head piece left on tile " .. i)
     end
-    frames[1].button.scripts.OnClick(frames[1].button)
-    c.advance(10)
-    frames[1].button.scripts.OnClick(frames[1].button)
-    check(carried(headModel):find("^7=%d+$"), "only a Legs piece on the list's head model, got " .. carried(headModel))
     equal(legs.slot, "legs", "the slot of the tile")
 end)
 
@@ -4430,7 +4420,7 @@ test("fix2 F3: the zoom is a value of the slot table: Back 1.236, every other sl
     end
 end)
 
-test("fix2 F3: a Back tile and the item list's model get 1.236; a Head and a Feet tile get 1", function()
+test("fix2 F3: a Back tile gets 1.236; a Head and a Feet tile get 1", function()
     local apps = Fake.appearances(370, 5)
     for _, a in ipairs(Fake.appearances(10, 0, CAT.Feet, 2000)) do apps[#apps + 1] = a end
     for _, a in ipairs(Fake.appearances(10, 0, CAT.Back, 8000)) do apps[#apps + 1] = a end
@@ -4443,13 +4433,6 @@ test("fix2 F3: a Back tile and the item list's model get 1.236; a Head and a Fee
     buttons[3].scripts.OnClick(buttons[3])
     local p = frames[1].model.calls.SetCameraPosition
     check(p and math.abs(p[1] - 4 * 1.236) < 1e-9, "Back: camera distance 4 x 1.236, got " .. tostring(p and p[1]))
-    frames[1].button.scripts.OnClick(frames[1].button)
-    c.advance(10)
-    frames[1].button.scripts.OnClick(frames[1].button)
-    local list, listModel = itemListFrame(c)
-    for _, w in ipairs(list.children) do if w.kind == "DressUpModel" and w ~= list.weaponModel then listModel = w end end
-    local q = listModel.calls.SetCameraPosition
-    check(q and math.abs(q[1] - 4 * 1.236) < 1e-9, "Back's list model: 4 x 1.236, got " .. tostring(q and q[1]))
 end)
 
 ---------------------------------------------------------------- Buy and confirm (step 7, TC-33): state
@@ -6541,7 +6524,7 @@ test("B state: the flyout's head and body states keep their texts; a found row c
     equal(l.collected, false, "not collected")
     c.advance(5)
     l = TC.BrowserState.View().list
-    equal(l.title, "2 item variants, cheapest first", "found summary")
+    equal(l.title, "2 items, cheapest first", "found summary")
     equal(l.rows[1].forSale, "x1", "the count of a row")
     equal(l.rows[2].forSale, "x2", "the count of the second row")
     check(l.rows[1].buy and l.rows[1].buy.enabled, "a found row's Buy")
@@ -6779,7 +6762,7 @@ test("B whole: a bottom-row flyout is moved up to end at the grid's bottom; four
     local function inFlyout(text)
         return find(c, function(w) return w.text == text and under(w, fly) and visible(w) end) ~= nil
     end
-    check(inFlyout("6 item variants, cheapest first"), "the summary")
+    check(inFlyout("6 items, cheapest first"), "the summary")
     check(inFlyout("1s") and inFlyout("4s") and not inFlyout("5s"), "four rows")
     fly.scripts.OnMouseWheel(fly, -1)
     check(not inFlyout("1s") and inFlyout("5s"), "the wheel over it scrolls its rows")
@@ -6862,7 +6845,7 @@ test("B whole: the flyout's rows carry the price beside Buy; every body state an
     equal(price.points[1].point .. ">" .. price.points[1].relativePoint, "RIGHT>LEFT", "the price's right edge on Buy's left")
     equal(price.points[1].relativeTo, buy, "the price beside Buy")
     check(textShown(c, "x1"), "the row's count")
-    check(textShown(c, "1 item variant, cheapest first"), "found")
+    check(textShown(c, "1 item, cheapest first"), "found")
     check(textShown(c, "Checked just now") and textShown(c, "Check again"), "the foot")
     local again = find(c, function(w) return w.kind == "Button" and w.text == "Check again" and visible(w) end)
     c.click(again)
@@ -7073,19 +7056,19 @@ test("C3: the paging group ends at the grid's right edge, in the catalogue and i
     noErrors(c, "paging edge")
 end)
 
-test("head: the summary line sits right of the model under the type line, in the head, and the first row starts under the head", function()
+test("head: the summary line sits right of the icon under the type line, in the head, and the first row starts under the head", function()
     local c = buyWhole()
     local fly = itemListFrame(c)
     local function inFly(text)
         return find(c, function(w) return w.text == text and w.kind == "FontString" and under(w, fly) and visible(w) end)
     end
-    local summary, typeText = inFly("1 item variant, cheapest first"), inFly("Head, cloth")
+    local summary, typeText = inFly("1 item, cheapest first"), inFly("Head, cloth")
     check(summary and typeText, "the summary and the type line")
     local anchor = summary.points[1]
     equal(anchor.relativeTo, typeText, "anchored to the type line")
     equal(anchor.point .. ">" .. anchor.relativePoint, "TOPLEFT>BOTTOMLEFT", "under it")
     equal(anchor.x, 0, "at its left edge")
-    check(typeText.points[1].x >= 10 + 44, "right of the 44 wide model")
+    equal(typeText.points[1].x, 10 + 32 + 8, "8 right of the 32 wide icon border")
     equal(summary.width, 232 - typeText.points[1].x - 28, "wrapping before the close mark")
     local row = rowBuy(c):GetParent()
     equal(point(row), "10,-66", "the first row starts right under the 66 high head")
@@ -7414,7 +7397,7 @@ test("TC-36 art: each template and atlas refused in turn: the fallback, nothing 
         { noAtlases = { ["auctionhouse-rowstripe-1"] = true, ["auctionhouse-ui-row-highlight"] = true }, see = function(c, f)
             local fly = openTile(c, f)
             check(not find(c, function(w) return under(w, fly) and w.calls.SetAtlas
-                and w.calls.SetAtlas[1]:find("^auctionhouse") end), "no row atlas")
+                and w.calls.SetAtlas[1]:find("^auctionhouse.*row") end), "no row atlas")
             local row = rowBuy(c):GetParent()
             row.scripts.OnEnter(row)
             check(visible(row.highlight) and row.highlight.color, "the row highlight in colour") end },
@@ -7441,7 +7424,7 @@ test("TC-36 art: each template and atlas refused in turn: the fallback, nothing 
     end
 end)
 
-test("TC-36 light: Collections' light on tile and flyout models when SetLight exists; skipped without it", function()
+test("TC-36 light: Collections' light on tile models when SetLight exists; skipped without it", function()
     local c, tabs = visitTwice()
     tabs[1].scripts.OnClick(tabs[1])
     equal(#c.lights, 24, "one light per tile model")
@@ -7450,7 +7433,7 @@ test("TC-36 light: Collections' light on tile and flyout models when SetLight ex
         .. l.light.ambientIntensity .. " " .. l.light.diffuseIntensity .. " " .. tostring(l.light.omnidirectional),
         "true -1,1,-1 1.05 0 false", "ItemModelBaseMixin:OnLoad's values")
     openTile(c, tileFrames(c)[1])
-    equal(#c.lights, 25, "the flyout's model too")
+    equal(#c.lights, 24, "the flyout has no model")
     for _, opts in ipairs({ { noSetLight = true }, { noLightMakers = true } }) do
         local d, t = visitTwice(opts)
         t[1].scripts.OnClick(t[1])
@@ -11864,6 +11847,158 @@ test("E4 Source menu: the funnel's Source submenu lists what the state answers, 
     end
 end)
 
+end)()
+
+---------------------------------------------------------------- flyout: the item list's icon, the tiles' models (testpass 1)
+;(function()
+-- buyWhole with its two boots given icons (false: the client knows none).
+local function iconWhole(icon, opts)
+    opts = opts or {}
+    opts.client = opts.client or {}
+    opts.client.items = { [501] = { name = "Willow Boots", quality = 2, bindType = 2, subType = "Cloth", icon = icon },
+        [601] = { name = "Ivy Boots", quality = 2, bindType = 2, subType = "Cloth", icon = 135602 } }
+    return buyWhole(opts)
+end
+
+test("flyout icon: the list's head shows its first row's item icon in the auction house's icon border, and no model", function()
+    local c = iconWhole(135501)
+    local fly = itemListFrame(c)
+    equal(TC.BrowserState.View().list.rows[1].itemID, 501, "the first row's item")
+    check(fly.icon and visible(fly.icon), "the icon shown")
+    equal(texturePath(fly.icon), 135501, "the first row's icon")
+    equal(fly.icon.width .. "x" .. fly.icon.height, "28x28", "the icon's size")
+    equal(fly.iconBorder.calls.SetAtlas and fly.iconBorder.calls.SetAtlas[1], "auctionhouse-itemicon-small-border", "the border")
+    equal(fly.iconBorder.width .. "x" .. fly.iconBorder.height, "32x32", "the border's size")
+    equal(#findAll(c, function(w) return w.kind == "DressUpModel" and under(w, fly) end), 0, "no model in the list")
+    equal(fly.icon.scripts and fly.icon.scripts.OnEnter, nil, "nothing on hover")
+    noErrors(c, "list icon")
+end)
+
+test("flyout icon: without an icon known, or without rows, the slot row's art for the slot; without that the question mark", function()
+    local c = iconWhole(false)
+    local fly = itemListFrame(c)
+    equal(TC.BrowserState.View().list.rows[1].itemID, 501, "a first row")
+    equal(fly.icon.calls.SetAtlas and fly.icon.calls.SetAtlas[1], "transmog-nav-slot-head", "icon not known: the slot's art")
+    -- a found list with its icon, then a look not for sale
+    c = iconWhole(135501)
+    fly = itemListFrame(c)
+    equal(texturePath(fly.icon), 135501, "the found list's icon")
+    local textures = fly.icon.callCount.SetTexture
+    c.ah.listings = {}
+    c.click(c.frames[2].button)
+    c.advance(10)
+    c.click(c.frames[2].button)
+    equal(TC.BrowserState.View().list.state, "not for sale", "nothing for sale")
+    equal(fly.icon.callCount.SetTexture, textures, "no item icon without a row for sale")
+    equal(fly.icon.calls.SetAtlas and fly.icon.calls.SetAtlas[1], "transmog-nav-slot-head", "no rows: the slot's art")
+    c = iconWhole(false, { client = { noAtlases = { ["transmog-nav-slot-head"] = true } } })
+    fly = itemListFrame(c)
+    equal(texturePath(fly.icon), "Interface\\Icons\\INV_Misc_QuestionMark", "without the slot's art: the question mark")
+    noErrors(c, "list icon fallback")
+end)
+
+test("tooltip price: the coins are marked up and spaced as the game's money formatter does", function()
+    boot()
+    local saved = CreateAtlasMarkup
+    CreateAtlasMarkup = function(atlas, width, height, x, y)
+        return ("|A:%s:%d:%d:%d:%d|a"):format(atlas, height or 0, width or 0, x or 0, y or 0)
+    end
+    local _, right = TC.Tooltip.Texts({ text = "Lowest price", color = "FFFFD100", money = TC.BrowserState.MoneyParts(10180) })
+    CreateAtlasMarkup = saved
+    equal(right, "1|A:coin-gold:14:14:2:0|a 1|A:coin-silver:14:14:2:0|a 80|A:coin-copper:14:14:2:0|a", "the price's text")
+end)
+
+-- Head appearances and six belts; every appearance has its own camera.
+local function belts()
+    local list = Fake.appearances(370, 5)
+    for _, a in ipairs(Fake.appearances(6, 0, CAT.Waist, 7000)) do list[#list + 1] = a end
+    return list
+end
+local function onWaist()
+    local c, tabs = visitTwice({ appearances = belts() })
+    C_TransmogCollection.GetAppearanceCameraID = function(id) return 100 + id % 7 end
+    tabs[1].scripts.OnClick(tabs[1])
+    local waist = find(c, function(w) return w.kind == "Button" and w.slot == "waist" and w.ring end)
+    waist.scripts.OnClick(waist)
+    return c, tileFrames(c)
+end
+test("flyout model: a piece the client dropped before the figure loaded is tried on again once it loads", function()
+    local c, frames = onWaist()
+    local tile = frames[2].model
+    local piece = carried(tile)
+    check(piece:find("^6=%d+$"), "a Waist piece on tile 2, got " .. piece)
+    local camera = tile.uiCamera
+    -- the client lost the piece put on before the figure was in
+    tile.worn = {}
+    local tries = #c.tryOn
+    tile.scripts.OnModelLoaded(tile)
+    equal(carried(tile), piece, "tile 2's piece after its figure loaded")
+    equal(tile.uiCamera, camera, "tile 2's camera after its figure loaded")
+    equal(#c.tryOn, tries + 1, "TryOn calls for the load")
+    -- once: a later load (or a load the TryOn itself causes) tries nothing more
+    tile.scripts.OnModelLoaded(tile)
+    equal(#c.tryOn, tries + 1, "TryOn calls after a second load")
+end)
+
+test("flyout model: a placeholder's figure tries no piece on when it loads", function()
+    local c, tabs = visitTwice({ appearances = Fake.appearances(370, 5) })
+    c.ah.pageSize = 2
+    for id = 1010, 1050, 10 do c.ah.listings[#c.ah.listings + 1] = listing("Item " .. (id * 10 + 1), id * 10 + 1, id) end
+    tabs[1].scripts.OnClick(tabs[1])
+    local frames = tileFrames(c)
+    panelSweep(c)
+    c.advance(0.26)
+    local placeholder
+    for _, frame in ipairs(frames) do
+        if visible(frame.bar) and not placeholder then placeholder = frame.model end
+    end
+    check(placeholder, "a placeholder")
+    local tries = #c.tryOn
+    placeholder.scripts.OnModelLoaded(placeholder)
+    equal(#c.tryOn, tries, "TryOn calls when a placeholder's figure loads")
+end)
+
+-- Every camera applied to a model, with the RefreshCamera calls before it.
+local function watchCameras(model)
+    local applied, apply = {}, Model_ApplyUICamera
+    Model_ApplyUICamera = function(m, cameraID)
+        if m == model then applied[#applied + 1] = { refreshed = m.callCount.RefreshCamera or 0 } end
+        return apply(m, cameraID)
+    end
+    return applied
+end
+
+test("flyout model: a tile's camera is applied again, on a fresh view, on a size change and on load", function()
+    local _, frames = onWaist()
+    local model = frames[2].model
+    local applied = watchCameras(model)
+    check(model.scripts.OnSizeChanged, "the tile has OnSizeChanged")
+    model.scripts.OnSizeChanged(model, 76, 82)
+    equal(#applied, 1, "cameras applied on a size change")
+    model.scripts.OnModelLoaded(model)
+    equal(#applied, 2, "cameras applied on load")
+    for i, a in ipairs(applied) do check(a.refreshed > 0, "RefreshCamera before camera " .. i) end
+end)
+
+test("flyout model: a reused tile resets its position, facing, pitch and roll before the next appearance", function()
+    local c, frames = onWaist()
+    local model = frames[1].model
+    local belt = model.tcAppearance
+    model.calls.SetPosition, model.calls.SetFacing, model.calls.SetPitch, model.calls.SetRoll = nil, nil, nil, nil
+    -- the head appearances have no camera of their own
+    local cameraOf = C_TransmogCollection.GetAppearanceCameraID
+    C_TransmogCollection.GetAppearanceCameraID = function(id) if id < 7000 then return nil end return cameraOf(id) end
+    local refreshed = model.callCount.RefreshCamera or 0
+    local head = find(c, function(w) return w.kind == "Button" and w.slot == "head" and w.ring end)
+    head.scripts.OnClick(head)
+    check(model.tcAppearance ~= belt and model.tcAppearance < 7000, "tile 1 shows a head appearance")
+    equal(table.concat(model.calls.SetPosition or {}, ","), "0,0,0", "the tile's position")
+    equal(table.concat(model.calls.SetFacing or {}, ","), "0", "the tile's facing")
+    equal(table.concat(model.calls.SetPitch or {}, ","), "0", "the tile's pitch")
+    equal(table.concat(model.calls.SetRoll or {}, ","), "0", "the tile's roll")
+    check((model.callCount.RefreshCamera or 0) > refreshed, "RefreshCamera on the next appearance")
+    equal(#c.misuse, 0, "misuse of the fake: " .. table.concat(c.misuse, "; "))
+end)
 end)()
 
 test("TC-15 no forbidden collection call was made in the whole run", function()

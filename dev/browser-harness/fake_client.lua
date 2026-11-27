@@ -158,6 +158,7 @@ end
 --                   holidayRaises: it raises
 --   sets, setInfo, noSets: C_TransmogSets (see there)
 --   items also take minLevel and equipLoc (GetItemInfo, GetItemInfoInstant)
+--   and icon (GetItemIconByID; false: none)
 --   an appearance's sourceTypes: the source type of each source (default 4)
 --   filterCategory  Collections' search-and-filter category at the start
 --                   (TC-43, measured in game on 2026-11-26): the one category
@@ -1073,6 +1074,15 @@ function Fake.new(opts)
             if not d.classID then return nil end
             return itemID, "Armor", d.subType or "", d.equipLoc or "INVTYPE_FEET", 0, d.classID, d.subClassID
         end or nil,
+        -- ItemDocumentation.lua:611-623: the item's icon file id, nilable;
+        -- an item's icon (false: none), else 100000 + its id
+        GetItemIconByID = function(item)
+            local itemID = idOf(item)
+            misuse(itemID ~= nil, "GetItemIconByID with " .. type(item))
+            local icon = itemDef(itemID).icon
+            if icon == false then return nil end
+            return icon or 100000 + itemID
+        end,
         -- c.qualityColorRaises: the next that many calls raise
         GetItemQualityColor = function(quality)
             misuse(type(quality) == "number", "GetItemQualityColor with " .. type(quality))
