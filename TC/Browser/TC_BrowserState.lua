@@ -41,7 +41,7 @@ local OTHER_SOURCE, OTHER_TEXT = "other", "Other"
 -- another character). saved is the table they are kept in:
 -- TransmogCheckerDB.browser once State.Bind handed it over, a table of this
 -- file's own before.
-local DEFAULTS = { scanWhenShown = true, show = "All", forSaleOnly = false, sort = "priceLow", slot = TC.Slots[1].key,
+local DEFAULTS = { scanWhenShown = true, show = "Not collected", forSaleOnly = false, sort = "priceLow", slot = TC.Slots[1].key,
     class = "own" }
 local saved = {}
 
@@ -53,8 +53,8 @@ local function isSort(value)
 end
 
 -- A saved value as the state takes it: a missing or malformed one is its
--- default; a saved Show of Bought, not collected is All (nothing may be
--- pending in a new session).
+-- default; a saved Show of Bought, not collected is the default, Not
+-- collected (nothing may be pending in a new session).
 local function flag(value, default)
     if type(value) == "boolean" then return value end
     return default
@@ -1111,7 +1111,8 @@ local function classNeutral()
     return view.class == nil or view.class == ALL_CLASSES or view.class == (ownClass())
 end
 
--- Whether Reset filters would change nothing: Show All, For sale only off,
+-- Whether Reset filters would change nothing: Show Not collected (slice G),
+-- For sale only off,
 -- every Source entry ticked, a neutral class, all weapon types, no search
 -- text and the sort Price: low to high.
 local function filtersAtStart()

@@ -6394,9 +6394,9 @@ test("B state: arrows and the wheel turn pages and read nothing; the view carrie
     equal(#c.ah.sends, 0, "paging reads nothing")
 end)
 
--- ledger (slice B): run on the new default Show (All) with nothing else
--- saved but Scan when shown off: the start is no mark; Not collected is a
--- change; Reset goes back to All. The sweep's choices are filters now, so
+-- ledger (slice B): run on the default Show (slice G: Not collected, was
+-- All) with nothing else saved but Scan when shown off: the start is no
+-- mark; All is a change; Reset goes back to Not collected. The sweep's choices are filters now, so
 -- they show the mark (the sweep view's fixed Show was none), and Reset
 -- clears them; filterFixed is gone.
 test("B state: the funnel's Show and class choices, the changed mark and Reset filters; nothing is read", function()
@@ -6405,21 +6405,22 @@ test("B state: the funnel's Show and class choices, the changed mark and Reset f
     equal(v.filtersChanged, false, "at the start nothing differs")
     local names = {}
     for i, e in ipairs(v.filters) do names[i] = e.name .. (e.selected and "*" or "") end
-    equal(table.concat(names, "|"), "All*|Collected|Not collected", "the Show entries, the chosen marked")
+    -- slice G: the default Show is Not collected (was All), All the change
+    equal(table.concat(names, "|"), "All|Collected|Not collected*", "the Show entries, the chosen marked")
     equal(v.filterFixed, nil, "Show is never fixed")
     TC.BrowserState.SelectClass("all")
     -- fix D F4: All classes is neutral now (this asserted the mark)
     equal(TC.BrowserState.View().filtersChanged, false, "All classes is neutral: no mark")
     TC.BrowserState.SelectClass(9)
     equal(TC.BrowserState.View().filtersChanged, false, "the own class chosen again is the start")
-    TC.BrowserState.SetFilter("Not collected")
+    TC.BrowserState.SetFilter("All")
     v = TC.BrowserState.View()
-    equal(v.filtersChanged, true, "Show Not collected differs from the start")
+    equal(v.filtersChanged, true, "Show All differs from the start")
     TC.BrowserState.SelectClass(1)
     TC.BrowserState.NextPage()
     TC.BrowserState.ResetFilters()
     v = TC.BrowserState.View()
-    equal(v.filter, "All", "Show back on All")
+    equal(v.filter, "Not collected", "Show back on Not collected")
     equal(v.classes.text, "Warlock", "the class back on the character's")
     equal(v.page, 1, "page 1 after the reset")
     equal(v.filtersChanged, false, "nothing differs after the reset")
@@ -6430,10 +6431,63 @@ test("B state: the funnel's Show and class choices, the changed mark and Reset f
     equal(v.filtersChanged, true, "the sweep's choices are a change")
     TC.BrowserState.ResetFilters()
     v = TC.BrowserState.View()
-    equal(tostring(v.forSaleOnly) .. "/" .. v.filter .. "/" .. tostring(v.filtersChanged), "false/All/false",
+    equal(tostring(v.forSaleOnly) .. "/" .. v.filter .. "/" .. tostring(v.filtersChanged), "false/Not collected/false",
         "Reset ends For sale only and the sort too")
     for _, e in ipairs(v.sorts) do if e.selected then equal(e.name, "Price: low to high", "the sort back on its default, Price: low to high (slice C)") end end
     equal(#c.ah.sends, 1, "only the sweep's scan was read")
+end)
+
+-- slice G: the Show filter's default is Not collected ("bargain start" with
+-- the sort's Price: low to high); the stored values are the choices' names.
+local function showMarked(v)
+    for _, e in ipairs(v.filters) do if e.selected then return e.name end end
+end
+test("G state: a first run starts on Show Not collected, with no mark", function()
+    for _, saved in ipairs({ false, {} }) do
+        local what = saved and "an empty saved table" or "no saved table"
+        checkState(nil, { saved = saved })
+        local v = TC.BrowserState.View()
+        equal(v.filter, "Not collected", what .. ": Show")
+        equal(showMarked(v), "Not collected", what .. ": the Show entry marked")
+        equal(v.filtersChanged, false, what .. ": no mark")
+        if saved then equal(saved.show, "Not collected", what .. ": the default written back") end
+    end
+end)
+
+test("G state: a missing or malformed saved Show loads as Not collected", function()
+    for _, show in ipairs({ "none", 42, "Bogus", "Bought, not collected" }) do
+        local saved = { scanWhenShown = false, show = show ~= "none" and show or nil }
+        checkState(nil, { saved = saved })
+        local v = TC.BrowserState.View()
+        equal(v.filter, "Not collected", tostring(show) .. ": Show")
+        equal(saved.show, "Not collected", tostring(show) .. ": the saved value")
+        equal(v.filtersChanged, false, tostring(show) .. ": no mark")
+    end
+end)
+
+test("G state: a saved Show All or Collected loads as saved and lights the mark", function()
+    for _, show in ipairs({ "All", "Collected" }) do
+        local saved = { scanWhenShown = false, show = show }
+        checkState(nil, { saved = saved })
+        local v = TC.BrowserState.View()
+        equal(v.filter, show, show .. ": Show as saved")
+        equal(saved.show, show, show .. ": the saved value kept")
+        equal(v.filtersChanged, true, show .. ": the mark")
+    end
+end)
+
+test("G state: Reset filters returns Show to Not collected; the mark is neutral on it", function()
+    local saved = { scanWhenShown = false, show = "All" }
+    checkState(nil, { saved = saved })
+    TC.BrowserState.ResetFilters()
+    local v = TC.BrowserState.View()
+    equal(v.filter, "Not collected", "Show after Reset filters")
+    equal(saved.show, "Not collected", "the saved value after Reset filters")
+    equal(v.filtersChanged, false, "no mark after Reset filters")
+    TC.BrowserState.SetFilter("Collected")
+    equal(TC.BrowserState.View().filtersChanged, true, "the mark on Collected")
+    TC.BrowserState.SetFilter("Not collected")
+    equal(TC.BrowserState.View().filtersChanged, false, "no mark back on Not collected")
 end)
 
 -- ledger (slice B): the scan control is "Scan slot" in every state (it was
@@ -6571,8 +6625,8 @@ test("B whole: the catalogue's and the sweep's choices send what All and For sal
     noErrors(c, "toggles")
 end)
 
--- ledger (slice B): saved Show is the new default (All), so the start has
--- no mark; Show Not collected sets it and Reset brings back All
+-- ledger (slice B): saved Show is the default (slice G: Not collected), so
+-- the start has no mark; Show Collected sets it and Reset brings it back
 test("B whole: the funnel's mark shows while a choice differs; the mark and Reset filters reset; nothing is sent", function()
     local fixture = classFixture(0)
     fixture.saved = { scanWhenShown = false }
@@ -6608,16 +6662,17 @@ test("B whole: the funnel's mark shows while a choice differs; the mark and Rese
     check(not funnel.highlightLocked, "the funnel's highlight released after the reset")
     check(textShown(c, "3 appearances"), "count back on Warlock")
     local _, pick = openMenu(c, funnelOf(c))
-    pick("Not collected")
-    check(visible(mark), "the mark after Show Not collected")
-    check(not funnel.highlightLocked, "the highlight not held after Show Not collected")
+    -- slice G: the default Show is Not collected, so Collected is the change
+    pick("Collected")
+    check(visible(mark), "the mark after Show Collected")
+    check(not funnel.highlightLocked, "the highlight not held after Show Collected")
     local texts
     texts, pick = openMenu(c, funnelOf(c))
     equal(texts[#texts], "Reset filters", "the menu's last entry")
     check(pick("Reset filters"), "Reset filters chosen")
     check(not visible(mark), "no mark after Reset filters")
     check(not funnel.highlightLocked, "the highlight released after Reset filters")
-    equal(markedShow(c), "All", "Show back on All")
+    equal(markedShow(c), "Not collected", "Show back on Not collected")
     c.advance(5)
     sentNothing(c, "funnel")
     noErrors(c, "funnel")
@@ -8694,13 +8749,13 @@ test("TC-39 Show: Bought, not collected is offered only while something is pendi
     equal(tileIDs(S.View()), "2005", "legs: the pending legs appearance")
     -- ledger (slice B): offered with For sale only too and combines with it
     -- (it was not offered in the sweep view); Reset returns to the default
-    -- Show, All
+    -- Show, Not collected (slice G; was All)
     S.SetForSaleOnly(true)
     equal(showNames(S.View()), "All,Collected,Not collected," .. PENDING_SHOW, "offered with For sale only")
     equal(S.View().filter, PENDING_SHOW, "and kept with it")
     S.ResetFilters()
     v = S.View()
-    equal(v.filter, "All", "Reset filters returns to the default")
+    equal(v.filter, "Not collected", "Reset filters returns to the default")
     equal(v.forSaleOnly, false, "and For sale only off")
     equal(v.filtersChanged, false, "at the start")
     noErrors(c, "show")
@@ -9825,7 +9880,8 @@ local function sbState(prices, opts)
     local list = Fake.appearances(6, 1)
     for _, a in ipairs(list) do a.sourceTypes = SB_TYPES[a.id] end
     opts.appearances = opts.appearances or list
-    if opts.saved == nil then opts.saved = { scanWhenShown = false, sort = "default" } end
+    -- slice G: Show All set, as these tests were written on that default
+    if opts.saved == nil then opts.saved = { scanWhenShown = false, show = "All", sort = "default" } end
     local c = bootState(opts)
     TC.BrowserState.Refresh()
     for id, price in pairs(prices or {}) do
@@ -9845,7 +9901,7 @@ local function onlySources(keep)
 end
 
 test("slice B order: the one view lists the slot in the game's order, Default sort, Show All, For sale only off", function()
-    local c = sbState(nil, { saved = {} })
+    local c = sbState(nil, { saved = { show = "All" } })
     local v = TC.BrowserState.View()
     equal(tileIDs(v), "1001,1002,1003,1004,1005,1006", "the game's order")
     equal(v.filter .. "/" .. tostring(v.forSaleOnly), "All/false", "Show All, For sale only off")
@@ -9901,7 +9957,7 @@ end)
 
 test("slice B Source: one type, several, Other, an appearance of two types, and All sources", function()
     -- slice C: the saved start with the default sort, so All sources is the start
-    local c = sbState(nil, { saved = { scanWhenShown = false } })
+    local c = sbState(nil, { saved = { scanWhenShown = false, show = "All" } })
     local S = TC.BrowserState
     local names = {}
     for i, e in ipairs(S.View().sources) do names[i] = e.name .. (e.selected and "*" or "") end
@@ -9920,6 +9976,8 @@ test("slice B Source: one type, several, Other, an appearance of two types, and 
     equal(v.empty and v.empty.title .. "/" .. v.empty.button, "No matches/All sources", "nothing from Achievement")
     v.empty.action()
     equal(tileIDs(S.View()), "1001,1002,1003,1004,1005,1006", "All sources ticks every entry")
+    -- slice G: Show back on its default, Not collected, for the mark
+    S.SetFilter("Not collected")
     equal(S.View().filtersChanged, false, "and is the start again")
     sentNothing(c, "source")
 end)
@@ -10090,9 +10148,9 @@ test("slice B Reset filters: Show, For sale only, Source, class, weapon type, se
     local ticked = 0
     for _, e in ipairs(v.sources) do if e.selected then ticked = ticked + 1 end end
     equal(table.concat({ v.filter, tostring(v.forSaleOnly), ticked, v.classes.text, v.weaponTypes.text, "'" .. v.search .. "'", sort,
-        tostring(v.filtersChanged) }, "/"), "All/false/7/Warlock/All weapon types/''/Price: low to high/false", "every default")
+        tostring(v.filtersChanged) }, "/"), "Not collected/false/7/Warlock/All weapon types/''/Price: low to high/false", "every default (slice G: Show Not collected)")
     equal(TransmogCheckerDB.browser.show .. "/" .. tostring(TransmogCheckerDB.browser.forSaleOnly) .. "/" .. TransmogCheckerDB.browser.sort,
-        "All/false/priceLow", "the saved values follow")
+        "Not collected/false/priceLow", "the saved values follow")
     equal(TransmogCheckerDB.browser.scanWhenShown, false, "Scan when shown is no filter: untouched")
     sentNothing(c, "reset")
 end)
@@ -10103,7 +10161,8 @@ test("slice B the filter-active mark: each filter and the sort alone set it; bac
     local function changed() return S.View().filtersChanged end
     equal(changed(), false, "nothing at the start")
     for _, way in ipairs({
-        { "Show", function() S.SetFilter("Not collected") end, function() S.SetFilter("All") end },
+        -- slice G: the default Show is Not collected, so All is the change
+        { "Show", function() S.SetFilter("All") end, function() S.SetFilter("Not collected") end },
         { "For sale only", function() S.SetForSaleOnly(true) end, function() S.SetForSaleOnly(false) end },
         { "Source", function() S.SetSource("other", false) end, function() S.SetSource("other", true) end },
         { "class", function() S.SelectClass(8) end, function() S.SelectClass(9) end },
@@ -10176,8 +10235,8 @@ test("slice B saved: the defaults on a first run, the tooltip's settings beside 
     equal(TransmogCheckerDB, nil, "nothing saved yet")
     c.fire("ADDON_LOADED", "TransmogChecker")
     local b = TransmogCheckerDB.browser
-    equal(table.concat({ tostring(b.scanWhenShown), b.show, tostring(b.forSaleOnly), b.sort }, "/"), "true/All/false/priceLow",
-        "the defaults (slice C: the sort by price)")
+    equal(table.concat({ tostring(b.scanWhenShown), b.show, tostring(b.forSaleOnly), b.sort }, "/"), "true/Not collected/false/priceLow",
+        "the defaults (slice C: the sort by price, G: Show Not collected)")
     local keys = {}
     for k in pairs(b) do keys[#keys + 1] = k end
     table.sort(keys)
@@ -10185,7 +10244,7 @@ test("slice B saved: the defaults on a first run, the tooltip's settings beside 
     equal(table.concat(keys, ","), "class,forSaleOnly,scanWhenShown,show,slot,sort", "the six values only (slice C: the slot, D2: the class)")
     equal(b.class, "own", "the class: your own")
     local v = TC.BrowserState.View()
-    equal(v.filter .. "/" .. tostring(v.forSaleOnly) .. "/" .. tostring(v.scanWhenShown), "All/false/true", "the view")
+    equal(v.filter .. "/" .. tostring(v.forSaleOnly) .. "/" .. tostring(v.scanWhenShown), "Not collected/false/true", "the view")
     equal(table.concat({ TC.Config.tooltipStyle, tostring(TC.Config.otherItems), tostring(TC.Config.filterBlizzNotCollectedLine),
         tostring(TC.Config.skipPoorAndCommon), tostring(TC.Config.debug) }, "/"), "full/notCollected/nil/true/false", "the tooltip's defaults (slice D1)")
     noErrors(c, "first run")
@@ -10226,12 +10285,13 @@ test("slice B saved: each value is written on change and loaded in the next sess
     noErrors(d, "next session")
 end)
 
-test("slice B saved: Bought, not collected loads as All; malformed values and a malformed table load as the defaults", function()
+-- slice G: the default Show is Not collected; the valid saved Show is All
+test("slice B saved: Bought, not collected loads as Not collected; malformed values and a malformed table load as the defaults", function()
     for _, case in ipairs({
-        { { show = "Bought, not collected", forSaleOnly = true }, "true/All/true/priceLow" },
-        { { scanWhenShown = "yes", show = 7, forSaleOnly = {}, sort = "cheap" }, "true/All/false/priceLow" },
-        { { scanWhenShown = false, show = "Not collected", sort = "priceLow" }, "false/Not collected/false/priceLow" },
-        { "junk", "true/All/false/priceLow" },
+        { { show = "Bought, not collected", forSaleOnly = true }, "true/Not collected/true/priceLow" },
+        { { scanWhenShown = "yes", show = 7, forSaleOnly = {}, sort = "cheap" }, "true/Not collected/false/priceLow" },
+        { { scanWhenShown = false, show = "All", sort = "priceLow" }, "false/All/false/priceLow" },
+        { "junk", "true/Not collected/false/priceLow" },
     }) do
         local c = boot({ saved = false })
         TransmogCheckerDB = { browser = case[1], hideCollectedAlts = false, skipPoorAndCommon = false }
@@ -10492,12 +10552,13 @@ local function narrowedFixture(collected)
     return list
 end
 -- The state on that fixture, Show All, nothing read yet; Collections' filter
--- category on Head unless opts says.
+-- category on Head unless opts says. Show All is saved (slice G: the
+-- default is Not collected).
 local function narrowedState(opts)
     opts = opts or {}
     opts.appearances = opts.appearances or narrowedFixture(opts.collected)
     if opts.filterCategory == nil then opts.filterCategory = CAT.Head end
-    if opts.saved == nil then opts.saved = { scanWhenShown = false } end
+    if opts.saved == nil then opts.saved = { scanWhenShown = false, show = "All" } end
     return bootState(opts)
 end
 -- The values written to Collections' search-and-filter category, in order.
@@ -10589,7 +10650,7 @@ end)
 test("TC-43 the filter category is back on Head when the tab is left, the window closes or the slot changes during the frame's wait", function()
     for _, way in ipairs({ "tab left", "window closed", "slot changed" }) do
         local c, tabs = visitTwice({ appearances = narrowedFixture(), filterCategory = CAT.Head, filterLag = "frame",
-            saved = { scanWhenShown = false } })
+            saved = { scanWhenShown = false, show = "All" } })
         tabs[1].scripts.OnClick(tabs[1])
         equal(categoryWrites(c), AWAY, way .. ": pointed away while it waits")
         if way == "tab left" then
@@ -10617,7 +10678,7 @@ test("TC-43 the filter category is back on Head when the tab is left, the window
 end)
 
 test("TC-43 nothing is written to Collections before the browser's tab is selected", function()
-    local c = login({ appearances = narrowedFixture(), filterCategory = CAT.Head, saved = { scanWhenShown = false } })
+    local c = login({ appearances = narrowedFixture(), filterCategory = CAT.Head, saved = { scanWhenShown = false, show = "All" } })
     c.openAuction()
     c.closeAuction()
     c.openAuction()
@@ -10634,7 +10695,7 @@ end)
 test("TC-43 a write that fires TRANSMOG_COLLECTION_UPDATED reads once and loops nothing", function()
     for _, lag in ipairs({ false, "frame" }) do
         local c, tabs = visitTwice({ appearances = narrowedFixture(), filterCategory = CAT.Head, filterCategoryFires = true,
-            filterLag = lag or nil, saved = { scanWhenShown = false } })
+            filterLag = lag or nil, saved = { scanWhenShown = false, show = "All" } })
         tabs[1].scripts.OnClick(tabs[1])
         c.advance(1)
         equal(categoryWrites(c), AWAY .. ",1", tostring(lag) .. ": writes")
@@ -10948,7 +11009,7 @@ test("slice C sort: Price: low to high on a first run, for a missing or malforme
 end)
 
 test("slice C sort: a saved \"default\" keeps the game's order, named Collections order; Reset gives Price: low to high", function()
-    local c = sbState(SB_PRICES, { saved = { scanWhenShown = false, sort = "default" } })
+    local c = sbState(SB_PRICES, { saved = { scanWhenShown = false, show = "All", sort = "default" } })
     scanned(c)
     local S = TC.BrowserState
     local names = {}
@@ -10957,14 +11018,16 @@ test("slice C sort: a saved \"default\" keeps the game's order, named Collection
         "the choices with their stored values, the saved one marked")
     equal(tileIDs(S.View()), "1001,1002,1003,1004,1005,1006", "Collections order: the game's order")
     equal(S.View().filtersChanged, true, "Collections order differs from the default: the mark")
+    -- slice G: Show on its default, Not collected, so only the sort can mark
+    S.SetFilter("Not collected")
     S.SetSort("priceLow")
     equal(S.View().filtersChanged, false, "Price: low to high: no mark")
     equal(TransmogCheckerDB.browser.sort, "priceLow", "stored as priceLow")
     S.SetSort("default")
     equal(TransmogCheckerDB.browser.sort, "default", "Collections order stored as default")
     S.ResetFilters()
-    equal(TransmogCheckerDB.browser.sort .. " " .. tileIDs(S.View()), "priceLow 1001,1004,1002,1005,1003,1006",
-        "Reset: stored and drawn by price")
+    equal(TransmogCheckerDB.browser.sort .. " " .. tileIDs(S.View()), "priceLow 1004,1002,1005,1003,1006",
+        "Reset: stored and drawn by price (slice G: under Not collected, without the collected 1001)")
     equal(S.View().filtersChanged, false, "and no mark")
     equal(#c.ah.sends, 1, "the scan only")
 end)
@@ -11356,10 +11419,11 @@ test("D2 class filter: All classes and your own class light no mark and Reset ke
     local S = state()
     local function at() local v = S.View() return v.classes.text .. "/" .. tostring(v.filtersChanged) end
     equal(at(), "All classes/false", "All classes remembered: no mark")
-    S.SetFilter("Not collected")
+    -- slice G: the default Show is Not collected, so All is the other filter
+    S.SetFilter("All")
     equal(at(), "All classes/true", "another filter: the mark")
     S.ResetFilters()
-    equal(at() .. "/" .. S.View().filter, "All classes/false/All", "Reset: the filter back, All classes kept")
+    equal(at() .. "/" .. S.View().filter, "All classes/false/Not collected", "Reset: the filter back, All classes kept")
     equal(TransmogCheckerDB.browser.class, "all", "and still saved as all")
     S.SelectClass(9)
     equal(at(), "Warlock/false", "your own class: no mark")
@@ -11631,7 +11695,8 @@ test("F2 funnel: while a filter differs the red mark alone says so; the highligh
     local c, tabs = visitTwice({ appearances = manySlots(), saved = { scanWhenShown = false } })
     tabs[1].scripts.OnClick(tabs[1])
     local funnel = funnelOf(c)
-    check(funnelPick(c, "Not collected"), "a filter changed")
+    -- slice G: the default Show is Not collected, so Collected is a change
+    check(funnelPick(c, "Collected"), "a filter changed")
     check(visible(markOf(c)), "the red mark")
     check(not funnel.highlightLocked, "no held highlight")
     noErrors(c, "no held highlight")
