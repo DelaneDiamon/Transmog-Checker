@@ -1,6 +1,8 @@
 # Screenshots for the CurseForge page
 
-Six screenshots, in the order they appear in `docs/curseforge-description.md`. Each is marked there as `[Screenshot N: ...]`.
+Six screenshots, in the order they appear in `docs/curseforge-description.md`. Each is marked there as `[Screenshot N: ...]`. The files are in `docs/screenshots/`.
+
+Gallery order on CurseForge: 3, 4, 1, 2, 5, 6.
 
 ## Before you take any of them
 
@@ -14,7 +16,7 @@ Six screenshots, in the order they appear in `docs/curseforge-description.md`. E
 - Setup: settings at their defaults (Tooltip style Full, Other items with this look: Only when not collected, Lowest auction price on). Scan a slot in the Appearances tab first, so a price is known. Then hover, in your bags or on an auction row, an item of that slot whose appearance you have not collected and that has other items with the same look.
 - Visible: the game's item lines, then "Not collected" with its source on the right, the "Lowest price" line with its age, and "Other items using this appearance:" with its list.
 - Crop: the tooltip only.
-- Caption: Every item tooltip says whether its look is collected, where it comes from, and what else gives it.
+- Caption: Every item tooltip says whether its look is collected, how to collect it, its lowest price, and what else gives it.
 
 ## 2. Tooltip, Compact style
 

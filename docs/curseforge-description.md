@@ -34,7 +34,7 @@ The **Filter** button holds the filters and the sort:
 
 - Show: All, Collected or Not collected, and Bought, not collected while something you bought or have in your bags would add a look.
 - For sale only.
-- Source: how the items are obtained, as the game names it, listing only the source types the slot's looks have, plus Other.
+- Source: how the items are obtained, as the game names it; it lists only the source types the game reports for the looks of the selected slot, so a type with nothing in that slot is not listed.
 - Class: All classes, your class or another class.
 - Sort: Collections order, Price: low to high, Price: high to low.
 - Scan prices when the tab opens.
@@ -69,7 +69,7 @@ Open Options > AddOns > TransmogChecker, type `/tc`, or use the addon list on th
 
 - Made for WoW: Forever only. Releases up to 0.0.21 were for Mists of Pandaria Classic and get no new work.
 - Opening the settings page closes the auction house window, because the game's Options window does.
-- The Source filter lists only the source types the slot's looks have. The game reports no boss-drop sources, so those items are under Other.
+- The Source filter lists only the source types the game reports for the looks of the selected slot, so a type with nothing in that slot is not listed.
 - Prices are what the last scan or check saw. The lowest price on tooltips lasts for the session and is gone after a reload or logout.
 - In combat, the settings page opens once combat ends.
 
