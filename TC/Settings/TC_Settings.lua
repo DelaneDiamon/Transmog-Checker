@@ -77,15 +77,28 @@ end
 -- InitFrame and Resetter call the frame's Init and Release
 -- (ScrollUtil.lua:1697-1707), the mixin below. No field of the initializer
 -- is written: the list reads them in its own code (Blizzard_SettingsList.lua:57-71).
-local PREVIEW_X, PREVIEW_Y, SAMPLE_GAP, SAMPLE_WIDTH = 37, -8, 16, 290
-local PAD, HEAD_HEIGHT, LINE_HEIGHT = 9, 17, 15
--- A sample is as wide as its widest line that does not wrap, a line's left
--- text, TEXT_GAP and its right text, as the game's tooltip sizes itself to
--- its lines (slice E, E1; the gap is inferred from the 40 between a line's
--- two texts in SharedTooltipTemplates.xml:36-39), at least SAMPLE_WIDTH;
--- the two stay inside the row, ROW_EDGE from its right edge. Where the row
--- is too narrow, a left text wraps before it would reach its right text.
+-- The page fits the default Options panel without scrolling: the list shows
+-- 551 and the headings and settings take 373, which leaves 178 for this row
+-- (the arithmetic with its sources is in dev/browser-harness/run.lua, "G1").
+-- So the samples are drawn one font step under the game's tooltip: the name
+-- in GameTooltipText (12) where the tooltip has GameTooltipHeaderText (14),
+-- the lines in GameTooltipTextSmall (10) where it has GameTooltipText (12)
+-- (FontStyles.xml:314-322, Fonts.xml:1273-1275, 1385-1387, 1403-1405), each
+-- line 2 taller than its font; a price line is as tall as its 14 coins
+-- (TC_Tooltip.lua:231). The tallest combination (Full, other items shown,
+-- price on) is 2 * 8 + 14 + 11 * 12 + 14 = 176, the template's height.
+local PREVIEW_X, PREVIEW_Y, SAMPLE_GAP, SAMPLE_WIDTH = 37, 0, 16, 150
+local PAD, HEAD_HEIGHT, LINE_HEIGHT, COIN_HEIGHT = 8, 14, 12, 14
+local NAME_FONT, LINE_FONT = "GameTooltipText", "GameTooltipTextSmall"
+-- A sample is as wide as its widest line, a line's left text, TEXT_GAP and
+-- its right text, as the game's tooltip sizes itself to its lines (slice E,
+-- E1; the gap is inferred from the 40 between a line's two texts in
+-- SharedTooltipTemplates.xml:36-39), at least SAMPLE_WIDTH; the two stay
+-- inside the row, ROW_EDGE from its right edge. Where the row is too
+-- narrow, a left text wraps before it would reach its right text.
 local TEXT_GAP, ROW_EDGE = 40, 8
+-- The caption: one line, CAPTION_GAP under the shorter sample.
+local CAPTION_GAP = 4
 local CAPTION = "Preview: a sample item, not your collection"
 local UNCOMMON, WHITE = "FF1EFF00", "FFFFFFFF"
 local OTHERS = { "Ivycloth Boots of Intellect", "Ivycloth Boots of the Owl", "Ivycloth Boots of Spirit" }
@@ -104,16 +117,16 @@ local function sampleItem(collected)
 end
 
 -- Line i of a sample: a frame with its left and right text; the first in
--- the tooltip's header font.
+-- the name's font.
 local function rowOf(sample, i)
     local row = sample.rows[i]
     if row then return row end
     row = CreateFrame("Frame", nil, sample)
-    local font = i == 1 and "GameTooltipHeaderText" or "GameTooltipText"
+    local font = i == 1 and NAME_FONT or LINE_FONT
     row.left = row:CreateFontString(nil, "OVERLAY", font)
     row.left:SetPoint("TOPLEFT", row, "TOPLEFT", 0, 0)
     row.left:SetJustifyH("LEFT")
-    row.right = row:CreateFontString(nil, "OVERLAY", "GameTooltipText")
+    row.right = row:CreateFontString(nil, "OVERLAY", font)
     row.right:SetPoint("TOPRIGHT", row, "TOPRIGHT", 0, 0)
     row.right:SetJustifyH("RIGHT")
     sample.rows[i] = row
@@ -133,10 +146,8 @@ local function fillSample(sample, lines)
         row.right:SetText(right or "")
         row.right:SetShown(right ~= nil)
         if rightColor then row.right:SetTextColor(unpack(rightColor)) end
-        if not line.wrap then
-            local width = row.left:GetStringWidth() + (right and TEXT_GAP + row.right:GetStringWidth() or 0)
-            wanted = math.max(wanted, math.ceil(2 * PAD + (line.indent or 0) + width))
-        end
+        local width = row.left:GetStringWidth() + (right and TEXT_GAP + row.right:GetStringWidth() or 0)
+        wanted = math.max(wanted, math.ceil(2 * PAD + (line.indent or 0) + width))
     end
     for i = #lines + 1, #sample.rows do sample.rows[i]:Hide() end
     return wanted
@@ -154,10 +165,11 @@ local function placeSample(sample, lines, width)
         row:SetWidth(inner - indent)
         local room = inner - indent
         if row.right:IsShown() then room = room - TEXT_GAP - row.right:GetStringWidth() end
-        local wrap = line.wrap == true or row.left:GetStringWidth() > room
+        local wrap = row.left:GetStringWidth() > room
         row.left:SetWidth(wrap and room or 0)
         row.left:SetWordWrap(wrap)
         local height = i == 1 and HEAD_HEIGHT or LINE_HEIGHT
+        if line.money then height = math.max(height, COIN_HEIGHT) end
         if wrap then height = math.max(height, row.left:GetStringHeight()) end
         row:SetHeight(height)
         row:Show()
@@ -205,6 +217,10 @@ local function draw()
         placeSample(sample, all[i], widths[i])
         x = x + widths[i] + SAMPLE_GAP
     end
+    local first, second = preview.samples[1], preview.samples[2]
+    local shorter = second:GetHeight() <= first:GetHeight() and second or first
+    preview.caption:ClearAllPoints()
+    preview.caption:SetPoint("TOPLEFT", shorter, "BOTTOMLEFT", 0, -CAPTION_GAP)
 end
 
 local function build(parent)
@@ -218,9 +234,17 @@ local function build(parent)
         sample.rows = {}
         preview.samples[i] = sample
     end
-    local caption = preview:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
-    caption:SetPoint("BOTTOMRIGHT", preview, "BOTTOMRIGHT", -24, 8)
+    -- the caption in the lines' font, in the grey of GameFontDisableSmall
+    local caption = preview:CreateFontString(nil, "OVERLAY", LINE_FONT)
+    caption:SetJustifyH("LEFT")
+    caption:SetWordWrap(false)
+    if DISABLED_FONT_COLOR and DISABLED_FONT_COLOR.GetRGB then
+        caption:SetTextColor(DISABLED_FONT_COLOR:GetRGB())
+    else
+        caption:SetTextColor(0.5, 0.5, 0.5)
+    end
     caption:SetText(CAPTION)
+    preview.caption = caption
     -- the row's width is the list's: the samples are placed again in it
     preview:SetScript("OnSizeChanged", draw)
 end

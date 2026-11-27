@@ -334,18 +334,21 @@ function Fake.new(opts)
     function methods:HasFocus() return self.focus == true end
     function methods:GetText() return self.text end
     -- a font string's text width: 6 for each character shown; a colour code
-    -- draws nothing and a texture's markup (|T...|t) draws one 12 wide (slice E)
+    -- draws nothing and a texture's markup (|T...|t) draws one 12 wide (slice E).
+    -- In GameTooltipTextSmall, a 10 point font where the others are 12
+    -- (Fonts.xml:1385-1387, 1403-1405), 5 for each.
+    local function perCharacter(w) return w.template == "GameTooltipTextSmall" and 5 or 6 end
     function methods:GetStringWidth()
         local shown = (self.text or ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("|T.-|t", "..")
-        return #shown * 6
+        return #shown * perCharacter(self)
     end
-    -- a font string's text height: 12 for each line of 6 per character wrapped
-    -- at its width (one line without a width), none for no text
+    -- a font string's text height: 12 for each line of its characters' width
+    -- wrapped at its width (one line without a width), none for no text
     function methods:GetStringHeight()
         local n = #(self.text or "")
         if n == 0 then return 0 end
         local width = self.width
-        return (width and width > 0 and math.ceil(n * 6 / width) or 1) * 12
+        return (width and width > 0 and math.ceil(n * perCharacter(self) / width) or 1) * 12
     end
     function methods:GetName() return self.name end
     function methods:SetEnabled(on) self.enabled = on and true or false end

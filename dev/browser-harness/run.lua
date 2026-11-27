@@ -11338,7 +11338,7 @@ test("D2 preview: nothing before the page shows; two samples from the tooltip's 
     said(c, "")
     check(not find(c, function(w) return w.text == "Ivycloth Boots of the Eagle" end), "nothing built on opening")
     local rows = page(c)
-    equal(rows[1].extent, 228, "the preview row's height")
+    equal(rows[1].extent, 176, "the preview row's height")
     local shown = previewTexts(c)
     equal(shown[1], "Ivycloth Boots of the Eagle\nBinds when equipped\nFeet | Cloth\n \n[bag]Not collected | World Drop\n"
         .. "In your bags: equip it or sell it to a vendor to collect.\nLowest price 3 min ago | 41s 50c\n \n"
@@ -11383,9 +11383,9 @@ test("D2 preview row: a template of the addon's XML with its mixin; no field of 
     local init = rows[1].init
     equal(init.frameTemplate, "TransmogCheckerPreviewTemplate", "the template")
     local template = c.templates.TransmogCheckerPreviewTemplate
-    equal(template and template.height, 228, "its height, from the XML")
+    equal(template and template.height, 176, "its height, from the XML")
     equal(template and template.mixin, "TransmogCheckerPreviewMixin", "its mixin, from the XML")
-    equal(rows[1].extent, 228, "the row's height is the template's")
+    equal(rows[1].extent, 176, "the row's height is the template's")
     for _, key in ipairs({ "GetExtent", "InitFrame", "Resetter" }) do
         check(rawget(init, key) == init.own[key], key .. ": Blizzard's own, not written")
     end
@@ -11525,7 +11525,7 @@ local function noOverlap(c, what, rowWidth)
         else
             check(r.left <= r.row.width, what .. ": " .. r.text .. " within its row")
         end
-        check(r.row.points[1].x + r.row.width <= r.sample.width - 9, what .. ": " .. r.text .. " inside its sample")
+        check(r.row.points[1].x + r.row.width <= r.sample.width - 8, what .. ": " .. r.text .. " inside its sample")
     end
     local samples = {}
     for _, s in ipairs(frame.children[1].children) do if s.kind == "Frame" and visible(s) then samples[#samples + 1] = s end end
@@ -11552,7 +11552,7 @@ test("E1 preview: in every style and colour the name and its right text never ov
     TC.SetSetting("otherItems", "notCollected")
     TC.SetSetting("tooltipStyle", "compact")
     local _, rows = previewRows(c)
-    check(rows[1].sample.width > 290, "Compact: the first sample wider than 290 for its name line, got " .. rows[1].sample.width)
+    check(rows[1].sample.width > 150, "Compact: the first sample wider than its least 150 for its name line, got " .. rows[1].sample.width)
     equal(rows[1].left, ("Ivycloth Boots of the Eagle"):len() * 6, "the name on one line when there is room")
     noErrors(c, "preview overlap")
 end)
@@ -11570,6 +11570,120 @@ test("E1 preview: in a narrow row the samples stay inside it and the name wraps 
     TC.SetSetting("tooltipStyle", "full")
     noOverlap(c, "full in 560", 560)
     noErrors(c, "narrow preview")
+end)
+
+-- The page fits the default Options panel without scrolling (client
+-- 1.60.1.71037). The list's visible height: the panel's 724
+-- (Blizzard_SettingsPanel.xml:5) less the category list's insets 76 and 46
+-- (:61-62) and the container's 1 (:68) is 601; the scroll box starts 2 under
+-- the 50 header and ends 2 past the bottom (Blizzard_SettingsList.xml:7,
+-- Blizzard_SettingsList.lua:79-83): 601 - 52 + 2 = 551. The rest of the page:
+-- the view's padding 10 + 10 and 9 between rows (Blizzard_SettingsList.lua:
+-- 52-55; ScrollBoxStride.lua:46-62, ScrollBoxLinearView.lua:242), two headings
+-- of 45 (Blizzard_SettingControls.xml:13) and seven controls of 26 (:108,
+-- :122): 20 + 9 * 9 + 2 * 45 + 7 * 26 = 373. Left for the preview: 178.
+local PREVIEW_BUDGET = 551 - 373
+-- The row's width: the panel's 920 less the category list's 18 + 199
+-- (Blizzard_SettingsPanel.xml:59-61), the 16 after it (:67) and the 22 on
+-- the right (:69) is 665; the scroll box 15 out on the left and 20 in on the
+-- right (Blizzard_SettingsList.lua:81-82) is 660; less the view's 25 of left
+-- padding (:53): 635.
+local ROW_WIDTH = 635
+-- Each combination of the settings that change the preview, set in turn.
+local function eachCombination(fn)
+    for _, show in ipairs({ true, false }) do
+        for _, style in ipairs({ "full", "compact" }) do
+            for _, color in ipairs({ "orange", "lightBlue", "white" }) do
+                for _, others in ipairs({ "notCollected", "always", "off" }) do
+                    for _, price in ipairs({ true, false }) do
+                        TC.SetSetting("tooltipShow", show)
+                        TC.SetSetting("tooltipStyle", style)
+                        TC.SetSetting("notCollectedColor", color)
+                        TC.SetSetting("otherItems", others)
+                        TC.SetSetting("lowestPrice", price)
+                        fn(("%s/%s/%s/%s/price %s"):format(tostring(show), style, color, others, tostring(price)))
+                    end
+                end
+            end
+        end
+    end
+end
+-- The shown page's preview: the preview frame, its shown samples and its
+-- caption.
+local function previewParts(c)
+    local preview = c.settings.frames[#c.settings.frames].frame.children[1]
+    local samples, caption = {}, nil
+    for _, w in ipairs(preview.children) do
+        if w.kind == "Frame" and visible(w) then samples[#samples + 1] = w end
+        if w.kind == "FontString" then caption = w end
+    end
+    return preview, samples, caption
+end
+-- The page opened with its row at width.
+local function previewAt(c, width)
+    said(c, "")
+    page(c)
+    c.settings.frames[#c.settings.frames].frame:SetWidth(width)
+    return previewParts(c)
+end
+
+test("G1 page fits: the preview row is within the page's budget and as tall as its tallest combination needs", function()
+    local c = d2()
+    local _, samples, caption = previewAt(c, ROW_WIDTH)
+    local template = c.templates.TransmogCheckerPreviewTemplate
+    check(template.height <= PREVIEW_BUDGET, ("the template's %d within the budget of %d"):format(template.height, PREVIEW_BUDGET))
+    equal(page(c)[1].extent, template.height, "the row's height is the template's")
+    local tallest, where = 0, nil
+    eachCombination(function(what)
+        local _, shown = previewParts(c)
+        for _, s in ipairs(shown) do
+            local bottom = -s.points[1].y + s.height
+            if bottom > tallest then tallest, where = bottom, what end
+        end
+    end)
+    equal(where, "true/full/orange/notCollected/price true", "the tallest: Full, other items shown, price on")
+    equal(tallest, template.height, "the template as tall as the tallest combination")
+    check(#samples == 2 and caption ~= nil, "two samples and the caption")
+    noErrors(c, "page fits")
+end)
+
+test("G1 page fits: at the default row width no line of either sample wraps, in every combination", function()
+    local c = d2()
+    previewAt(c, ROW_WIDTH)
+    eachCombination(function(what)
+        local _, shown = previewParts(c)
+        for _, s in ipairs(shown) do
+            for _, r in ipairs(s.children) do
+                if r.kind == "Frame" and visible(r) then
+                    local left = r.children[1]
+                    check(left.calls.SetWordWrap and left.calls.SetWordWrap[1] == false,
+                        what .. ": " .. plain(left.text or "") .. " on one line")
+                end
+            end
+        end
+        noOverlap(c, what, ROW_WIDTH)
+    end)
+    noErrors(c, "no wrap")
+end)
+
+test("G1 page fits: the caption on one line under the shorter sample, inside the row, in every combination", function()
+    local c = d2()
+    local template = c.templates.TransmogCheckerPreviewTemplate
+    previewAt(c, ROW_WIDTH)
+    eachCombination(function(what)
+        local _, shown, caption = previewParts(c)
+        equal(caption.text, "Preview: a sample item, not your collection", what .. ": the caption")
+        local shorter = shown[2].height <= shown[1].height and shown[2] or shown[1]
+        local p = caption.points[1]
+        check(#caption.points == 1 and p.point == "TOPLEFT" and p.relativeTo == shorter and p.relativePoint == "BOTTOMLEFT",
+            what .. ": under the shorter sample, at its left")
+        check(not (caption.width and caption.width > 0), what .. ": one line")
+        local bottom = -shorter.points[1].y + shorter.height - p.y + caption:GetStringHeight()
+        check(bottom <= template.height, ("%s: the caption's bottom %d inside the row's %d"):format(what, bottom, template.height))
+        local right = shorter.points[1].x + caption:GetStringWidth()
+        check(right <= ROW_WIDTH - 8, ("%s: the caption's right %d inside the row"):format(what, right))
+    end)
+    noErrors(c, "caption")
 end)
 
 -- Slice E, E2: the template's plate art (a wide button's, MenuTemplates.xml:
