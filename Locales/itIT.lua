@@ -50,12 +50,12 @@ TC.Locales.itIT = { name = "Italiano", strings = {
     SETTING_LANGUAGE_TIP = "La lingua dei testi di TransmogChecker. Auto segue la lingua del gioco. Una modifica si applica dopo aver ricaricato l'interfaccia.",
     LANGUAGE_AUTO = "Auto (lingua del gioco)",
     RELOAD_PROMPT = "La lingua di TransmogChecker cambia quando l'interfaccia viene ricaricata. Ricaricare ora?",
+    RELOAD_UI = "Ricarica IU",
+    LATER = "Più tardi",
     SETTINGS_AFTER_COMBAT = "Le impostazioni si apriranno dopo il combattimento.",
     PREVIEW_CAPTION = "Anteprima: un oggetto di esempio, non la tua collezione",
     PREVIEW_ITEM = "Stivali di Stoffa d'Edera dell'Aquila",
     PREVIEW_OTHER_1 = "Stivali di Stoffa d'Edera dell'Intelletto",
-    PREVIEW_OTHER_2 = "Stivali di Stoffa d'Edera del Gufo",
-    PREVIEW_OTHER_3 = "Stivali di Stoffa d'Edera dello Spirito",
     PREVIEW_COLLECTED_ITEM = "Stivali di Stoffa Runica",
 
     -- the item tooltip
@@ -91,6 +91,9 @@ TC.Locales.itIT = { name = "Italiano", strings = {
     SLOT_MAIN_HAND = "Mano primaria",
     SLOT_OFF_HAND = "Mano secondaria",
     SLOT_RANGED = "A distanza",
+    SLOT_ONE_HAND = "A una mano",
+    SLOT_TWO_HAND = "A due mani",
+    SLOT_HELD_IN_OFF_HAND = "Tenuto nella mano secondaria",
 
     -- source types, where the client names none (TRANSMOG_SOURCE_n), and professions
     SOURCE_BOSS_DROP = "Bottino dei boss",
@@ -158,6 +161,8 @@ TC.Locales.itIT = { name = "Italiano", strings = {
     TIP_DETAILS = "Clicca per i dettagli.",
     DROP = "Bottino: %s",
     DROP_WITH_DIFFICULTIES = "Bottino: %s (%s)",
+    DROP_PLACE = "%s (%s)",
+    LIST_DELIMITER = ", ",
     BOSS_DROP_HEADER = "Bottino dei boss:",
     MORE_DROPS = { one = "e %d altro", other = "e altri %d" },
     SOURCE_WITH_PROFESSION = "%s: %s",

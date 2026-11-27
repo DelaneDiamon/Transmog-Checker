@@ -49,12 +49,12 @@ TC.Locales.zhCN = { name = "简体中文", plural = function() return "other" en
     SETTING_LANGUAGE_TIP = "TransmogChecker 文本的语言。自动跟随游戏语言。更改在重载界面后生效。",
     LANGUAGE_AUTO = "自动（游戏语言）",
     RELOAD_PROMPT = "TransmogChecker 的语言将在重载界面后更改。现在重载界面吗？",
+    RELOAD_UI = "重载UI",
+    LATER = "稍后",
     SETTINGS_AFTER_COMBAT = "战斗结束后将打开设置。",
     PREVIEW_CAPTION = "预览：示例物品，并非你的收集情况",
     PREVIEW_ITEM = "雄鹰之常青藤布靴",
     PREVIEW_OTHER_1 = "智力之常青藤布靴",
-    PREVIEW_OTHER_2 = "猫头鹰之常青藤布靴",
-    PREVIEW_OTHER_3 = "精神之常青藤布靴",
     PREVIEW_COLLECTED_ITEM = "符文布靴",
 
     -- the item tooltip
@@ -90,6 +90,9 @@ TC.Locales.zhCN = { name = "简体中文", plural = function() return "other" en
     SLOT_MAIN_HAND = "主手",
     SLOT_OFF_HAND = "副手",
     SLOT_RANGED = "远程",
+    SLOT_ONE_HAND = "单手",
+    SLOT_TWO_HAND = "双手",
+    SLOT_HELD_IN_OFF_HAND = "副手物品",
 
     -- source types, where the client names none (TRANSMOG_SOURCE_n), and professions
     SOURCE_BOSS_DROP = "首领掉落",
@@ -157,6 +160,8 @@ TC.Locales.zhCN = { name = "简体中文", plural = function() return "other" en
     TIP_DETAILS = "点击查看详情。",
     DROP = "掉落：%s",
     DROP_WITH_DIFFICULTIES = "掉落：%s（%s）",
+    DROP_PLACE = "%s（%s）",
+    LIST_DELIMITER = "，",
     BOSS_DROP_HEADER = "首领掉落：",
     MORE_DROPS = { other = "还有 %d 个" },
     SOURCE_WITH_PROFESSION = "%s：%s",

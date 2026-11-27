@@ -30,9 +30,6 @@ local BIND_ON_EQUIP = Enum and Enum.ItemBind and Enum.ItemBind.OnEquip or 2
 local ERRORS = Enum and Enum.AuctionHouseError
 local ITEM_NOT_FOUND = ERRORS and ERRORS.ItemNotFound or 4
 local ITEM_NOT_AVAILABLE = ERRORS and ERRORS.ItemNotAvailable or 25
--- The game's own text, as the approved board asks (its wording on Forever
--- is unverified); ours when the client has none.
-local TEXT_MONEY = type(ERR_NOT_ENOUGH_MONEY) == "string" and ERR_NOT_ENOUGH_MONEY or nil
 -- Coin atlases of this build's money frame (Blizzard_MoneyFrame/Shared/MoneyFrame.lua:347-354).
 local COIN_ATLAS = { gold = "coin-gold", silver = "coin-silver", copper = "coin-copper" }
 local function coinLetter(coin)
@@ -205,7 +202,8 @@ local function draw()
     end
     setLine(d.changedText, changed, 1, 0.82, 0)
     setLine(d.hintText, hint)
-    setLine(d.moneyText, short and (TEXT_MONEY or L.BUY_NOT_ENOUGH_MONEY) or nil, 1, 0.1, 0.1)
+    -- the game's own text while the language is the client's (TC.ClientText), as the approved board asks
+    setLine(d.moneyText, short and TC.ClientText("ERR_NOT_ENOUGH_MONEY", "BUY_NOT_ENOUGH_MONEY") or nil, 1, 0.1, 0.1)
     -- the small spinner beside "Finding", where the client has one
     if d.findSpinner then
         d.findSpinner:SetShown(f.state == "finding")

@@ -52,12 +52,12 @@ end, strings = {
     SETTING_LANGUAGE_TIP = "O idioma dos textos do TransmogChecker. Automático segue o idioma do jogo. Uma alteração vale depois que a interface é recarregada.",
     LANGUAGE_AUTO = "Automático (idioma do jogo)",
     RELOAD_PROMPT = "O idioma do TransmogChecker muda quando a interface é recarregada. Recarregar agora?",
+    RELOAD_UI = "Recarregar IU",
+    LATER = "Mais tarde",
     SETTINGS_AFTER_COMBAT = "As configurações serão abertas após o combate.",
     PREVIEW_CAPTION = "Prévia: um item de exemplo, não a sua coleção",
     PREVIEW_ITEM = "Botas de Pano de Hera da Águia",
     PREVIEW_OTHER_1 = "Botas de Pano de Hera do Intelecto",
-    PREVIEW_OTHER_2 = "Botas de Pano de Hera da Coruja",
-    PREVIEW_OTHER_3 = "Botas de Pano de Hera do Espírito",
     PREVIEW_COLLECTED_ITEM = "Botas de Tecido Rúnico",
 
     -- the item tooltip
@@ -93,6 +93,9 @@ end, strings = {
     SLOT_MAIN_HAND = "Mão principal",
     SLOT_OFF_HAND = "Mão secundária",
     SLOT_RANGED = "À distância",
+    SLOT_ONE_HAND = "Uma Mão",
+    SLOT_TWO_HAND = "Duas Mãos",
+    SLOT_HELD_IN_OFF_HAND = "Empunhado na mão secundária",
 
     -- source types, where the client names none (TRANSMOG_SOURCE_n), and professions
     SOURCE_BOSS_DROP = "Saque de chefe",
@@ -160,6 +163,8 @@ end, strings = {
     TIP_DETAILS = "Clique para ver os detalhes.",
     DROP = "Saque: %s",
     DROP_WITH_DIFFICULTIES = "Saque: %s (%s)",
+    DROP_PLACE = "%s (%s)",
+    LIST_DELIMITER = ", ",
     BOSS_DROP_HEADER = "Saque de chefe:",
     MORE_DROPS = { one = "e mais %d", other = "e mais %d" },
     SOURCE_WITH_PROFESSION = "%s: %s",

@@ -50,12 +50,12 @@ TC.Locales.deDE = { name = "Deutsch", strings = {
     SETTING_LANGUAGE_TIP = "Die Sprache der Texte von TransmogChecker. Automatisch folgt der Sprache des Spiels. Eine Änderung gilt, nachdem das Interface neu geladen wurde.",
     LANGUAGE_AUTO = "Automatisch (Spielsprache)",
     RELOAD_PROMPT = "Die Sprache von TransmogChecker ändert sich, wenn das Interface neu geladen wird. Jetzt neu laden?",
+    RELOAD_UI = "UI neu laden",
+    LATER = "Später",
     SETTINGS_AFTER_COMBAT = "Die Einstellungen öffnen sich nach dem Kampf.",
     PREVIEW_CAPTION = "Vorschau: ein Beispielgegenstand, nicht Eure Sammlung",
     PREVIEW_ITEM = "Efeustoffstiefel des Adlers",
     PREVIEW_OTHER_1 = "Efeustoffstiefel der Intelligenz",
-    PREVIEW_OTHER_2 = "Efeustoffstiefel der Eule",
-    PREVIEW_OTHER_3 = "Efeustoffstiefel der Willenskraft",
     PREVIEW_COLLECTED_ITEM = "Runenstoffstiefel",
 
     -- the item tooltip
@@ -91,6 +91,9 @@ TC.Locales.deDE = { name = "Deutsch", strings = {
     SLOT_MAIN_HAND = "Waffenhand",
     SLOT_OFF_HAND = "Schildhand",
     SLOT_RANGED = "Distanz",
+    SLOT_ONE_HAND = "Einhändig",
+    SLOT_TWO_HAND = "Zweihändig",
+    SLOT_HELD_IN_OFF_HAND = "In Schildhand geführt",
 
     -- source types, where the client names none (TRANSMOG_SOURCE_n), and professions
     SOURCE_BOSS_DROP = "Bossbeute",
@@ -158,6 +161,8 @@ TC.Locales.deDE = { name = "Deutsch", strings = {
     TIP_DETAILS = "Klicken für Details.",
     DROP = "Beute: %s",
     DROP_WITH_DIFFICULTIES = "Beute: %s (%s)",
+    DROP_PLACE = "%s (%s)",
+    LIST_DELIMITER = ", ",
     BOSS_DROP_HEADER = "Bossbeute:",
     MORE_DROPS = { one = "und %d weiterer", other = "und %d weitere" },
     SOURCE_WITH_PROFESSION = "%s: %s",

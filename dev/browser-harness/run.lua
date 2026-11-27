@@ -8394,6 +8394,36 @@ test("TC-35b fallbacks: each client string nil in turn raises nothing and shows 
     end
 end)
 
+-- i18n slice D: the tile tooltip's client texts follow the chosen language
+test("i18n D tab: the tile tooltip's source type, Collected and slot read the chosen language under another than the client's, the client's globals in its own", function()
+    local function tip(locale, language, globals)
+        local c, tabs = visitTwice({ locale = locale, appearances = { { id = 2, uiOrder = 1, sources = { 21, 22 }, sourceTypes = { 4, 4 },
+            collectedSource = 22, classes = { [9] = true } } }, sourceItems = { [21] = 601, [22] = 602 },
+            items = { [601] = item({ equipLoc = "INVTYPE_FEET" }), [602] = item({ name = "Other" }) } })
+        TC.SetLanguage(language)
+        for k, v in pairs(globals or {}) do _G[k] = v end
+        tabs[1].scripts.OnClick(tabs[1])
+        TC.BrowserState.SetFilter("all")
+        TC.BrowserState.SelectClass(1)
+        enter(tileFrames(c)[1])
+        noErrors(c, locale .. "/" .. language)
+        return table.concat(c.tooltipTexts(), "\n")
+    end
+    local text = tip("enUS", "deDE")
+    check(text:find("Weltbeute", 1, true), "the source type in German:\n" .. text)
+    check(text:find("Other | Gesammelt", 1, true), "Collected in German:\n" .. text)
+    check(text:find("Cloth, Füße", 1, true), "the slot in German, the subtype as the item gives it:\n" .. text)
+    check(not text:find("World Drop", 1, true) and not text:find("Feet", 1, true), "no English left:\n" .. text)
+    for _, case in ipairs({ { "enUS", "auto" }, { "enGB", "enUS" } }) do
+        text = tip(case[1], case[2], { TRANSMOG_SOURCE_4 = "client world drop", TRANSMOG_COLLECTED = "client collected",
+            INVTYPE_FEET = "client feet" })
+        local what = case[1] .. " client, " .. case[2]
+        check(text:find("client world drop", 1, true), what .. ": the client's source type:\n" .. text)
+        check(text:find("Other | client collected", 1, true), what .. ": the client's Collected:\n" .. text)
+        check(text:find("Cloth, client feet", 1, true), what .. ": the client's slot:\n" .. text)
+    end
+end)
+
 test("TC-35b limit: the list of other items never vanishes; a long head shows fewer drops and the notice, the price lines stay", function()
     local types, items = {}, {}
     for i = 1, 5 do types[i], items[600 + i] = 1, item({ name = "Item " .. i, bindType = 2, minLevel = 40 }) end
@@ -9523,6 +9553,33 @@ test("D1 Full, the five cases without a price, line for line", function()
         ORANGE .. ":Not collected | FFFFFF:Drop: Edwin VanCleef (The Deadmines)" }), "4 binds when picked up, a chat link")
     equal(shown(c, 1501, true), join(CASE5_HEAD, CASE5_LIST), "5 five other items")
     tipNoErrors(c, "full")
+end)
+
+-- i18n slice D: the client's texts follow the chosen language. A language
+-- other than the client's (GetLocale, enGB as enUS) reads the locale
+-- table's string; the client's own language reads the client's global.
+test("i18n D tooltip: under a language other than the client's, Collected, the source names and the list's header are the chosen language's; in the client's own, the client's globals", function()
+    local c = pageFixture({ locale = "enUS" })
+    TC.SetLanguage("deDE")
+    local text = shown(c, 1501, true)
+    check(text:find("Nicht gesammelt | FFFFFF:Weltbeute", 1, true), "the source name in German:\n" .. text)
+    check(text:find(":Andere Gegenstände mit dieser Vorlage:", 1, true), "the list's header in German:\n" .. text)
+    check(text:find("Ivycloth Boots of Intellect | FFFFFF:Weltbeute", 1, true), "a row's source in German:\n" .. text)
+    check(not text:find("World Drop", 1, true) and not text:find("Other items", 1, true), "no English left:\n" .. text)
+    equal(shown(c, 1201, true), lines({ "FFFFFF:Abjurer's Boots of the Owl", "-: ", GREEN .. ":[check]Gesammelt" }), "Collected in German")
+    tipNoErrors(c, "override")
+    -- the client's own language, on auto or chosen, enGB as enUS: the globals as they are
+    for _, case in ipairs({ { "enUS", "auto" }, { "enGB", "auto" }, { "enGB", "enUS" }, { "deDE", "deDE" } }) do
+        local d = pageFixture({ locale = case[1] })
+        TC.SetLanguage(case[2])
+        TRANSMOG_COLLECTED, TRANSMOG_SOURCE_4, WARDROBE_OTHER_ITEMS = "client collected", "client world drop", "client header"
+        local what = case[1] .. " client, " .. case[2]
+        text = shown(d, 1501, true)
+        check(text:find("| FFFFFF:client world drop", 1, true), what .. ": the client's source name:\n" .. text)
+        check(text:find(":client header", 1, true), what .. ": the client's header:\n" .. text)
+        equal(shown(d, 1201, true), lines({ "FFFFFF:Abjurer's Boots of the Owl", "-: ", GREEN .. ":[check]client collected" }), what .. ": the client's Collected")
+        tipNoErrors(d, what)
+    end
 end)
 
 test("D1 Full, cases 3 and 5 with the price the browser saw 3 min ago, line for line", function()
@@ -11346,11 +11403,11 @@ test("D2 preview: nothing before the page shows; two samples from the tooltip's 
     equal(rows[1].extent, 140, "the preview row's height")
     local shown = previewTexts(c)
     -- i18n slice A: the samples lost the item's own two lines and the cut
-    -- list (three other items of three), so the language row fits
+    -- list (three other items of three), so the language row fits; slice D:
+    -- one other item, so a Chinese or Korean sample fits
     equal(shown[1], "Ivycloth Boots of the Eagle\n \n[bag]Not collected | World Drop\n"
         .. "In your bags: equip it or sell it to a vendor to collect.\nLowest price 3 min ago | 41s 50c\n \n"
-        .. "Other items using this appearance:\nIvycloth Boots of Intellect | World Drop\nIvycloth Boots of the Owl | World Drop\n"
-        .. "Ivycloth Boots of Spirit | World Drop", "Full, not collected")
+        .. "Other items using this appearance:\nIvycloth Boots of Intellect | World Drop", "Full, not collected")
     equal(shown[2], "Runecloth Boots\n \n[check]Collected", "Full, collected")
     local nc = previewLine(c, "|T")
     equal(table.concat(nc.textColor, ","), "1," .. 127 / 255 .. ",0", "Not collected in orange")
@@ -11363,7 +11420,7 @@ test("D2 preview: nothing before the page shows; two samples from the tooltip's 
     check(not previewTexts(c)[1]:find("Lowest price", 1, true), "no price line")
     settingOf(c, "Tooltip style"):SetValue("compact")
     shown = previewTexts(c)
-    equal(shown[1], "Ivycloth Boots of the Eagle | Not collected +3 items\n"
+    equal(shown[1], "Ivycloth Boots of the Eagle | Not collected +1 item\n"
         .. "[bag]In your bags: equip it or sell it to a vendor to collect.", "Compact, not collected")
     equal(shown[2], "Runecloth Boots | [check]Collected", "Compact, collected")
     settingOf(c, "Show collection status"):SetValue(false)
@@ -11649,7 +11706,10 @@ test("G1 page fits: the preview row is within the page's budget and as tall as i
         end
     end)
     equal(where, "true/full/orange/notCollected/price true", "the tallest: Full, other items shown, price on")
-    equal(tallest, template.height, "the template as tall as the tallest combination")
+    -- i18n slice D: one other item; the template keeps 140 for the taller
+    -- Chinese and Korean lines (test "i18n D preview")
+    equal(tallest, 116, "the tallest combination in English")
+    check(tallest <= template.height, "the template as tall as the tallest combination or taller")
     check(#samples == 2 and caption ~= nil, "two samples and the caption")
     noErrors(c, "page fits")
 end)
@@ -11691,6 +11751,67 @@ test("G1 page fits: the caption on one line under the shorter sample, inside the
         check(right <= ROW_WIDTH - 8, ("%s: the caption's right %d inside the row"):format(what, right))
     end)
     noErrors(c, "caption")
+end)
+
+-- i18n slice D: the preview lays out any script. On an English client set
+-- to each of four languages (CJK and Hangul lines are taller in the fake,
+-- Fake.lineHeight), in every combination: each line as tall as its texts
+-- and stacked under the one before, the lines inside their sample, the
+-- caption clear of both samples, everything inside the row's height.
+local function rect(x, y, w, h) return { left = x, top = y, right = x + w, bottom = y + h } end
+local function meets(a, b)
+    return a.left < b.right and b.left < a.right and a.top < b.bottom and b.top < a.bottom
+end
+test("i18n D preview: in zhCN, koKR, ruRU and deDE no line overlaps another or leaves its sample, the caption overlaps nothing, the row fits", function()
+    for _, code in ipairs({ "zhCN", "koKR", "ruRU", "deDE" }) do
+        local c = d2({ locale = "enUS" })
+        TC.SetLanguage(code)
+        local preview, _, caption = previewAt(c, ROW_WIDTH)
+        -- the client tells the preview its new size (the fake does not)
+        preview.scripts.OnSizeChanged(preview)
+        if code == "zhCN" then
+            -- the samples come from the tooltip's own lines: its client texts in the chosen language
+            local text = table.concat(previewTexts(c), "\n")
+            check(text:find("未收集 | 世界掉落", 1, true) and text:find("使用此外观的其他物品：", 1, true)
+                and not text:find("World Drop", 1, true) and not text:find("Other items", 1, true), "the preview in Chinese:\n" .. text)
+        end
+        local template = c.templates.TransmogCheckerPreviewTemplate
+        eachCombination(function(combination)
+            local what = code .. " " .. combination
+            local _, shown = previewParts(c)
+            local boxes = {}
+            for i, sample in ipairs(shown) do
+                local sp = sample.points[1]
+                boxes[i] = rect(sp.x, -sp.y, sample.width, sample.height)
+                check(boxes[i].bottom <= template.height, ("%s: sample %d's bottom %s inside the row's %d"):format(what, i,
+                    tostring(boxes[i].bottom), template.height))
+                local below = nil
+                for _, r in ipairs(sample.children) do
+                    if r.kind == "Frame" and visible(r) then
+                        local left, right = r.children[1], r.children[2]
+                        local text = plain(left.text or "")
+                        local need = left:GetStringHeight()
+                        if right.shown and right.text and right.text ~= "" then need = math.max(need, right:GetStringHeight()) end
+                        check(r.height >= need, ("%s: %q: its line %s as tall as its text's %s"):format(what, text, tostring(r.height), tostring(need)))
+                        local top = -r.points[1].y
+                        if below then check(top >= below, ("%s: %q starts at %s, under the line before (%s)"):format(what, text, tostring(top), tostring(below))) end
+                        below = top + r.height
+                    end
+                end
+                check(below + 8 <= sample.height, what .. ": the last line inside its sample")
+            end
+            noOverlap(c, what, ROW_WIDTH)
+            local p = caption.points[1]
+            local anchor = p.relativeTo.points[1]
+            local width = caption:GetStringWidth()
+            if caption.width and caption.width > 0 then width = math.min(width, caption.width) end
+            local box = rect(anchor.x + p.x, -anchor.y + p.relativeTo.height - p.y, width, caption:GetStringHeight())
+            for i, b in ipairs(boxes) do check(not meets(box, b), what .. ": the caption clear of sample " .. i) end
+            check(box.bottom <= template.height, ("%s: the caption's bottom %s inside the row's %d"):format(what, tostring(box.bottom), template.height))
+            check(box.right <= ROW_WIDTH - 8, ("%s: the caption inside the row: %s to %s, width %s"):format(what, tostring(box.left), tostring(box.right), tostring(caption.width)))
+        end)
+        noErrors(c, code)
+    end
 end)
 
 -- Slice E, E2: the template's plate art (a wide button's, MenuTemplates.xml:
@@ -11854,6 +11975,22 @@ local function sourceMenu()
     for i, e in ipairs(TC.BrowserState.SourceEntries()) do out[i] = e.name .. (e.selected and "*" or "") end
     return table.concat(out, "|")
 end
+
+-- i18n slice D: the Source menu's names follow the chosen language
+test("i18n D filter menu: the Source entries read the chosen language under another than the client's, the client's globals in its own", function()
+    local function menu(locale, language, globals)
+        local c = bootState({ locale = locale, appearances = headAndLegs({ { 2, 2 }, { 3, 3 }, { 2, 3 } }, { { 1, 4 } }),
+            saved = { scanWhenShown = false } })
+        TC.SetLanguage(language)
+        for k, v in pairs(globals or {}) do _G[k] = v end
+        TC.BrowserState.Refresh()
+        noErrors(c, locale .. "/" .. language)
+        return sourceMenu()
+    end
+    equal(menu("enUS", "deDE"), "Quest*|Händler*", "German: Vendor as Händler")
+    equal(menu("enUS", "auto", { TRANSMOG_SOURCE_3 = "client vendor" }), "Quest*|client vendor*", "auto: the client's global")
+    equal(menu("deDE", "deDE", { TRANSMOG_SOURCE_3 = "client vendor" }), "Quest*|client vendor*", "the client's own language chosen: its global")
+end)
 
 test("E4 Source menu: a slot whose appearances come from Quest and Vendor only lists Quest and Vendor", function()
     local c = bootState({ appearances = headAndLegs({ { 2, 2 }, { 3, 3 }, { 2, 3 } }, { { 1, 4 } }),
@@ -12325,7 +12462,9 @@ end
 local function keysUsed(code)
     local used = {}
     for _, pattern in ipairs({ "[^%w_]L%.([%u%d_]+)", "[^%w_]L%[%s*\"([%u%d_]+)\"%s*%]", "Plural%(%s*\"([%u%d_]+)\"",
-        "%wKey%s*=%s*\"([%u%d_]+)\"" }) do
+        "%wKey%s*=%s*\"([%u%d_]+)\"",
+        -- i18n slice D: the key a client text falls back to
+        "ClientText%(%s*[^,]+,%s*\"([%u%d_]+)\"" }) do
         for key in code:gmatch(pattern) do used[key] = true end
     end
     return used
@@ -12730,13 +12869,15 @@ test("i18n C widths: in every language the funnel's own list fits each entry; Bl
     check(not readFile("TC/Browser/TC_BrowserPanel.lua"):find("SetMaximumWidth", 1, true), "no maximum width set")
 end)
 
-test("i18n C reload prompt: without RELOADUI and LATER its buttons read ACCEPT and CANCEL", function()
+-- i18n slice D: without RELOADUI and LATER the buttons read the locale
+-- table's (they read ACCEPT and CANCEL before)
+test("i18n C reload prompt: without RELOADUI and LATER its buttons read the locale table's Reload UI and Later", function()
     local c = fresh(nil, true)
     RELOADUI, LATER = nil, nil
     local rows = c.settingsPage(c.settings.addon[1].ID)
     rows[2].init.data.setting:SetValue("deDE")
     equal(#c.popups, 1, "the prompt")
-    equal(c.popups[1].dialog.button1 .. "/" .. c.popups[1].dialog.button2, ACCEPT .. "/" .. CANCEL, "the fallback texts")
+    equal(c.popups[1].dialog.button1 .. "/" .. c.popups[1].dialog.button2, "Reload UI/Later", "the fallback texts")
     noErrors(c, "fallback buttons")
 end)
 

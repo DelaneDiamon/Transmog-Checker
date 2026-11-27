@@ -3,7 +3,7 @@
 ## 1.0.1 (2026-11-27)
 
 - New: TransmogChecker is available in German, French, Italian, Spanish (EU and Latin America), Portuguese (Brazil), Russian, Korean, Simplified Chinese and Traditional Chinese.
-- New: it follows the game's language. The Language setting on the settings page overrides it; a change applies after the interface reloads.
+- New: it follows the game's language. The Language setting on the settings page overrides it, for the game's own words it shows too (such as "Collected" and the source names); a change applies after the interface reloads.
 - Changed: the Buy button in the item list fits longer words.
 - The translations are new, and corrections are welcome.
 

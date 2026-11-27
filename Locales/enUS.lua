@@ -51,12 +51,12 @@ TC.Locales.enUS = { name = "English", strings = {
     SETTING_LANGUAGE_TIP = "The language of TransmogChecker's texts. Auto follows the game's language. A change applies after the interface reloads.",
     LANGUAGE_AUTO = "Auto (game language)",
     RELOAD_PROMPT = "TransmogChecker's language changes when the interface reloads. Reload now?",
+    RELOAD_UI = "Reload UI",
+    LATER = "Later",
     SETTINGS_AFTER_COMBAT = "Settings open after combat.",
     PREVIEW_CAPTION = "Preview: a sample item, not your collection",
     PREVIEW_ITEM = "Ivycloth Boots of the Eagle",
     PREVIEW_OTHER_1 = "Ivycloth Boots of Intellect",
-    PREVIEW_OTHER_2 = "Ivycloth Boots of the Owl",
-    PREVIEW_OTHER_3 = "Ivycloth Boots of Spirit",
     PREVIEW_COLLECTED_ITEM = "Runecloth Boots",
 
     -- the item tooltip
@@ -92,6 +92,9 @@ TC.Locales.enUS = { name = "English", strings = {
     SLOT_MAIN_HAND = "Main hand",
     SLOT_OFF_HAND = "Off hand",
     SLOT_RANGED = "Ranged",
+    SLOT_ONE_HAND = "One-Hand",
+    SLOT_TWO_HAND = "Two-Hand",
+    SLOT_HELD_IN_OFF_HAND = "Held In Off-hand",
 
     -- source types, where the client names none (TRANSMOG_SOURCE_n), and professions
     SOURCE_BOSS_DROP = "Boss Drop",
@@ -159,6 +162,8 @@ TC.Locales.enUS = { name = "English", strings = {
     TIP_DETAILS = "Click for details.",
     DROP = "Drop: %s",
     DROP_WITH_DIFFICULTIES = "Drop: %s (%s)",
+    DROP_PLACE = "%s (%s)",
+    LIST_DELIMITER = ", ",
     BOSS_DROP_HEADER = "Boss drop:",
     MORE_DROPS = { one = "and %d more", other = "and %d more" },
     SOURCE_WITH_PROFESSION = "%s: %s",

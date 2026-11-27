@@ -339,13 +339,11 @@ local function typed()
     return out
 end
 
--- A client string when it has a text, else the fallback (the tile tooltip
--- and the Source filter).
+-- A string when it has a text, else nil. The client's own texts (the tile
+-- tooltip and the Source filter) are read through TC.ClientText
+-- (Locales/Locale.lua): the client's in its own language, else ours.
 local function nonEmpty(s)
     return type(s) == "string" and s ~= "" and s or nil
-end
-local function clientText(name, fallback)
-    return nonEmpty(_G[name]) or fallback
 end
 
 -- The Source filter's entries: one per source type the client names
@@ -368,7 +366,7 @@ local function sourceTypes()
             local asked, answer = pcall(TCol.IsValidTransmogSource, n)
             valid = not asked or answer ~= false
         end
-        local name = valid and clientText("TRANSMOG_SOURCE_" .. n, english[n] and L[english[n].nameKey])
+        local name = valid and TC.ClientText("TRANSMOG_SOURCE_" .. n, english[n] and english[n].nameKey)
         if name then entries[#entries + 1] = { key = n, name = name } end
     end
     entries[#entries + 1] = { key = OTHER_SOURCE, name = L.SOURCE_OTHER }
@@ -1581,9 +1579,9 @@ end
 -- The tile tooltip (visual pass, board 7), built as Collections builds its
 -- own (CollectionWardrobeUtil.SetAppearanceTooltip, Blizzard_FrameXMLUtil/
 -- CollectionsUtil.lua:183-384). The client's strings and colours are read
--- when it has them; the locale table's texts after them are the board's wording,
--- used only without them (their wording on Forever is unverified):
--- clientText, above.
+-- when it has them and the chosen language is the client's; the locale
+-- table's texts are the board's wording, used without them or under
+-- another language (their wording on Forever is unverified): TC.ClientText.
 local function fontColour(name, r, g, b)
     local c = _G[name]
     if type(c) == "table" and c.GetRGB then return { c:GetRGB() } end
@@ -1608,7 +1606,7 @@ local function sourceName(source, c)
         name = TC.Appearances.ItemName(source.itemID)
         if name and C_Item and C_Item.GetItemInfo then quality = select(3, C_Item.GetItemInfo(source.itemID)) end
     end
-    if not name then return clientText("RETRIEVING_ITEM_INFO", L.RETRIEVING_ITEM), c.red end
+    if not name then return TC.ClientText("RETRIEVING_ITEM_INFO", "RETRIEVING_ITEM"), c.red end
     return name, qualityColour(quality, c.white)
 end
 
@@ -1629,7 +1627,7 @@ end
 local function typeText(source)
     local n = source.sourceType
     local own = TC.SOURCE_TYPES and TC.SOURCE_TYPES[n]
-    return n and clientText("TRANSMOG_SOURCE_" .. n, own and L[own.nameKey] or "") or ""
+    return n and TC.ClientText("TRANSMOG_SOURCE_" .. n, own and own.nameKey) or ""
 end
 
 -- Source type 6 is profession (recorded in game on tailored items, TC-35).
@@ -1655,12 +1653,12 @@ end
 local function dropPlace(drop)
     local encounter, instance = nonEmpty(drop.encounter), nonEmpty(drop.instance)
     local place = encounter and instance
-        and clientText("WARDROBE_TOOLTIP_ENCOUNTER_SOURCE", "%s (%s)"):format(encounter, instance) or encounter or instance
+        and TC.ClientText("WARDROBE_TOOLTIP_ENCOUNTER_SOURCE", "DROP_PLACE"):format(encounter, instance) or encounter or instance
     local texts = {}
     for _, text in ipairs(type(drop.difficulties) == "table" and drop.difficulties or {}) do
         if nonEmpty(text) then texts[#texts + 1] = text end
     end
-    local difficulties = texts[1] and table.concat(texts, clientText("PLAYER_LIST_DELIMITER", ", ")) or nil
+    local difficulties = texts[1] and table.concat(texts, TC.ClientText("PLAYER_LIST_DELIMITER", "LIST_DELIMITER")) or nil
     return place, difficulties
 end
 
@@ -1673,9 +1671,9 @@ local function sourceLines(source, maxDrops)
     if list and not list[2] then
         local place, difficulties = dropPlace(list[1])
         if difficulties then
-            return { clientText("WARDROBE_TOOLTIP_BOSS_DROP_FORMAT_WITH_DIFFICULTIES", L.DROP_WITH_DIFFICULTIES):format(place, difficulties) }
+            return { TC.ClientText("WARDROBE_TOOLTIP_BOSS_DROP_FORMAT_WITH_DIFFICULTIES", "DROP_WITH_DIFFICULTIES"):format(place, difficulties) }
         end
-        return { clientText("WARDROBE_TOOLTIP_BOSS_DROP_FORMAT", L.DROP):format(place) }
+        return { TC.ClientText("WARDROBE_TOOLTIP_BOSS_DROP_FORMAT", "DROP"):format(place) }
     elseif list then
         local lines = { L.BOSS_DROP_HEADER }
         for i, drop in ipairs(list) do
@@ -1699,7 +1697,7 @@ end
 -- CollectionsUtil.lua:156-170): one drop's encounter, "<first> +N" for
 -- several, the inferred profession, else the source type.
 local function sourceText(source, c)
-    if source.isCollected then return clientText("TRANSMOG_COLLECTED", L.COLLECTED), c.green end
+    if source.isCollected then return TC.ClientText("TRANSMOG_COLLECTED", "COLLECTED"), c.green end
     local list = rule("drops", drops, source)
     if list then
         local first = nonEmpty(list[1].encounter) or list[1].instance
@@ -1725,7 +1723,7 @@ function State.SourceLine(source)
 end
 
 local function otherItemsText()
-    return clientText("WARDROBE_OTHER_ITEMS", L.OTHER_ITEMS_HEADER)
+    return TC.ClientText("WARDROBE_OTHER_ITEMS", "OTHER_ITEMS_HEADER")
 end
 -- "and N more items"
 local function moreItems(n)
@@ -1736,7 +1734,7 @@ end
 -- filter's "Collected" and "Not collected", the list's header and its
 -- "and N more items" (a function of N) and the pending sentences.
 function State.Wording()
-    return { collected = clientText("TRANSMOG_COLLECTED", L.COLLECTED), notCollected = L.NOT_COLLECTED,
+    return { collected = TC.ClientText("TRANSMOG_COLLECTED", "COLLECTED"), notCollected = L.NOT_COLLECTED,
         otherItems = otherItemsText(), moreItems = moreItems, pending = pendingTexts() }
 end
 
@@ -1756,14 +1754,30 @@ local function loadedInfo(itemID)
     return C_Item.GetItemInfo(itemID)
 end
 
+-- The locale key of each equip location's name (the client's INVTYPE_
+-- globals, as the game's item tooltip names the slot).
+local EQUIP_SLOTS = {
+    INVTYPE_HEAD = { nameKey = "SLOT_HEAD" }, INVTYPE_SHOULDER = { nameKey = "SLOT_SHOULDER" },
+    INVTYPE_BODY = { nameKey = "SLOT_SHIRT" }, INVTYPE_CHEST = { nameKey = "SLOT_CHEST" },
+    INVTYPE_ROBE = { nameKey = "SLOT_CHEST" }, INVTYPE_WAIST = { nameKey = "SLOT_WAIST" },
+    INVTYPE_LEGS = { nameKey = "SLOT_LEGS" }, INVTYPE_FEET = { nameKey = "SLOT_FEET" },
+    INVTYPE_WRIST = { nameKey = "SLOT_WRIST" }, INVTYPE_HAND = { nameKey = "SLOT_HANDS" },
+    INVTYPE_CLOAK = { nameKey = "SLOT_BACK" }, INVTYPE_TABARD = { nameKey = "SLOT_TABARD" },
+    INVTYPE_WEAPON = { nameKey = "SLOT_ONE_HAND" }, INVTYPE_2HWEAPON = { nameKey = "SLOT_TWO_HAND" },
+    INVTYPE_WEAPONMAINHAND = { nameKey = "SLOT_MAIN_HAND" }, INVTYPE_WEAPONOFFHAND = { nameKey = "SLOT_OFF_HAND" },
+    INVTYPE_SHIELD = { nameKey = "SLOT_OFF_HAND" }, INVTYPE_HOLDABLE = { nameKey = "SLOT_HELD_IN_OFF_HAND" },
+    INVTYPE_RANGED = { nameKey = "SLOT_RANGED" }, INVTYPE_RANGEDRIGHT = { nameKey = "SLOT_RANGED" },
+}
+
 -- "Requires level N" (above 1) and "<subtype>, <slot>" (the slot is the
--- client's INVTYPE_ name of the equip location), what is loaded of them,
--- joined by a middle dot; nil with nothing loaded.
+-- client's INVTYPE_ name of the equip location, TC.ClientText), what is
+-- loaded of them, joined by a middle dot; nil with nothing loaded.
 local function itemLine(itemID)
     local _, _, _, _, minLevel, _, subType, _, equipLoc = loadedInfo(itemID)
     local parts = {}
     if type(minLevel) == "number" and minLevel > 1 then parts[1] = L.REQUIRES_LEVEL:format(minLevel) end
-    local kind, slot = nonEmpty(subType), nonEmpty(equipLoc) and nonEmpty(_G[equipLoc])
+    local own = nonEmpty(equipLoc) and EQUIP_SLOTS[equipLoc]
+    local kind, slot = nonEmpty(subType), nonEmpty(equipLoc) and TC.ClientText(equipLoc, own and own.nameKey)
     parts[#parts + 1] = kind and slot and (kind .. ", " .. slot) or kind or slot
     return parts[1] and table.concat(parts, " \194\183 ") or nil
 end
@@ -1803,7 +1817,7 @@ local function holidayLine(sourceID)
     local TCol = C_TransmogCollection
     local name = type(sourceID) == "number" and TCol and TCol.GetSourceRequiredHoliday
         and nonEmpty(TCol.GetSourceRequiredHoliday(sourceID))
-    return name and clientText("TRANSMOG_APPEARANCE_USABLE_HOLIDAY", L.HOLIDAY_ONLY):format(name) or nil
+    return name and TC.ClientText("TRANSMOG_APPEARANCE_USABLE_HOLIDAY", "HOLIDAY_ONLY"):format(name) or nil
 end
 
 -- The tooltip never has more lines than this.

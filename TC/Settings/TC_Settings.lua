@@ -99,13 +99,27 @@ end
 -- in GameTooltipText (12) where the tooltip has GameTooltipHeaderText (14),
 -- the lines in GameTooltipTextSmall (10) where it has GameTooltipText (12)
 -- (FontStyles.xml:314-322, Fonts.xml:1273-1275, 1385-1387, 1403-1405), each
--- line 2 taller than its font; a price line is as tall as its 14 coins
--- (TC_Tooltip.lua:231). A sample shows the item's name and the addon's
--- lines only, with three other items. The tallest combination (Full, other
--- items shown, price on) is 2 * 8 + 14 + 8 * 12 + 14 = 140, the template's height.
+-- line LINE_SPACING taller than its text, and at least 14 for the name and
+-- 12 for a line (the roman fonts' 12 and 10, plus 2); a price line is as
+-- tall as its 14 coins (TC_Tooltip.lua:231). A line's height is read from
+-- its font string once its text is set: the same fonts take a taller member
+-- for Chinese and Korean (13 for the name, 12 or 13 for a line,
+-- Fonts.xml:1385-1420). A sample shows the item's name and the addon's
+-- lines only, with one other item (i18n slice D: three left a Chinese or
+-- Korean sample taller than the row). The tallest combination (Full, other
+-- items shown, price on) in English is 2 * 8 + 14 + 6 * 12 + 14 = 116; with
+-- Chinese or Korean lines of 15 and a name of 17 (the harness's model) 132;
+-- the template's 140 leaves the rest for real fonts.
 local PREVIEW_X, PREVIEW_Y, SAMPLE_GAP, SAMPLE_WIDTH = 37, 0, 16, 150
-local PAD, HEAD_HEIGHT, LINE_HEIGHT, COIN_HEIGHT = 8, 14, 12, 14
+local PAD, HEAD_HEIGHT, LINE_HEIGHT, COIN_HEIGHT, LINE_SPACING = 8, 14, 12, 14, 2
 local NAME_FONT, LINE_FONT = "GameTooltipText", "GameTooltipTextSmall"
+-- A Chinese or Korean character is drawn a full em wide and tall: at least
+-- WIDE_EM, the largest of those members' heights in either font
+-- (Fonts.xml:1389-1396, 1407-1416). A font string's own measure is taken
+-- when it is larger. Inferred from the owner's screenshot of an English
+-- client set to 简体中文, where the samples were sized narrower and the
+-- lines stepped shorter than the Chinese text drew.
+local WIDE_EM = 13
 -- A sample is as wide as its widest line, a line's left text, TEXT_GAP and
 -- its right text, as the game's tooltip sizes itself to its lines (slice E,
 -- E1; the gap is inferred from the 40 between a line's two texts in
@@ -113,11 +127,12 @@ local NAME_FONT, LINE_FONT = "GameTooltipText", "GameTooltipTextSmall"
 -- inside the row, ROW_EDGE from its right edge. Where the row is too
 -- narrow, a left text wraps before it would reach its right text.
 local TEXT_GAP, ROW_EDGE = 40, 8
--- The caption: one line, CAPTION_GAP under the shorter sample.
+-- The caption: CAPTION_GAP under the shorter sample, at its left, wrapped
+-- where it would pass the row's right edge.
 local CAPTION_GAP = 4
 local UNCOMMON = "FF1EFF00"
 -- The sample items' names (locale keys) and how long ago the price was seen.
-local OTHERS = { { nameKey = "PREVIEW_OTHER_1" }, { nameKey = "PREVIEW_OTHER_2" }, { nameKey = "PREVIEW_OTHER_3" } }
+local OTHERS = { { nameKey = "PREVIEW_OTHER_1" } }
 local AGE_MINUTES = 3
 local SAMPLES = {
     { nameKey = "PREVIEW_ITEM", collected = false, pending = "bags", copper = 4150 },
@@ -126,7 +141,7 @@ local SAMPLES = {
 local preview
 
 local function sampleItem(collected)
-    local source = _G.TRANSMOG_SOURCE_4 or L.SOURCE_WORLD_DROP
+    local source = TC.ClientText("TRANSMOG_SOURCE_4", "SOURCE_WORLD_DROP")
     local others = {}
     for i, other in ipairs(OTHERS) do others[i] = { name = L[other.nameKey], color = UNCOMMON, source = source, collected = false } end
     return { collected = collected, bindsOnEquip = true, source = source, others = others, otherCount = #OTHERS }
@@ -137,6 +152,32 @@ local function sampleKnown(spec)
     if not spec.copper then return { pending = spec.pending } end
     return { pending = spec.pending,
         price = { copper = spec.copper, age = TC.Plural("AGE_MINUTES", AGE_MINUTES):format(AGE_MINUTES) } }
+end
+
+-- How many Chinese or Korean characters a text shows (the three-byte
+-- characters U+3000 to U+DFFF and U+F000 to U+FFFF, the full-width forms
+-- among them), its colour codes and textures left out.
+local function wideCount(text)
+    text = (text or ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("|T.-|t", "")
+    local n = 0
+    for _ in text:gmatch("[\227-\237\239][\128-\191][\128-\191]") do n = n + 1 end
+    return n
+end
+
+-- A font string's text width: its own measure, at least WIDE_EM for each
+-- Chinese or Korean character.
+local function widthOf(fs)
+    return math.max(fs:GetStringWidth(), wideCount(fs:GetText()) * WIDE_EM)
+end
+
+-- A font string's text height in lines of at most width (nil: one line):
+-- its own measure, at least WIDE_EM a line for a text with a Chinese or
+-- Korean character.
+local function heightOf(fs, width)
+    local own = fs.GetStringHeight and fs:GetStringHeight() or 0
+    if wideCount(fs:GetText()) == 0 then return own end
+    local lines = width and width > 0 and math.ceil(widthOf(fs) / width) or 1
+    return math.max(own, lines * WIDE_EM)
 end
 
 -- Line i of a sample: a frame with its left and right text; the first in
@@ -169,7 +210,7 @@ local function fillSample(sample, lines)
         row.right:SetText(right or "")
         row.right:SetShown(right ~= nil)
         if rightColor then row.right:SetTextColor(unpack(rightColor)) end
-        local width = row.left:GetStringWidth() + (right and TEXT_GAP + row.right:GetStringWidth() or 0)
+        local width = widthOf(row.left) + (right and TEXT_GAP + widthOf(row.right) or 0)
         wanted = math.max(wanted, math.ceil(2 * PAD + (line.indent or 0) + width))
     end
     for i = #lines + 1, #sample.rows do sample.rows[i]:Hide() end
@@ -187,13 +228,15 @@ local function placeSample(sample, lines, width)
         row:SetPoint("TOPLEFT", sample, "TOPLEFT", PAD + indent, y)
         row:SetWidth(inner - indent)
         local room = inner - indent
-        if row.right:IsShown() then room = room - TEXT_GAP - row.right:GetStringWidth() end
-        local wrap = row.left:GetStringWidth() > room
+        if row.right:IsShown() then room = room - TEXT_GAP - widthOf(row.right) end
+        local wrap = widthOf(row.left) > room
         row.left:SetWidth(wrap and room or 0)
         row.left:SetWordWrap(wrap)
-        local height = i == 1 and HEAD_HEIGHT or LINE_HEIGHT
+        -- as tall as its taller text, read now that the text and width are set
+        local text = heightOf(row.left, wrap and room or nil)
+        if row.right:IsShown() then text = math.max(text, heightOf(row.right)) end
+        local height = math.max(i == 1 and HEAD_HEIGHT or LINE_HEIGHT, math.ceil(text) + LINE_SPACING)
         if line.money then height = math.max(height, COIN_HEIGHT) end
-        if wrap then height = math.max(height, row.left:GetStringHeight()) end
         row:SetHeight(height)
         row:Show()
         y = y - height
@@ -241,8 +284,16 @@ local function draw()
     end
     local first, second = preview.samples[1], preview.samples[2]
     local shorter = second:GetHeight() <= first:GetHeight() and second or first
-    preview.caption:ClearAllPoints()
-    preview.caption:SetPoint("TOPLEFT", shorter, "BOTTOMLEFT", 0, -CAPTION_GAP)
+    local caption = preview.caption
+    caption:ClearAllPoints()
+    caption:SetPoint("TOPLEFT", shorter, "BOTTOMLEFT", 0, -CAPTION_GAP)
+    -- the room from the shorter sample's left to the row's right edge
+    local room = parent and parent:GetWidth()
+    room = room and room > 0 and math.floor(room - ROW_EDGE - (shorter == first and PREVIEW_X or PREVIEW_X + widths[1] + SAMPLE_GAP))
+    caption:SetWidth(0)
+    local wrap = room and widthOf(caption) > room or false
+    caption:SetWidth(wrap and room or 0)
+    caption:SetWordWrap(wrap)
 end
 
 local function build(parent)
@@ -259,7 +310,6 @@ local function build(parent)
     -- the caption in the lines' font, in the grey of GameFontDisableSmall
     local caption = preview:CreateFontString(nil, "OVERLAY", LINE_FONT)
     caption:SetJustifyH("LEFT")
-    caption:SetWordWrap(false)
     if DISABLED_FONT_COLOR and DISABLED_FONT_COLOR.GetRGB then
         caption:SetTextColor(DISABLED_FONT_COLOR:GetRGB())
     else
@@ -334,12 +384,13 @@ end
 -- (Blizzard_AddOnPerformance/AddOnPerformance.lua:1-13) with Blizzard's
 -- button texts RELOADUI (Blizzard_AddOnList/AddonList.lua:541) and LATER
 -- (Blizzard_WowSurveyUI/Blizzard_WowSurveyUI.lua:4): windows are built
--- once, so a new language shows after a reload. Without either global,
--- ACCEPT and CANCEL.
+-- once, so a new language shows after a reload. The buttons are the client's
+-- RELOADUI and LATER in its own language, ours otherwise (TC.ClientText).
 local RELOAD_DIALOG = "TRANSMOGCHECKER_RELOAD"
 local function promptReload()
     if not (StaticPopupDialogs and StaticPopup_Show) then return end
-    StaticPopupDialogs[RELOAD_DIALOG] = { text = L.RELOAD_PROMPT, button1 = RELOADUI or ACCEPT, button2 = LATER or CANCEL,
+    StaticPopupDialogs[RELOAD_DIALOG] = { text = L.RELOAD_PROMPT, button1 = TC.ClientText("RELOADUI", "RELOAD_UI"),
+        button2 = TC.ClientText("LATER", "LATER"),
         OnAccept = function() if ReloadUI then ReloadUI() end end, timeout = 0, whileDead = 1, hideOnEscape = 1 }
     StaticPopup_Show(RELOAD_DIALOG)
 end

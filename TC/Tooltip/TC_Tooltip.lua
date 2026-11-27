@@ -109,7 +109,7 @@ local function nameOf(source)
     end
     if not name then
         if source.itemID then request(source.itemID) end
-        return RETRIEVING_ITEM_INFO or L.RETRIEVING_ITEM, TC.COLORS.RETRIEVING
+        return TC.ClientText("RETRIEVING_ITEM_INFO", "RETRIEVING_ITEM"), TC.COLORS.RETRIEVING
     end
     local color = TC.COLORS.WHITE
     if type(quality) == "number" and C_Item and C_Item.GetItemQualityColor then

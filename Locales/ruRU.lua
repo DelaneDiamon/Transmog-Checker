@@ -57,12 +57,12 @@ TC.Locales.ruRU = { name = "Русский", plural = plural, strings = {
     SETTING_LANGUAGE_TIP = "Язык текстов TransmogChecker. «Авто» следует языку игры. Изменение вступает в силу после перезагрузки интерфейса.",
     LANGUAGE_AUTO = "Авто (язык игры)",
     RELOAD_PROMPT = "Язык TransmogChecker сменится после перезагрузки интерфейса. Перезагрузить сейчас?",
+    RELOAD_UI = "Перезагрузить",
+    LATER = "Позже",
     SETTINGS_AFTER_COMBAT = "Настройки откроются после боя.",
     PREVIEW_CAPTION = "Пример: образец предмета, а не ваша коллекция",
     PREVIEW_ITEM = "Сапоги из плющевой ткани орла",
     PREVIEW_OTHER_1 = "Сапоги из плющевой ткани интеллекта",
-    PREVIEW_OTHER_2 = "Сапоги из плющевой ткани совы",
-    PREVIEW_OTHER_3 = "Сапоги из плющевой ткани духа",
     PREVIEW_COLLECTED_ITEM = "Сапоги из рунической ткани",
 
     -- the item tooltip
@@ -98,6 +98,9 @@ TC.Locales.ruRU = { name = "Русский", plural = plural, strings = {
     SLOT_MAIN_HAND = "Правая рука",
     SLOT_OFF_HAND = "Левая рука",
     SLOT_RANGED = "Дальний бой",
+    SLOT_ONE_HAND = "Одноручное",
+    SLOT_TWO_HAND = "Двуручное",
+    SLOT_HELD_IN_OFF_HAND = "Левая рука",
 
     -- source types, where the client names none (TRANSMOG_SOURCE_n), and professions
     SOURCE_BOSS_DROP = "Добыча с босса",
@@ -165,6 +168,8 @@ TC.Locales.ruRU = { name = "Русский", plural = plural, strings = {
     TIP_DETAILS = "Щелкните, чтобы узнать подробности.",
     DROP = "Добыча: %s",
     DROP_WITH_DIFFICULTIES = "Добыча: %s (%s)",
+    DROP_PLACE = "%s (%s)",
+    LIST_DELIMITER = ", ",
     BOSS_DROP_HEADER = "Добыча с босса:",
     MORE_DROPS = { one = "и еще %d", few = "и еще %d", many = "и еще %d" },
     SOURCE_WITH_PROFESSION = "%s: %s",

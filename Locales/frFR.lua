@@ -51,12 +51,12 @@ TC.Locales.frFR = { name = "Français", strings = {
     SETTING_LANGUAGE_TIP = "La langue des textes de TransmogChecker. Auto suit la langue du jeu. Un changement s'applique après le rechargement de l'interface.",
     LANGUAGE_AUTO = "Auto (langue du jeu)",
     RELOAD_PROMPT = "La langue de TransmogChecker change au rechargement de l'interface. Recharger maintenant ?",
+    RELOAD_UI = "Recharger l'IU",
+    LATER = "Plus tard",
     SETTINGS_AFTER_COMBAT = "Les paramètres s'ouvriront après le combat.",
     PREVIEW_CAPTION = "Aperçu : un objet d'exemple, pas votre collection",
     PREVIEW_ITEM = "Bottes en tisse-lierre de l'aigle",
     PREVIEW_OTHER_1 = "Bottes en tisse-lierre d'intelligence",
-    PREVIEW_OTHER_2 = "Bottes en tisse-lierre du hibou",
-    PREVIEW_OTHER_3 = "Bottes en tisse-lierre d'esprit",
     PREVIEW_COLLECTED_ITEM = "Bottes en étoffe runique",
 
     -- the item tooltip
@@ -92,6 +92,9 @@ TC.Locales.frFR = { name = "Français", strings = {
     SLOT_MAIN_HAND = "Main droite",
     SLOT_OFF_HAND = "Main gauche",
     SLOT_RANGED = "À distance",
+    SLOT_ONE_HAND = "A une main",
+    SLOT_TWO_HAND = "Deux mains",
+    SLOT_HELD_IN_OFF_HAND = "Tenu(e) en main gauche",
 
     -- source types, where the client names none (TRANSMOG_SOURCE_n), and professions
     SOURCE_BOSS_DROP = "Butin de boss",
@@ -159,6 +162,8 @@ TC.Locales.frFR = { name = "Français", strings = {
     TIP_DETAILS = "Cliquez pour plus de détails.",
     DROP = "Butin : %s",
     DROP_WITH_DIFFICULTIES = "Butin : %s (%s)",
+    DROP_PLACE = "%s (%s)",
+    LIST_DELIMITER = ", ",
     BOSS_DROP_HEADER = "Butin de boss :",
     MORE_DROPS = { one = "et %d autre", other = "et %d autres" },
     SOURCE_WITH_PROFESSION = "%s : %s",

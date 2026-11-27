@@ -41,6 +41,24 @@ TC.L = setmetatable({}, { __index = function(_, key)
     return key
 end })
 
+-- A text the client supplies (a global of Blizzard's, globalName) whose
+-- meaning the locale table also has (key): the client's while the active
+-- language is the client's own (GetLocale(), enGB read as enUS), and when
+-- the client has none; the locale table's under another language. A key
+-- that is nil leaves the client's text in every language. Answers nil
+-- with neither.
+function TC.ClientText(globalName, key)
+    local client = GetLocale and GetLocale()
+    if client == "enGB" then client = "enUS" end
+    local own = _G[globalName]
+    if type(own) ~= "string" or own == "" then own = nil end
+    if key and (TC.Language() ~= client or not own) then
+        local text = TC.L[key]
+        if text ~= key then return text end
+    end
+    return own
+end
+
 -- English's rule: one for 1, other for every other count.
 local function englishPlural(n)
     return n == 1 and "one" or "other"

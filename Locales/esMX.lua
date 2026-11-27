@@ -52,12 +52,12 @@ end, strings = {
     SETTING_LANGUAGE_TIP = "El idioma de los textos de TransmogChecker. Auto sigue el idioma del juego. Un cambio se aplica al recargar la interfaz.",
     LANGUAGE_AUTO = "Auto (idioma del juego)",
     RELOAD_PROMPT = "El idioma de TransmogChecker cambia al recargar la interfaz. ¿Recargar ahora?",
+    RELOAD_UI = "Recargar IU",
+    LATER = "Más tarde",
     SETTINGS_AFTER_COMBAT = "La configuración se abrirá después del combate.",
     PREVIEW_CAPTION = "Vista previa: un objeto de ejemplo, no tu colección",
     PREVIEW_ITEM = "Botas de tela de hiedra del Águila",
     PREVIEW_OTHER_1 = "Botas de tela de hiedra de Intelecto",
-    PREVIEW_OTHER_2 = "Botas de tela de hiedra del Búho",
-    PREVIEW_OTHER_3 = "Botas de tela de hiedra de Espíritu",
     PREVIEW_COLLECTED_ITEM = "Botas de paño rúnico",
 
     -- the item tooltip
@@ -93,6 +93,9 @@ end, strings = {
     SLOT_MAIN_HAND = "Mano derecha",
     SLOT_OFF_HAND = "Mano izquierda",
     SLOT_RANGED = "A distancia",
+    SLOT_ONE_HAND = "Una mano",
+    SLOT_TWO_HAND = "Dos manos",
+    SLOT_HELD_IN_OFF_HAND = "Sostener con la mano izquierda",
 
     -- source types, where the client names none (TRANSMOG_SOURCE_n), and professions
     SOURCE_BOSS_DROP = "Botín de jefe",
@@ -160,6 +163,8 @@ end, strings = {
     TIP_DETAILS = "Haz clic para ver los detalles.",
     DROP = "Botín: %s",
     DROP_WITH_DIFFICULTIES = "Botín: %s (%s)",
+    DROP_PLACE = "%s (%s)",
+    LIST_DELIMITER = ", ",
     BOSS_DROP_HEADER = "Botín de jefe:",
     MORE_DROPS = { one = "y %d más", other = "y %d más" },
     SOURCE_WITH_PROFESSION = "%s: %s",

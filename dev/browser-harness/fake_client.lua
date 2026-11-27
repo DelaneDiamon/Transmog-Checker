@@ -364,13 +364,26 @@ function Fake.new(opts)
         local small = self.font and self.font.name == "GameFontHighlightSmall"
         return shownColumns(self.text) * (small and 5 or 6)
     end
-    -- a font string's text height: 12 for each line of its characters' width
-    -- wrapped at its width (one line without a width), none for no text
+    -- a font string's text height: a line's height for each line of its
+    -- characters' width wrapped at its width (one line without a width),
+    -- none for no text. A line is 10 in GameTooltipTextSmall, 12 in the
+    -- others; a text with a CJK or Hangul character 1.25 times that (i18n
+    -- slice D: the game's tooltip fonts take a taller member for those
+    -- alphabets, 12 or 13 where the roman one is 10, Fonts.xml:1403-1420;
+    -- the real pixel heights are unverified).
+    local function lineHeight(w, text)
+        local base = w.template == "GameTooltipTextSmall" and 10 or 12
+        local wide = false
+        for ch in text:gmatch("[\227-\237\239][\128-\191][\128-\191]") do wide = true break end
+        return wide and base * 1.25 or base
+    end
+    Fake.lineHeight = lineHeight
     function methods:GetStringHeight()
-        local n = columns(self.text or "")
+        local text = self.text or ""
+        local n = columns(text)
         if n == 0 then return 0 end
         local width = self.width
-        return (width and width > 0 and math.ceil(n * perCharacter(self) / width) or 1) * 12
+        return (width and width > 0 and math.ceil(n * perCharacter(self) / width) or 1) * lineHeight(self, text)
     end
     function methods:GetName() return self.name end
     function methods:SetEnabled(on) self.enabled = on and true or false end
