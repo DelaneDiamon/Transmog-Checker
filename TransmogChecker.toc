@@ -12,6 +12,16 @@ Libs/LibStub/LibStub.lua
 Libs/LibAHTab/LibAHTab.lua
 Locales/Locale.lua
 Locales/enUS.lua
+Locales/deDE.lua
+Locales/esES.lua
+Locales/esMX.lua
+Locales/frFR.lua
+Locales/itIT.lua
+Locales/koKR.lua
+Locales/ptBR.lua
+Locales/ruRU.lua
+Locales/zhCN.lua
+Locales/zhTW.lua
 TransmogChecker.lua
 TC/Common/TC_Constants.lua
 TC/Browser/TC_AuctionQueue.lua

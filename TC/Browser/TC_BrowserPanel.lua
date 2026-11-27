@@ -78,7 +78,8 @@ local FADE_HEIGHT = 16
 local ICON_SIZE, ICON_BORDER_SIZE = 28, 32
 local ICON_BORDER_ATLAS = "auctionhouse-itemicon-small-border"
 local QUESTION_MARK = "Interface\\Icons\\INV_Misc_QuestionMark"
--- A found row's Buy button.
+-- A found row's Buy button: BUY_WIDTH, or wider for a longer word (i18n
+-- slice C).
 local BUY_WIDTH, BUY_HEIGHT = 40, 18
 -- Texture paths are inferred from mainline clients, not read for Forever.
 local CHECK_TEXTURE = "Interface\\RaidFrame\\ReadyCheck-Ready"
@@ -211,6 +212,21 @@ local function newButton(parent, text, width, height, onClick)
     button:SetText(text)
     button:SetScript("OnClick", onClick)
     return button
+end
+
+-- Widens a button of the given width to its text where the text needs more:
+-- the text's width plus the room English's text has in that width
+-- (Button:GetTextWidth, SimpleButtonAPIDocumentation.lua:244), never under
+-- the width; English keeps it exactly.
+local function fitText(button, english, width)
+    if not (english and button.GetTextWidth and button.GetText) then return end
+    local own = button:GetText()
+    if own == english then return end
+    button:SetText(english)
+    local englishWidth = button:GetTextWidth()
+    button:SetText(own)
+    local more = button:GetTextWidth() - englishWidth
+    if more > 0 then button:SetWidth(math.ceil(width + more)) end
 end
 
 -- A tooltip of a title and, when given, a grey line under it.
@@ -743,9 +759,11 @@ local function newFlyout(panel, level, overTile)
         row.name:SetJustifyH("LEFT")
         row.forSale = row:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
         row.forSale:SetPoint("TOPLEFT", row, "TOPLEFT", 2, -22)
+        row.forSale:SetWordWrap(false)
         -- "Buy" on a found row (spec 2.6): the state opens the buy dialog;
         -- the price sits beside it (layout B, 6.2)
         row.buy = newButton(row, L.BUY, BUY_WIDTH, BUY_HEIGHT, function() State.BuyRow(offset + i) end)
+        fitText(row.buy, TC.Locales.enUS and TC.Locales.enUS.strings.BUY, BUY_WIDTH)
         row.buy:SetPoint("TOPRIGHT", row, "TOPRIGHT", -10, -18)
         row.buy:Hide()
         row.price = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
@@ -868,8 +886,14 @@ local function newFlyout(panel, level, overTile)
                     row.price:SetPoint("TOPRIGHT", row, "TOPRIGHT", -10, -22)
                 end
                 setName(row.name, shownRow.name, shownRow.quality)
+                row.forSale:SetWidth(0)
                 row.forSale:SetText(checking and "-" or shownRow.forSale or "")
                 row.price:SetText(shownRow.money and moneyMarkup(shownRow.money) or "")
+                -- the count gives way to the price and Buy: cut before the
+                -- price, never under it (i18n slice C)
+                local right = 10 + (buy and row.buy:GetWidth() + TOOLS_GAP or 0) + row.price:GetStringWidth()
+                local room = math.floor(FLY_INSIDE - 2 - TOOLS_GAP - right)
+                if row.forSale:GetStringWidth() > room then row.forSale:SetWidth(math.max(room, 1)) end
             end
         end
         local scrolls = count > shown
@@ -970,6 +994,9 @@ end
 -- The menu of a button without Blizzard's menu: a list under the button's
 -- side corner. fill(items) lists { text, action, enabled, line }: line puts
 -- a line above the entry; a chosen entry hides the menu and runs action.
+-- Blizzard's own menu sizes itself to its entries (Blizzard_Menu/Menu.lua:
+-- 1436-1459, no maximum width unless one is set); this list does too.
+local MENU_PAD = 8
 local function listMenu(panel, button, width, side)
     local menu = CreateFrame("Frame", nil, panel)
     menu:SetFrameStrata("DIALOG")
@@ -980,7 +1007,9 @@ local function listMenu(panel, button, width, side)
     menu:Hide()
     local entries, lines = {}, {}
     function menu.fill(items)
-        local y = -4
+        -- at least width, else as wide as its widest entry's text and
+        -- MENU_PAD on each side of it (i18n slice C); it grows away from side
+        local y, wide = -4, width
         for i, item in ipairs(items) do
             local line = lines[i]
             if item.line then
@@ -1012,16 +1041,21 @@ local function listMenu(panel, button, width, side)
             entry:ClearAllPoints()
             entry:SetPoint("TOPLEFT", menu, "TOPLEFT", 4, y)
             entry:SetText(item.text)
+            if entry.GetTextWidth then wide = math.max(wide, math.ceil(entry:GetTextWidth() + 2 * MENU_PAD) + 8) end
             entry:SetEnabled(item.enabled ~= false)
             entry.action = item.action
             entry:Show()
             y = y - 20
         end
+        for i = 1, #items do
+            entries[i]:SetWidth(wide - 8)
+            if lines[i] then lines[i]:SetWidth(wide - 16) end
+        end
         for i = #items + 1, #entries do
             entries[i]:Hide()
             if lines[i] then lines[i]:Hide() end
         end
-        menu:SetSize(width, 8 - y)
+        menu:SetSize(wide, 8 - y)
     end
     button.menu = menu
     button.close = function() menu:Hide() end

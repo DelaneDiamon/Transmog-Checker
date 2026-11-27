@@ -50,11 +50,15 @@ local ROWS = {
 -- tab opens"; the funnel's Settings… opens the page at this label.
 local SCAN = { key = "scanWhenShown", labelKey = "SETTING_SCAN", tipKey = "SETTING_SCAN_TIP" }
 -- The language setting, the general row under the preview: Auto, then each
--- language with a locale file by its own name, in the order of their codes.
+-- language with a locale file by its own name: English, then the others in
+-- the order of their codes.
 local function languageChoices()
     local codes = {}
-    for code in pairs(TC.Locales) do codes[#codes + 1] = code end
+    for code in pairs(TC.Locales) do
+        if code ~= "enUS" then codes[#codes + 1] = code end
+    end
     table.sort(codes)
+    if TC.Locales.enUS then table.insert(codes, 1, "enUS") end
     local choices = { { "auto", labelKey = "LANGUAGE_AUTO" } }
     for _, code in ipairs(codes) do choices[#choices + 1] = { code, label = TC.Locales[code].name } end
     return choices
@@ -330,11 +334,12 @@ end
 -- (Blizzard_AddOnPerformance/AddOnPerformance.lua:1-13) with Blizzard's
 -- button texts RELOADUI (Blizzard_AddOnList/AddonList.lua:541) and LATER
 -- (Blizzard_WowSurveyUI/Blizzard_WowSurveyUI.lua:4): windows are built
--- once, so a new language shows after a reload.
+-- once, so a new language shows after a reload. Without either global,
+-- ACCEPT and CANCEL.
 local RELOAD_DIALOG = "TRANSMOGCHECKER_RELOAD"
 local function promptReload()
     if not (StaticPopupDialogs and StaticPopup_Show) then return end
-    StaticPopupDialogs[RELOAD_DIALOG] = { text = L.RELOAD_PROMPT, button1 = RELOADUI, button2 = LATER,
+    StaticPopupDialogs[RELOAD_DIALOG] = { text = L.RELOAD_PROMPT, button1 = RELOADUI or ACCEPT, button2 = LATER or CANCEL,
         OnAccept = function() if ReloadUI then ReloadUI() end end, timeout = 0, whileDead = 1, hideOnEscape = 1 }
     StaticPopup_Show(RELOAD_DIALOG)
 end

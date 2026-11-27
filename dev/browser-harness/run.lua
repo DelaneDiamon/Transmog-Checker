@@ -2358,6 +2358,8 @@ end
 -- tab button.
 local function login(opts)
     local c = boot(opts)
+    -- opts.beforeLoaded: run after the files load, before ADDON_LOADED (a test language registers there)
+    if opts and opts.beforeLoaded then opts.beforeLoaded() end
     c.fire("ADDON_LOADED", "TransmogChecker")
     c.fire("PLAYER_LOGIN")
     return c
@@ -12164,7 +12166,7 @@ test("i18n auto follows GetLocale, enGB and a code without a file read English; 
     local names = {}
     for _, r in ipairs(c.settingsPage(c.settings.addon[1].ID)) do names[#names + 1] = tostring(r.name) end
     check(table.concat(names, "|"):find("|Sammelstatus|", 1, true), "the page built in it: " .. table.concat(names, "|"))
-    for _, code in ipairs({ "enGB", "frFR" }) do
+    for _, code in ipairs({ "enGB", "xxXX" }) do
         c.locale = code
         equal(TC.Language() .. "/" .. TC.L.NOT_COLLECTED, "enUS/Not collected", code .. ": English")
     end
@@ -12173,7 +12175,7 @@ test("i18n auto follows GetLocale, enGB and a code without a file read English; 
     TransmogCheckerDB = { language = "tsTS" }
     d.fire("ADDON_LOADED", "TransmogChecker")
     equal(TC.Language() .. "/" .. TC.L.NOT_COLLECTED, "tsTS/Nicht gesammelt", "a saved language over the game's")
-    for _, value in ipairs({ "frFR", 7, "" }) do
+    for _, value in ipairs({ "xxXX", 7, "" }) do
         local e = fresh()
         TransmogCheckerDB = { language = value }
         e.fire("ADDON_LOADED", "TransmogChecker")
@@ -12233,7 +12235,10 @@ test("i18n language setting: the page's dropdown lists Auto and each language by
     equal(language.tooltip, TC.L.SETTING_LANGUAGE_TIP, "its tooltip from the locale table")
     local options = {}
     for i, o in ipairs(language.options) do options[i] = o.value .. "=" .. o.label end
-    equal(table.concat(options, "|"), "auto=Auto (game language)|enUS=English|tsTS=Testisch", "Auto, then each language by its name")
+    -- i18n slice C: English first, then the others by code, the shipped ten among them
+    equal(table.concat(options, "|"), "auto=Auto (game language)|enUS=English|deDE=Deutsch|esES=Español (EU)"
+        .. "|esMX=Español (AL)|frFR=Français|itIT=Italiano|koKR=한국어|ptBR=Português (Brasil)|ruRU=Русский"
+        .. "|tsTS=Testisch|zhCN=简体中文|zhTW=繁體中文", "Auto, English, then each language by its name in the order of the codes")
     equal(language.value .. "/" .. language.init.data.setting:GetDefaultValue(), "auto/auto", "auto, also as the default")
     equal(#c.popups, 0, "no prompt yet")
     language.init.data.setting:SetValue("tsTS")
@@ -12360,6 +12365,38 @@ local NOT_USER_FACING = {
     ["TC/Browser/TC_BrowserState.lua"] = { ["All"] = true, ["Collected"] = true, ["Not collected"] = true,
         ["Bought, not collected"] = true },
 }
+-- i18n slice C: what the wider scan (a space and three letters) also finds
+-- that is not user-facing, added to the lists above.
+local function allow(path, texts)
+    NOT_USER_FACING[path] = NOT_USER_FACING[path] or {}
+    for _, text in ipairs(texts) do NOT_USER_FACING[path][text] = true end
+end
+-- the chat lines' tag, the addon's short name
+allow("TransmogChecker.lua", { "|cFF9D9D9DTC:|r " })
+allow("TC/Settings/TC_Settings.lua", { "|cFF9D9D9DTC:|r " })
+-- /tc debug's output, a developer's
+allow("TC/Tooltip/TC_Tooltip.lua", { "|cFF9D9D9DTC Debug:|r", "a line", "no line" })
+-- the state's values (an outcome, a tile's strip, a check's state, a buy's
+-- end), compared in code and never drawn
+allow("TC/Browser/TC_Check.lua", { "could not check", "cannot be sold", "not for sale" })
+allow("TC/Browser/TC_BrowserState.lua", { "not for sale", "could not check", "not checked", "cannot be sold", "no answer" })
+allow("TC/Browser/TC_BrowserPanel.lua", { "not for sale", "no answer" })
+allow("TC/Browser/TC_Buy.lua", { "not sent" })
+-- developer texts: a failure's reason, which reaches only
+-- TC.BrowserState.lastError (/dump) or a check's result.error, never drawn
+allow("TC/Browser/TC_AuctionQueue.lua", { "C_AuctionHouse is missing", " is missing", "C_Timer.NewTicker or GetTime is missing",
+    "the search was dropped by the client ", " times", "no answer within 5 seconds of the send",
+    "no item key info within 5 seconds", "the search was dropped by the client for 5 seconds",
+    "not ready to send for 5 seconds", "another browse was sent while ours was in flight",
+    "browse failure (AUCTION_HOUSE_BROWSE_FAILURE)" })
+allow("TC/Browser/TC_Appearances.lua", { "the class filter moved", "the class filter was not put back to ",
+    "the class filter was refused", "the filter category was not put back to %d", ", nor on the next frame",
+    "category %d: %d of %d listed with the filter category pointed away",
+    "category %d: %d of %d listed; Collections is open" })
+allow("TC/Browser/TC_Check.lua", { "no item of the appearance is known", "%d of %d items not looked up",
+    "the browse for %s was cut off at %d pages" })
+allow("TC/Browser/TC_Scan.lua", { "C_TransmogCollection.GetItemInfo is missing", "an Enum value of the scan filter is missing",
+    "the scan was cut off at %d pages" })
 
 test("i18n literals: no user-facing English text is left in the shipping Lua and XML outside Locales/", function()
     local c = fresh()
@@ -12384,13 +12421,338 @@ test("i18n literals: no user-facing English text is left in the shipping Lua and
             local text = lit.text
             -- a locale string, or a sentence: a capital, then two words or more
             local sentence = text:find("^%u%l*[%s,:]") and text:find("%a%a+[%s,:]+%a%a+")
-            if (english[text] or sentence) and not allowed[text] then
+            -- i18n slice C (QA A, 1): also any literal with a space and three letters or more
+            local spaced = text:find(" ", 1, true) and select(2, text:gsub("%a", "")) >= 3
+            if (english[text] or sentence or spaced) and not allowed[text] then
                 found[#found + 1] = ("%s:%d %q"):format(f.path, lit.line, text)
             end
         end
     end
     equal(table.concat(found, "; "), "", "English literals")
     noErrors(c, "literals")
+end)
+
+end)()
+
+---------------------------------------------------------------- i18n slice C: the ten language files
+
+;(function()
+
+-- The shipped languages besides English, in the .toc's order.
+local CODES = { "deDE", "esES", "esMX", "frFR", "itIT", "koKR", "ptBR", "ruRU", "zhCN", "zhTW" }
+-- F1's limit (slice F): a label of 27 columns of 6 (about 195 in the default panel)
+local LABEL_LIMIT = 27
+local function fresh(opts, fire)
+    local o = { saved = false, settings = true }
+    for k, v in pairs(opts or {}) do o[k] = v end
+    local c = boot(o)
+    if fire then c.fire("ADDON_LOADED", "TransmogChecker") end
+    return c
+end
+local function readFile(path)
+    local file = assert(io.open(repo .. "/" .. path, "rb"))
+    local text = file:read("*a")
+    file:close()
+    return text
+end
+-- An entry's forms: a plural entry's by form name, else { text }.
+local function formsOf(value)
+    if type(value) == "table" then return value end
+    return { text = value }
+end
+-- A text's placeholder types in order ("d,s"), and its escape counts.
+local function placeholders(text)
+    local out = {}
+    for kind in (text:gsub("%%%%", "")):gmatch("%%[-+ #0]*%d*%.?%d*(%a)") do out[#out + 1] = kind end
+    return table.concat(out, ",")
+end
+local ESCAPES = { { "colour", "|c%x%x%x%x%x%x%x%x" }, { "colour end", "|r" }, { "texture", "|T" }, { "texture end", "|t" },
+    { "atlas", "|A" }, { "atlas end", "|a" }, { "newline", "\n" } }
+local function escapes(text)
+    local out = {}
+    for _, e in ipairs(ESCAPES) do out[#out + 1] = e[1] .. "=" .. select(2, text:gsub(e[2], "")) end
+    return table.concat(out, " ")
+end
+local function englishPlural(n) return n == 1 and "one" or "other" end
+-- Every problem of every language file, by check, sorted.
+local function problems(check)
+    local c = fresh(nil, true)
+    local english = TC.Locales.enUS.strings
+    local out = {}
+    for _, code in ipairs(CODES) do
+        local locale = TC.Locales[code]
+        if not locale then
+            out[#out + 1] = code .. ": not loaded"
+        else
+            check(code, locale, english, out)
+        end
+    end
+    noErrors(c, "language files")
+    table.sort(out)
+    return table.concat(out, "; ")
+end
+
+test("i18n C load: the .toc lists the ten after enUS.lua in the order of their codes; on auto each applies when the game runs in it", function()
+    local listed, after = {}, false
+    for line in io.lines(repo .. "/TransmogChecker.toc") do
+        line = line:gsub("\r", "")
+        local code = line:match("^Locales/(%a%a%u%u)%.lua$")
+        if after and code then listed[#listed + 1] = code end
+        if code == "enUS" then after = true end
+    end
+    equal(table.concat(listed, ","), table.concat(CODES, ","), "the language files after enUS.lua")
+    for _, code in ipairs(CODES) do
+        local c = fresh({ locale = code }, true)
+        equal(TransmogCheckerDB.language .. "/" .. TC.Language(), "auto/" .. code, code .. ": auto, the game's language")
+        equal(TC.L.NOT_COLLECTED, TC.Locales[code].strings.NOT_COLLECTED, code .. ": its strings")
+        check(TC.L.NOT_COLLECTED ~= "Not collected", code .. ": not English")
+        noErrors(c, code)
+    end
+end)
+
+test("i18n C keys: each language file has enUS's keys exactly; a plural entry has every form its rule answers for 0 to 200", function()
+    equal(problems(function(code, locale, english, out)
+        for key, value in pairs(english) do
+            local own = locale.strings[key]
+            if own == nil then
+                out[#out + 1] = code .. ": no " .. key
+            elseif type(own) ~= type(value) then
+                out[#out + 1] = code .. ": " .. key .. " is a " .. type(own) .. ", English's a " .. type(value)
+            elseif type(own) == "table" then
+                local rule = locale.plural or englishPlural
+                for n = 0, 200 do
+                    local form = rule(n)
+                    if type(own[form]) ~= "string" then
+                        out[#out + 1] = ("%s: %s has no %s form (for %d)"):format(code, key, tostring(form), n)
+                        break
+                    end
+                end
+            end
+        end
+        for key in pairs(locale.strings) do
+            if english[key] == nil then out[#out + 1] = code .. ": " .. key .. " is not an English key" end
+        end
+        if type(locale.name) ~= "string" or locale.name == "" then out[#out + 1] = code .. ": no name" end
+    end), "", "key problems")
+end)
+
+test("i18n C formats: per key, each form's placeholders equal English's in type and order, and its colour, texture and newline counts", function()
+    equal(problems(function(code, locale, english, out)
+        for key, value in pairs(english) do
+            local own = locale.strings[key]
+            -- English's forms share their placeholders; "other" stands for them
+            local model = type(value) == "table" and value.other or value
+            for form, text in pairs(type(own) == type(value) and formsOf(own) or {}) do
+                if placeholders(text) ~= placeholders(model) then
+                    out[#out + 1] = ("%s: %s.%s has %q, English %q"):format(code, key, form, placeholders(text), placeholders(model))
+                end
+                if escapes(text) ~= escapes(model) then
+                    out[#out + 1] = ("%s: %s.%s escapes %s, English %s"):format(code, key, form, escapes(text), escapes(model))
+                end
+            end
+        end
+    end), "", "format problems")
+end)
+
+test("i18n C positional: no language file uses %1$s, which the harness's Lua 5.1 format cannot run", function()
+    -- The game's format takes positional placeholders (Localization.lua:17
+    -- uses %1$s), Lua 5.1's string.format raises "invalid option '%$'";
+    -- none is used today, and one would need a format shim in fake_client.lua.
+    equal(problems(function(code, locale, _, out)
+        for key, value in pairs(locale.strings) do
+            for form, text in pairs(formsOf(value)) do
+                if type(text) == "string" and (text:gsub("%%%%", "")):find("%%%d+%$") then
+                    out[#out + 1] = ("%s: %s.%s %q: positional placeholders do not run in the harness's Lua 5.1 format"):format(code, key, form, text)
+                end
+            end
+        end
+    end), "", "positional placeholders")
+end)
+
+-- Whether a text is UTF-8: each lead byte with its continuation bytes, no
+-- overlong form, no surrogate, nothing past U+10FFFF.
+local function utf8Valid(text)
+    local i, n = 1, #text
+    while i <= n do
+        local b = text:byte(i)
+        local count, low, high = 0, 0x80, 0xBF
+        if b < 0x80 then count = 0
+        elseif b >= 0xC2 and b <= 0xDF then count = 1
+        elseif b >= 0xE0 and b <= 0xEF then
+            count = 2
+            if b == 0xE0 then low = 0xA0 elseif b == 0xED then high = 0x9F end
+        elseif b >= 0xF0 and b <= 0xF4 then
+            count = 3
+            if b == 0xF0 then low = 0x90 elseif b == 0xF4 then high = 0x8F end
+        else
+            return false, i
+        end
+        for k = 1, count do
+            local cont = text:byte(i + k)
+            local lo, hi = k == 1 and low or 0x80, k == 1 and high or 0xBF
+            if not cont or cont < lo or cont > hi then return false, i end
+        end
+        i = i + count + 1
+    end
+    return true
+end
+
+test("i18n C files: each language file is UTF-8 without a BOM and has no CR", function()
+    local out = {}
+    for _, code in ipairs({ "enUS", unpack(CODES) }) do
+        local text = readFile("Locales/" .. code .. ".lua")
+        local ok, at = utf8Valid(text)
+        if not ok then out[#out + 1] = code .. ": not UTF-8 at byte " .. at end
+        if text:sub(1, 3) == "\239\187\191" then out[#out + 1] = code .. ": a BOM" end
+        if text:find("\r", 1, true) then out[#out + 1] = code .. ": a CR" end
+    end
+    equal(table.concat(out, "; "), "", "file problems")
+end)
+
+-- Widths by the fake's measure (fake_client.lua, columns: a character
+-- once, a full-width CJK or Hangul character twice; 6 a column in a 12
+-- point font, 5 in a 10 point one).
+test("i18n C widths: in every language each settings row's label fits its row (F1's 27 columns of 6)", function()
+    local out = {}
+    for _, code in ipairs({ "enUS", unpack(CODES) }) do
+        local c = fresh({ locale = code }, true)
+        for _, r in ipairs(c.settingsPage(c.settings.addon[1].ID)) do
+            if (r.kind == "checkbox" or r.kind == "dropdown") and Fake.columns(r.name) * 6 > LABEL_LIMIT * 6 then
+                out[#out + 1] = ("%s %q: %d wide, the row has %d"):format(code, r.name, Fake.columns(r.name) * 6, LABEL_LIMIT * 6)
+            end
+        end
+        noErrors(c, code)
+    end
+    equal(table.concat(out, "; "), "", "labels cut")
+end)
+
+-- The found row's Buy button, its row, and the row's price and count.
+local function buyRow(c)
+    local list = itemListFrame(c)
+    local button = find(c, function(w) return w.kind == "Button" and w.text == TC.L.BUY and under(w, list) and visible(w) end)
+    return button, button and button.parent
+end
+-- English's Buy: 40 wide (BUY_WIDTH), its text 18 (3 columns of 6): 22 of room.
+local BUY_ROOM = 40 - 18
+
+test("i18n C widths: in every language the item list's Buy fits its word, the count gives way and the price stays whole", function()
+    local out = {}
+    for _, code in ipairs({ "enUS", unpack(CODES) }) do
+        local c = buyWhole({ client = { locale = code } })
+        local button, row = buyRow(c)
+        if not button then
+            out[#out + 1] = code .. ": no Buy"
+        else
+            local need = math.max(40, button:GetTextWidth() + BUY_ROOM)
+            if button.width < need then out[#out + 1] = ("%s %q: %d wide, needs %d"):format(code, button.text, button.width, need) end
+            local p = row.price.points[1]
+            if not (p and p.point == "RIGHT" and p.relativeTo == button and p.relativePoint == "LEFT") then
+                out[#out + 1] = code .. ": the price is not beside Buy"
+            end
+            check(row.price.width == nil or row.price.width == 0, code .. ": the price has no width that cuts it")
+            local count = (row.forSale.width or 0) > 0 and row.forSale.width or row.forSale:GetStringWidth()
+            local right = 10 + button.width + 6 + row.price:GetStringWidth()
+            if 2 + count + 6 > 212 - right then out[#out + 1] = code .. ": the count runs under the price" end
+        end
+        noErrors(c, code)
+    end
+    equal(table.concat(out, "; "), "", "Buy rows")
+end)
+
+test("i18n C Buy: English's button is as before (40 by 18, 10 in from the right, the price 6 left of it, the count uncut)", function()
+    local c = buyWhole({ listed = 123456789 })
+    local button, row = buyRow(c)
+    check(button, "the row's Buy")
+    local p = button.points[1]
+    equal(("%dx%d %s %d,%d"):format(button.width, button.height, p.point, p.x, p.y), "40x18 TOPRIGHT -10,-18", "Buy's size and place")
+    local q = row.price.points[1]
+    equal(("%s %s %d"):format(q.point, q.relativePoint, q.x), "RIGHT LEFT -6", "the price beside it")
+    equal(row.forSale.width or 0, 0, "the count uncut")
+    equal(row.forSale.text, "x1", "the count")
+    noErrors(c, "English Buy")
+end)
+
+test("i18n C Buy: a long word widens the button by what it needs over English's; the count gives way, the price does not", function()
+    local word = "Sofortkauf jetzt"
+    local c = buyWhole({ listed = 123456789, client = { beforeLoaded = function()
+        TC.Locales.tsTS = { name = "Test", strings = { BUY = word } }
+        TransmogCheckerDB.language = "tsTS"
+    end } })
+    equal(TC.Language(), "tsTS", "the test language")
+    local button, row = buyRow(c)
+    check(button, "the row's Buy")
+    equal(button.width, #word * 6 + BUY_ROOM, "its text and English's room")
+    equal(button.height .. " " .. button.points[1].x, "18 -10", "its height and its place")
+    local priceWidth = row.price:GetStringWidth()
+    check(priceWidth > 0 and (row.price.width or 0) == 0, "the price whole")
+    local room = math.floor(212 - 2 - 6 - (10 + button.width + 6 + priceWidth))
+    equal(row.forSale.width, math.max(room, 1), "the count cut before the price")
+    equal(row.forSale.calls.SetWordWrap and row.forSale.calls.SetWordWrap[1], false, "on one line")
+    noErrors(c, "long Buy")
+end)
+
+test("i18n C widths: in every language the auction house tab is as wide as its label needs", function()
+    local out = {}
+    for _, code in ipairs({ "enUS", unpack(CODES) }) do
+        local c, tabs = visitTwice({ locale = code })
+        local tab = tabs[1]
+        equal(tab and tab.text, TC.L.TAB_APPEARANCES, code .. ": the tab's label")
+        -- LibAHTab: PanelTemplates_TabResize(tab, 20, nil, 70), no maximum
+        -- width (LibAHTab.lua:57, SharedUIPanelTemplates.lua:477-509)
+        local need = math.max(Fake.columns(tab.text) * 6 + 20 + 20, 70)
+        if tab.width < need then out[#out + 1] = ("%s %q: %d wide, needs %d"):format(code, tab.text, tab.width, need) end
+        noErrors(c, code)
+    end
+    equal(table.concat(out, "; "), "", "tabs cut")
+end)
+
+test("i18n C widths: in every language the funnel's own list fits each entry; Blizzard's menu is given no maximum width", function()
+    local out = {}
+    for _, code in ipairs({ "enUS", unpack(CODES) }) do
+        local c, tabs = visitTwice({ locale = code, noMenuTemplates = true, settings = true })
+        tabs[1].scripts.OnClick(tabs[1])
+        local funnel = funnelOf(c)
+        openMenu(c, funnel)
+        local entries = findAll(c, function(w) return w.kind == "Button" and w.parent == funnel.menu and visible(w) end)
+        check(#entries >= 8, code .. ": the list's entries")
+        for _, e in ipairs(entries) do
+            -- MENU_PAD (8) each side, in an entry 8 narrower than the list
+            if e:GetTextWidth() + 16 > e.width or e.width ~= funnel.menu.width - 8 then
+                out[#out + 1] = ("%s %q: %d wide in %d"):format(code, e.text, e:GetTextWidth() + 16, e.width)
+            end
+        end
+        check(funnel.menu.width >= 170, code .. ": at least the list's width")
+        noErrors(c, code)
+    end
+    equal(table.concat(out, "; "), "", "entries cut")
+    -- Blizzard's menu sizes itself to its entries unless given a maximum
+    -- (Blizzard_Menu/Menu.lua:339, 1436-1459)
+    check(not readFile("TC/Browser/TC_BrowserPanel.lua"):find("SetMaximumWidth", 1, true), "no maximum width set")
+end)
+
+test("i18n C reload prompt: without RELOADUI and LATER its buttons read ACCEPT and CANCEL", function()
+    local c = fresh(nil, true)
+    RELOADUI, LATER = nil, nil
+    local rows = c.settingsPage(c.settings.addon[1].ID)
+    rows[2].init.data.setting:SetValue("deDE")
+    equal(#c.popups, 1, "the prompt")
+    equal(c.popups[1].dialog.button1 .. "/" .. c.popups[1].dialog.button2, ACCEPT .. "/" .. CANCEL, "the fallback texts")
+    noErrors(c, "fallback buttons")
+end)
+
+test("i18n C Defaults: the Options panel's Defaults raises the reload prompt only when the language changes", function()
+    local c = fresh(nil, true)
+    local id = c.settings.addon[1].ID
+    local setting = c.settingsPage(id)[2].init.data.setting
+    c.settingsDefaults(id)
+    equal(TransmogCheckerDB.language .. "/" .. #c.popups, "auto/0", "auto already: no prompt")
+    setting:SetValue("ruRU")
+    equal(#c.popups, 1, "a change: the prompt")
+    c.settingsDefaults(id)
+    equal(TransmogCheckerDB.language .. "/" .. #c.popups, "auto/2", "back to auto: the prompt")
+    c.settingsDefaults(id)
+    equal(TransmogCheckerDB.language .. "/" .. #c.popups, "auto/2", "auto again: no prompt")
+    noErrors(c, "Defaults")
 end)
 
 end)()

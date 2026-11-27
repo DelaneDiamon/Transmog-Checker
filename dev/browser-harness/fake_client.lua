@@ -337,15 +337,37 @@ function Fake.new(opts)
     -- draws nothing and a texture's markup (|T...|t) draws one 12 wide (slice E).
     -- In GameTooltipTextSmall, a 10 point font where the others are 12
     -- (Fonts.xml:1385-1387, 1403-1405), 5 for each.
+    -- Characters, not bytes (i18n slice C): a UTF-8 character counts once
+    -- (Latin and Cyrillic alike), a full-width one twice: CJK and Hangul,
+    -- the three-byte characters led by E3 to ED (U+3000-U+DFFF) or EF
+    -- (U+F000-U+FFFF, the full-width forms among them).
     local function perCharacter(w) return w.template == "GameTooltipTextSmall" and 5 or 6 end
+    local function columns(text)
+        local n = 0
+        for ch in text:gmatch("[%z\1-\127\194-\244][\128-\191]*") do
+            local lead = ch:byte(1)
+            n = n + ((#ch == 3 and ((lead >= 0xE3 and lead <= 0xED) or lead == 0xEF)) and 2 or 1)
+        end
+        return n
+    end
+    Fake.columns = columns
+    local function shownColumns(text)
+        return columns((text or ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("|T.-|t", ".."))
+    end
     function methods:GetStringWidth()
-        local shown = (self.text or ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("|T.-|t", "..")
-        return #shown * perCharacter(self)
+        return shownColumns(self.text) * perCharacter(self)
+    end
+    -- A button's text width (SimpleButtonAPIDocumentation.lua:244): its text
+    -- by the same measure, 5 for each in GameFontHighlightSmall (10 point,
+    -- Fonts.xml), else 6.
+    function methods:GetTextWidth()
+        local small = self.font and self.font.name == "GameFontHighlightSmall"
+        return shownColumns(self.text) * (small and 5 or 6)
     end
     -- a font string's text height: 12 for each line of its characters' width
     -- wrapped at its width (one line without a width), none for no text
     function methods:GetStringHeight()
-        local n = #(self.text or "")
+        local n = columns(self.text or "")
         if n == 0 then return 0 end
         local width = self.width
         return (width and width > 0 and math.ceil(n * perCharacter(self) / width) or 1) * 12
@@ -498,7 +520,7 @@ function Fake.new(opts)
         c.popups[#c.popups + 1] = { which = which, dialog = StaticPopupDialogs[which] }
     end
     function ReloadUI() c.reloads = c.reloads + 1 end
-    RELOADUI, LATER = "Reload UI", "Later"
+    RELOADUI, LATER, ACCEPT, CANCEL = "Reload UI", "Later", "Accept", "Cancel"
     strmatch = string.match
     WOW_PROJECT_MAINLINE, WOW_PROJECT_CAMELOT = 1, 99
     WOW_PROJECT_ID = WOW_PROJECT_CAMELOT
@@ -683,9 +705,10 @@ function Fake.new(opts)
         end
     end
     -- SharedUIPanelTemplates.lua:477-509 with a made-up text width of 6 per
-    -- letter and 20 of padding; LibAHTab sizes its tab with them.
+    -- letter (a full-width character two, Fake.columns) and 20 of padding;
+    -- LibAHTab sizes its tab with them.
     function PanelTemplates_TabResize(tab, padding, absoluteSize, minWidth)
-        tab.width = math.max(#(tab.text or "") * 6 + 20 + (padding or 0), minWidth or 0)
+        tab.width = math.max(Fake.columns(tab.text or "") * 6 + 20 + (padding or 0), minWidth or 0)
     end
     function PanelTemplates_DeselectTab(tab) tab.selected = false end
     function PanelTemplates_SelectTab(tab) tab.selected = true end
