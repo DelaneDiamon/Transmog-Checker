@@ -142,6 +142,11 @@ local KEYS_PER_FRAME = 20
 -- seen: the bought appearances an item of which a bag read has found; from
 -- then on only the bags decide (selling or mailing the item away ends it).
 local bought, bags, pending, seen = {}, {}, {}, {}
+-- The lowest price the browser saw this session, for the item tooltip
+-- (slice D1): by appearance id, { copper, at, slot } from the latest
+-- finished scan or check that answered for it. Kept in memory only: no
+-- visit's Reset discards it, a reload does.
+local sessionPrices = {}
 
 -- The class dropdown's value for "All classes"; a class is its class id.
 local ALL_CLASSES = "all"
@@ -852,6 +857,12 @@ local function startScan()
                 s.results[id] = { outcome = "found", rows = group.rows, at = at, scanned = true }
             end
             scans[slot] = s
+            -- the scan answers for every appearance of its slot
+            for id, p in pairs(sessionPrices) do if p.slot == slot then sessionPrices[id] = nil end end
+            for id, group in pairs(result.appearances) do
+                local first = group.rows[1]
+                if first then sessionPrices[id] = { copper = first.minPrice, at = at, slot = slot } end
+            end
             for id, r in pairs(kept) do if r.slot == slot then kept[id] = nil end end
             for id, r in pairs(latest) do if r.slot == slot then latest[id] = nil end end
         else
@@ -1116,7 +1127,13 @@ local function runNext()
         if active ~= run then return end
         result.at, result.slot = now(), appearance.slot
         latest[id] = result
-        if result.outcome ~= "could not check" then kept[id] = result else noAnswer[id] = true end
+        if result.outcome ~= "could not check" then
+            kept[id] = result
+            local first = result.rows and result.rows[1]
+            sessionPrices[id] = first and { copper = first.minPrice, at = result.at, slot = result.slot } or nil
+        else
+            noAnswer[id] = true
+        end
         if result.error then State.lastError = result.error end
         checking[id], active = nil, nil
         settle()
@@ -1260,10 +1277,28 @@ end
 
 -- Ages read "just now" under one minute and "N min ago" after (A10):
 -- "Checked just now", "Scanned 4 min ago".
-local function age(at, verb)
+-- The item tooltip's price line reads the same age without the verb.
+function State.Age(at)
     local seconds = now() - at
-    if seconds < 60 then return verb .. " just now" end
-    return ("%s %d min ago"):format(verb, math.floor(seconds / 60))
+    if seconds < 60 then return "just now" end
+    return ("%d min ago"):format(math.floor(seconds / 60))
+end
+local function age(at, verb)
+    return verb .. " " .. State.Age(at)
+end
+
+-- The item tooltip's price (slice D1): the lowest price the browser saw
+-- this session for the appearance and when, or nil. It reads what scans and
+-- checks kept, never the auction house.
+function State.SessionPrice(appearanceID)
+    local p = sessionPrices[appearanceID]
+    if p then return p.copper, p.at end
+end
+
+-- What is pending for the appearance (TC-39): "bags", "bought" or nil, as
+-- the last bag read and the purchases left it.
+function State.Pending(appearanceID)
+    return pending[appearanceID]
 end
 
 local CHECK_AGAIN = "Check again"
@@ -1625,9 +1660,31 @@ local function sourceText(source, c)
 end
 
 -- A source's short text, as the list of other items words it: the item
--- tooltip's ALT lines (TC-15) use it, without its colour.
+-- tooltip's rows (TC-15) use it, without its colour.
 function State.SourceText(source)
     return (sourceText(source, { green = true, white = true }))
+end
+
+-- A source in one line, for the item tooltip's status line: its source
+-- lines when they are one line (a drop in full, the profession, the source
+-- type), else the short text (several drops); nil without any.
+function State.SourceLine(source)
+    local lines = sourceLines(source, MAX_DROPS)
+    if lines[2] then return State.SourceText(source) end
+    return lines[1]
+end
+
+local function otherItemsText()
+    return clientText("WARDROBE_OTHER_ITEMS", "Other items using this appearance:")
+end
+local MORE_ITEMS = "and %d more items"
+
+-- The words the item tooltip shares with the browser (slice D1): the Show
+-- filter's "Collected" and "Not collected", the list's header and its
+-- "and N more items" (a format), "Lowest price" and the pending sentences.
+function State.Wording()
+    return { collected = clientText("TRANSMOG_COLLECTED", "Collected"), notCollected = State.FILTERS[3],
+        otherItems = otherItemsText(), moreItems = MORE_ITEMS, lowestPrice = LOWEST_PRICE, pending = PENDING_TEXT }
 end
 
 -- The source the tooltip heads with (CollectionWardrobeUtil.
@@ -1785,7 +1842,7 @@ function State.TileTooltip(appearance)
     end
     if #sources > 1 and room > 0 then
         lines[#lines + 1] = { text = " " }
-        lines[#lines + 1] = { text = clientText("WARDROBE_OTHER_ITEMS", "Other items using this appearance:"), color = c.normal }
+        lines[#lines + 1] = { text = otherItemsText(), color = c.normal }
         local shown = #sources > room and room - 1 or #sources
         for i = 1, shown do
             local source = sources[i]
@@ -1793,7 +1850,7 @@ function State.TileTooltip(appearance)
             local text, textColour = sourceText(source, c)
             lines[#lines + 1] = { text = name, color = colour, right = text, rightColor = textColour }
         end
-        if shown < #sources then lines[#lines + 1] = { text = ("and %d more items"):format(#sources - shown), color = c.grey } end
+        if shown < #sources then lines[#lines + 1] = { text = MORE_ITEMS:format(#sources - shown), color = c.grey } end
     end
     for _, line in ipairs(tail) do lines[#lines + 1] = line end
     return lines

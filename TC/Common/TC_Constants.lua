@@ -1,13 +1,17 @@
 TC = TC or {}
 
--- Shared colors
+-- The item tooltip's colors (item-tooltip v3): the game's GREEN, NORMAL,
+-- GRAY and HIGHLIGHT_FONT_COLOR and Collections' red for a name not loaded,
+-- as TC_BrowserState.lua's fallbacks give them; "Not collected" in the
+-- setting's presets (orange is the colour of the old "MODEL NOT COLLECTED",
+-- light blue LIGHTBLUE_FONT_COLOR's fallback .53, .67, 1).
 TC.COLORS = {
-	PREFIX = "FF9D9D9D",
-	STATUS = {
-		EXACT = "FF00FF00",
-		MODEL = "FF00FF00",
-		MODEL_NOT = "FFFF7F00",
-	},
+	COLLECTED = "FF19FF19",
+	GOLD = "FFFFD100",
+	GREY = "FF808080",
+	WHITE = "FFFFFFFF",
+	RETRIEVING = "FFFF2020",
+	NOT_COLLECTED = { orange = "FFFF7F00", lightBlue = "FF87ABFF", white = "FFFFFFFF" },
 }
 
 -- Source type descriptions (extend as needed per client)

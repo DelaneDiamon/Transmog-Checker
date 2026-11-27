@@ -59,3 +59,11 @@ _Avoid_: Search, lookup, query
 **Scan**:
 One read of the auction house for a single slot, which finds the appearances for sale in it.
 _Avoid_: Browse, full scan, refresh
+
+**Tooltip style**:
+How the item tooltip shows an appearance's status: Full adds lines under the game's (the status, how to collect it, the session's lowest price and the other items), Compact writes the status on the right of the item's name line.
+_Avoid_: Mode, layout, view
+
+**Session price**:
+The lowest price the appearance browser saw for an appearance in this session, from its latest scan or check, and when; it outlives the auction house visit and is gone after a reload. The item tooltip shows it as "Lowest price".
+_Avoid_: Cached price, last price, AH price

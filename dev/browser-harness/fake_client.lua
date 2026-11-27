@@ -509,19 +509,44 @@ function Fake.new(opts)
                 Hide = function() if tip.lines[n] then tip.lines[n].hidden = true end end,
             }
         end
-        function t:AddLine(text, r, g, b, wrap)
-            self.lines[#self.lines + 1] = { text = text, r = r, g = g, b = b, wrap = wrap }
+        -- The right font string of line n, <name>TextRight<n>: shown with a
+        -- double line, hidden with a single one. c.rightWriteFails: SetText
+        -- changes nothing; c.noRightRegions: there is none.
+        local function defineRight(tip, n)
+            if not name then return end
+            if c.noRightRegions then _G[name .. "TextRight" .. n] = nil return end
+            _G[name .. "TextRight" .. n] = {
+                GetText = function() return tip.lines[n] and tip.lines[n].right end,
+                SetText = function(_, text)
+                    if tip.lines[n] and not c.rightWriteFails then tip.lines[n].right = text end
+                end,
+                SetTextColor = function(_, r, g, b)
+                    if tip.lines[n] then tip.lines[n].rr, tip.lines[n].rg, tip.lines[n].rb = r, g, b end
+                end,
+                Show = function() if tip.lines[n] then tip.lines[n].rightShown = true end end,
+                Hide = function() if tip.lines[n] then tip.lines[n].rightShown = false end end,
+                IsShown = function() return tip.lines[n] ~= nil and tip.lines[n].rightShown == true end,
+            }
+        end
+        function t:AddLine(text, r, g, b, wrap, leftOffset)
+            self.lines[#self.lines + 1] = { text = text, r = r, g = g, b = b, wrap = wrap, leftOffset = leftOffset }
             defineLeft(self, #self.lines)
+            defineRight(self, #self.lines)
             self.calls.AddLine = { text, r, g, b, wrap }
         end
-        function t:AddDoubleLine(text, right, r, g, b, rr, rg, rb)
-            self.lines[#self.lines + 1] = { text = text, r = r, g = g, b = b, right = right, rr = rr, rg = rg, rb = rb }
+        function t:AddDoubleLine(text, right, r, g, b, rr, rg, rb, wrap, leftOffset)
+            self.lines[#self.lines + 1] = { text = text, r = r, g = g, b = b, right = right, rr = rr, rg = rg, rb = rb,
+                wrap = wrap, leftOffset = leftOffset, rightShown = true }
             defineLeft(self, #self.lines)
+            defineRight(self, #self.lines)
         end
         function t:NumLines() return #self.lines end
         function t:GetItem()
             if self.item then return "Item", self.item end
         end
+        -- TooltipDataHandlerMixin:GetPrimaryTooltipInfo (TooltipDataHandler.lua:393):
+        -- the info c.hoverItem was given, such as { getterName = "GetBagItem" }
+        function t:GetPrimaryTooltipInfo() return self.info end
         return t
     end
     GameTooltip = newTooltip("GameTooltip")
@@ -536,10 +561,11 @@ function Fake.new(opts)
     TooltipDataProcessor = { AddTooltipPostCall = function(dataType, fn)
         c.postCalls[#c.postCalls + 1] = { dataType = dataType, fn = fn }
     end }
-    function c.hoverItem(link, tooltip)
+    -- info: the tooltip's primary info (a bag item's is { getterName = "GetBagItem" }).
+    function c.hoverItem(link, tooltip, info)
         tooltip = tooltip or GameTooltip
         tooltip:SetOwner(UIParent, "ANCHOR_RIGHT")
-        tooltip.item = link
+        tooltip.item, tooltip.info = link, info
         -- c.tooltipPre(tooltip): what Blizzard has put in the tooltip before the post-calls
         if c.tooltipPre then c.tooltipPre(tooltip) end
         for _, post in ipairs(c.postCalls) do

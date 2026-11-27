@@ -9053,24 +9053,62 @@ local function tipNoErrors(c, what)
     sentNothing(c, what)
     equal(#c.forbidden, 0, what .. ": forbidden calls: " .. table.concat(c.forbidden, ", "))
 end
+-- slice D1: in a block of its own, for the 200-local limit of the main chunk
+do
 
-test("TC-15 the tooltip says EXACT, MODEL or MODEL NOT COLLECTED, in today's colours", function()
+-- The tooltip's lines in compact notation: each line's colour as RRGGBB
+-- ("-" for none), its text with the marks as [check] and [bag], and for a
+-- double line " | " and the right side the same way.
+local function hexOf(r, g, b)
+    if not r then return "-" end
+    local function byte(v) return math.floor(v * 255 + 0.5) end
+    return ("%02X%02X%02X"):format(byte(r), byte(g), byte(b))
+end
+local function marked(text)
+    text = text or ""
+    text = text:gsub("|T[^|]*ReadyCheck%-Ready[^|]*|t ?", "[check]")
+    return (text:gsub("|T[^|]*UI%-GearManager%-ItemIntoBag[^|]*|t ?", "[bag]"))
+end
+local function fmtLine(line)
+    local s = hexOf(line.r, line.g, line.b) .. ":" .. marked(line.text)
+    if line.right and line.rightShown ~= false then s = s .. " | " .. hexOf(line.rr, line.rg, line.rb) .. ":" .. marked(line.right) end
+    return s
+end
+-- The item shown in GameTooltip (from the bags with bag), its lines formatted
+-- and joined by newlines.
+local function shown(c, itemID, bag)
+    c.hoverItem(itemLink(itemID), nil, bag and { getterName = "GetBagItem" } or nil)
+    local out = {}
+    for i, line in ipairs(GameTooltip.lines) do out[i] = fmtLine(line) end
+    return table.concat(out, "\n")
+end
+-- The status line of an item with no game lines (the second, after the blank line).
+local function statusOf(c, itemID)
+    c.hoverItem(itemLink(itemID))
+    local line = GameTooltip.lines[2]
+    return line and fmtLine(line) or nil
+end
+local GREEN, ORANGE, WHITE, GOLD, GREY = "19FF19", "FF7F00", "FFFFFF", "FFD100", "808080"
+local COLLECTED = GREEN .. ":[check]Collected"
+local function notCollected(source) return ORANGE .. ":Not collected" .. (source and (" | " .. WHITE .. ":" .. source) or "") end
+local IN_BAGS = "In your bags: equip it or sell it to a vendor to collect."
+local BOUGHT_TEXT = "Bought: take it from the mailbox, then equip it or sell it to a vendor to collect."
+
+test("TC-15 the status: Collected with the check from this item or another, Not collected in orange with the item's source", function()
     local c = tipFixture()
-    local lines = c.hoverItem(itemLink(501))
-    equal(lines[1], "|cFF9D9D9DTC:|r |cFF00FF00EXACT COLLECTED|r", "501: its own source is collected")
-    lines = c.hoverItem(itemLink(502))
-    equal(lines[1], "|cFF9D9D9DTC:|r |cFF00FF00MODEL COLLECTED|r", "502: collected through another item")
-    lines = c.hoverItem(itemLink(504))
-    equal(lines[1], "|cFF9D9D9DTC:|r |cFFFF7F00MODEL NOT COLLECTED|r", "504: not collected")
+    equal(statusOf(c, 501), COLLECTED, "501: its own source is collected")
+    equal(statusOf(c, 502), COLLECTED, "502: collected through another item looks the same")
+    equal(statusOf(c, 504), notCollected("World Drop"), "504: not collected")
+    equal(GameTooltip.lines[1].text, " ", "a blank line first")
     tipNoErrors(c, "statuses")
 end)
 
-test("TC-15 a look collected through an item of another armor type is MODEL COLLECTED; plate on a cloth class is never not collectable", function()
+test("TC-15 a look collected through an item of another armor type is collected; plate on a cloth class is never not collectable", function()
     local c = tipFixture()
-    equal(tipLines(c, 502)[1], "TC: MODEL COLLECTED", "plate 502, collected through cloth 501")
-    equal(#tipLines(c, 503), 0, "plate 503: no line until its quality is known (skipgreys on)")
+    equal(statusOf(c, 502), COLLECTED, "plate 502, collected through cloth 501")
+    equal(#tipLines(c, 503), 0, "plate 503: no line until its quality is known (skip greys on)")
     c.advance(1.1)
-    equal(tipLines(c, 503)[1], "TC: MODEL NOT COLLECTED", "plate 503 on the Warlock")
+    equal(statusOf(c, 503), notCollected("World Drop"), "plate 503 on the Warlock")
     for _, itemID in ipairs({ 501, 502, 503, 504, 505, 601, 602, 603, 604, 605, 606, 607 }) do
         for _, line in ipairs(tipLines(c, itemID)) do
             check(not line:find("COLLECTABLE", 1, true) and not line:find("LEVEL", 1, true)
@@ -9080,18 +9118,17 @@ test("TC-15 a look collected through an item of another armor type is MODEL COLL
     tipNoErrors(c, "armor types")
 end)
 
-test("TC-15 the bind sentence: only on a bind-on-equip item not collected, once its data is in", function()
+test("TC-15 the bind sentence: only on a bind-on-equip item not collected, once its data is in, white and wrapping", function()
     local c = tipFixture()
-    local lines = c.hoverItem(itemLink(505))
-    equal(lines[2], "|cFF9D9D9DTC:|r |cFFFF7F00" .. BIND_SENTENCE .. "|r", "505, bind on equip, loaded")
-    equal(tipLines(c, 504)[2] and tipLines(c, 504)[2]:find("Binds", 1, true), nil, "504 binds on pickup: no sentence")
-    equal(tipLines(c, 501)[2], nil, "501 binds on equip but is collected: one line")
-    lines = tipLines(c, 503)
-    equal(#lines, 0, "503 before its data: no line, its quality is unknown")
+    c.hoverItem(itemLink(505))
+    equal(fmtLine(GameTooltip.lines[3]), WHITE .. ":" .. BIND_SENTENCE, "505, bind on equip, loaded")
+    equal(GameTooltip.lines[3].wrap, true, "the sentence wraps")
+    for _, line in ipairs(tipLines(c, 504)) do check(not line:find("Binds", 1, true), "504 binds on pickup: no sentence") end
+    equal(#tipLines(c, 501), 2, "501 binds on equip but is collected: the blank and the status")
+    equal(#tipLines(c, 503), 0, "503 before its data: no line, its quality is unknown")
     c.advance(1.1)
-    lines = tipLines(c, 503)
-    equal(lines[1], "TC: MODEL NOT COLLECTED", "503 once its data is in")
-    equal(lines[2], "TC: " .. BIND_SENTENCE, "503 once its data is in")
+    c.hoverItem(itemLink(503))
+    equal(fmtLine(GameTooltip.lines[3]), WHITE .. ":" .. BIND_SENTENCE, "503 once its data is in")
     tipNoErrors(c, "bind sentence")
 end)
 
@@ -9100,65 +9137,56 @@ test("TC-15 no line for an item with no appearance, a non-gear item, or another 
     equal(#tipLines(c, 950), 0, "950 has no appearance")
     equal(#tipLines(c, 800), 0, "800 is not gear")
     equal(#tipLines(c, 501, c.newTooltip("ItemRefTooltip")), 0, "ItemRefTooltip")
-    equal(tipLines(c, 501)[1], "TC: EXACT COLLECTED", "GameTooltip still")
+    equal(statusOf(c, 501), COLLECTED, "GameTooltip still")
     tipNoErrors(c, "no line")
 end)
 
-test("TC-15 grey and white items: silent with /tc skipgreys on, annotated with it off", function()
+test("TC-15 grey and white items: silent with skip greys on (the default), annotated with it off", function()
     local c = tipFixture()
     equal(TC.Config.skipPoorAndCommon, true, "on by default")
     equal(#tipLines(c, 701), 0, "grey, skip on")
     equal(#tipLines(c, 702), 0, "white, skip on")
     SlashCmdList.TC("skipgreys")
-    equal(tipLines(c, 701)[1], "TC: MODEL NOT COLLECTED", "grey, skip off")
-    equal(tipLines(c, 702)[1], "TC: MODEL NOT COLLECTED", "white, skip off")
+    equal(statusOf(c, 701), notCollected("World Drop"), "grey, skip off")
+    equal(statusOf(c, 702), notCollected("World Drop"), "white, skip off")
     SlashCmdList.TC("skipgreys")
     equal(#tipLines(c, 701), 0, "grey, skip on again")
     tipNoErrors(c, "greys")
 end)
 
-test("TC-15 ALT lines: each other item with its short source, at most 8 and then and N more", function()
+test("TC-15 Full's other items: Collections' header, at most 3 rows of 9 then and N more items, each with its short source", function()
     local c = tipFixture()
-    local lines = tipLines(c, 601)
-    local want = {
-        "TC: MODEL NOT COLLECTED",
-        "ALT: Hogger's Boots [602] (Hogger)",
-        "ALT: Vendor Boots [603] (Vendor)",
-        "ALT: Tailored Boots [604] (Tailoring)",
-        "ALT: Linked Boots [605] (Profession)",
-        "ALT: Retrieving item information [606] (World Drop)",
-        "ALT: World Boots A [607] (World Drop)",
-        "ALT: World Boots B [608] (World Drop)",
-        "ALT: World Boots C [609] (World Drop)",
-        "ALT: and 1 more",
-    }
-    equal(table.concat(lines, "\n"), table.concat(want, "\n"), "601's lines")
-    tipNoErrors(c, "alt lines")
+    equal(shown(c, 601), table.concat({ "-: ", notCollected("World Drop"), "-: ", GOLD .. ":Other items using this appearance:",
+        "FFFFFF:Hogger's Boots | FFFFFF:Hogger", "FFFFFF:Vendor Boots | FFFFFF:Vendor", "FFFFFF:Tailored Boots | FFFFFF:Tailoring",
+        GREY .. ":and 6 more items" }, "\n"), "601's lines")
+    for i = 5, 8 do equal(GameTooltip.lines[i].leftOffset, 12, "row " .. i .. " indented") end
+    tipNoErrors(c, "other items")
 end)
 
-test("TC-15 ALT lines with /tc alts: hidden for a collected look while on, Collected while off", function()
+test("TC-15 other items set to Always: a collected look lists its other items too, Collected in green", function()
     local c = tipFixture()
-    equal(table.concat(tipLines(c, 502), "\n"), "TC: MODEL COLLECTED", "502, hide on")
-    SlashCmdList.TC("alts")
-    equal(table.concat(tipLines(c, 502), "\n"), "TC: MODEL COLLECTED\nALT: Felcloth Boots [501] (Collected)",
-        "502, hide off")
-    equal(table.concat(tipLines(c, 501), "\n"), "TC: EXACT COLLECTED\nALT: Plate Sabatons [502] (World Drop)",
-        "501, hide off")
-    tipNoErrors(c, "alts setting")
+    equal(shown(c, 502), "-: \n" .. COLLECTED, "502 with the default (when not collected)")
+    check(TC.SetSetting("otherItems", "always"), "the setting is taken")
+    equal(shown(c, 502), table.concat({ "-: ", COLLECTED, "-: ", GOLD .. ":Other items using this appearance:",
+        "FFFFFF:Felcloth Boots | " .. GREEN .. ":Collected" }, "\n"), "502 with Always")
+    equal(shown(c, 501), table.concat({ "-: ", COLLECTED, "-: ", GOLD .. ":Other items using this appearance:",
+        "FFFFFF:Plate Sabatons | FFFFFF:World Drop" }, "\n"), "501 with Always")
+    tipNoErrors(c, "always")
 end)
 
-test("TC-15 an alternative's data is asked for once per item per session, not on every show", function()
+test("TC-15 a listed item's data is asked for once per item per session, not on every show", function()
     local c = tipFixture()
     local function asked(itemID)
         local n = 0
         for _, id in ipairs(c.loadRequests) do if id == itemID then n = n + 1 end end
         return n
     end
-    for _ = 1, 5 do tipLines(c, 601) end
+    for _ = 1, 5 do tipLines(c, 504) end
     c.fire("TRANSMOG_COLLECTION_UPDATED")
-    for _ = 1, 5 do tipLines(c, 601) end
-    equal(asked(606), 1, "606's requests")
-    equal(asked(607), 0, "607 is loaded: no request")
+    for _ = 1, 5 do tipLines(c, 504) end
+    equal(asked(503), 1, "503's requests")
+    equal(asked(505), 0, "505 is loaded: no request")
+    check(shown(c, 504):find("\nFF2020:Retrieving item information | FFFFFF:World Drop", 1, true), "503 retrieving, in red")
     tipNoErrors(c, "requests")
 end)
 
@@ -9169,9 +9197,9 @@ test("TC-15 for every fixture item the tooltip's collected answer is the browser
     for itemID = 501, 702 do
         local appearanceID = C_TransmogCollection.GetItemInfo(itemID)
         if appearanceID then
-            local status = tipLines(c, itemID)[1]
-            local collected = status == "TC: EXACT COLLECTED" or status == "TC: MODEL COLLECTED"
-            check(collected or status == "TC: MODEL NOT COLLECTED", itemID .. ": a status, got " .. tostring(status))
+            local status = statusOf(c, itemID)
+            local collected = status == COLLECTED
+            check(collected or (status or ""):find("^" .. ORANGE .. ":Not collected"), itemID .. ": a status, got " .. tostring(status))
             equal(collected, TC.Appearances.IsCollected({ id = appearanceID }), itemID .. ": collected")
             n = n + 1
         end
@@ -9180,20 +9208,25 @@ test("TC-15 for every fixture item the tooltip's collected answer is the browser
     tipNoErrors(c, "same rule")
 end)
 
-test("TC-15 hovering one item for ten seconds computes once; the collection event computes again", function()
+test("TC-15 hovering one item for ten seconds computes once; the collection event and a setting change compute again", function()
     local c = tipFixture()
-    -- the ALT line of 503 waits for its data, which arrives after 1 s
+    -- a listed item of 504 (503) waits for its data, which arrives after 1 s
     tipLines(c, 504)
     c.advance(2)
     local before = c.transmogInfoCalls
     for _ = 1, 50 do tipLines(c, 504) c.advance(0.2) end
     equal(c.transmogInfoCalls - before, 1, "computations over 50 shows")
     c.collectedSources[22] = true
-    equal(tipLines(c, 504)[1], "TC: MODEL NOT COLLECTED", "kept until the event")
+    equal(statusOf(c, 504), notCollected("World Drop"), "kept until the event")
     c.fire("TRANSMOG_COLLECTION_UPDATED")
-    equal(tipLines(c, 504)[1], "TC: EXACT COLLECTED", "after the event")
+    equal(statusOf(c, 504), COLLECTED, "after the event")
     equal(c.transmogInfoCalls - before, 2, "computations after the event")
-    equal(tipLines(c, 505)[1], "TC: MODEL COLLECTED", "505 shares the look")
+    TC.SetSetting("lowestPrice", false)
+    tipLines(c, 504)
+    equal(c.transmogInfoCalls - before, 3, "a setting change computes again")
+    tipLines(c, 504)
+    equal(c.transmogInfoCalls - before, 3, "and then keeps it")
+    equal(statusOf(c, 505), COLLECTED, "505 shares the look")
     tipNoErrors(c, "memory")
 end)
 
@@ -9206,7 +9239,7 @@ test("TC-15 an API call that raises adds no line, raises nothing and is reported
     equal(#tipLines(c, 505), 0, "lines on a second item")
     equal(#c.errors, 1, "errors reported: " .. table.concat(c.errors, "; "))
     c.collectedRaises = false
-    equal(tipLines(c, 504)[1], "TC: MODEL NOT COLLECTED", "once the call answers again")
+    equal(statusOf(c, 504), notCollected("World Drop"), "once the call answers again")
     sentNothing(c, "raises")
 end)
 
@@ -9236,9 +9269,9 @@ test("TC-15 F1 the kept answers are bounded: 1,500 distinct links leave fewer th
     for itemID = 2000, 3499 do tipLines(c, itemID) end
     local size = memoSize(c)
     check(size > 0 and size < 1000, "fewer than 1,000 kept answers, got " .. size)
-    equal(tipLines(c, 501)[1], "TC: EXACT COLLECTED", "501 after the reset")
-    equal(tipLines(c, 502)[1], "TC: MODEL COLLECTED", "502 after the reset")
-    equal(tipLines(c, 504)[1], "TC: MODEL NOT COLLECTED", "504 after the reset")
+    equal(statusOf(c, 501), COLLECTED, "501 after the reset")
+    equal(statusOf(c, 502), COLLECTED, "502 after the reset")
+    equal(statusOf(c, 504), notCollected("World Drop"), "504 after the reset")
     check(memoSize(c) < 1000, "still bounded")
     tipNoErrors(c, "bounded memory")
 end)
@@ -9254,44 +9287,49 @@ test("TC-15 F2 collected is the shared rule's answer alone, even when the item's
         return out
     end
     equal(TC.Appearances.IsCollected({ id = 2 }), false, "the browser's rule: not collected")
-    equal(tipLines(c, 504)[1], "TC: MODEL NOT COLLECTED", "the tooltip says what the rule says")
+    check(statusOf(c, 504):find("^" .. ORANGE .. ":Not collected"), "the tooltip says what the rule says")
     tipNoErrors(c, "own source only")
 end)
 
-test("TC-15 F3 with skipgreys on, an item whose quality is unknown shows nothing until its data says it is green or better", function()
+test("TC-15 F3 with skip greys on, an item whose quality is unknown shows nothing until its data says it is green or better", function()
     local c = tipFixture()
     equal(TC.Config.skipPoorAndCommon, true, "skip on")
     equal(#tipLines(c, 711), 0, "white, data not loaded")
     equal(#tipLines(c, 712), 0, "green, data not loaded")
     c.advance(1.1)
     equal(#tipLines(c, 711), 0, "white, data in")
-    equal(tipLines(c, 712)[1], "TC: MODEL NOT COLLECTED", "green, data in")
+    equal(statusOf(c, 712), notCollected("World Drop"), "green, data in")
     tipNoErrors(c, "unknown quality")
 end)
 
-test("TC-15 F3 with skipgreys off, an item whose quality is unknown still gets its line", function()
+test("TC-15 F3 with skip greys off, an item whose quality is unknown still gets its line", function()
     local c = tipFixture()
     SlashCmdList.TC("skipgreys")
-    equal(tipLines(c, 711)[1], "TC: MODEL NOT COLLECTED", "white, data not loaded, skip off")
+    equal(statusOf(c, 711), notCollected("World Drop"), "white, data not loaded, skip off")
     tipNoErrors(c, "unknown quality, skip off")
 end)
 
 test("TC-15 F4 the lines are added once per show, again after the tooltip starts over", function()
     local c = tipFixture()
-    equal(#tipLines(c, 601), 10, "the first show")
+    equal(#tipLines(c, 601), 8, "the first show")
     for _, post in ipairs(c.postCalls) do post.fn(GameTooltip, { type = post.dataType }) end
     for _, post in ipairs(c.postCalls) do post.fn(GameTooltip, { type = post.dataType }) end
-    equal(#GameTooltip.lines, 10, "two more post-calls for the same show")
-    equal(#tipLines(c, 601), 10, "shown again after SetOwner")
-    equal(#tipLines(c, 502), 1, "another item")
+    equal(#GameTooltip.lines, 8, "two more post-calls for the same show")
+    equal(#tipLines(c, 601), 8, "shown again after SetOwner")
+    equal(#tipLines(c, 502), 2, "another item")
+    TC.SetSetting("tooltipStyle", "compact")
+    c.tooltipPre = function(tip) tip:AddLine("Felcloth Boots", 1, 1, 1) end
+    equal(shown(c, 501), "FFFFFF:Felcloth Boots | " .. COLLECTED, "Compact: the name line written")
+    for _, post in ipairs(c.postCalls) do post.fn(GameTooltip, { type = post.dataType }) end
+    equal(#GameTooltip.lines, 1, "Compact: a second post-call adds no fallback line")
     tipNoErrors(c, "once per show")
 end)
 
 test("TC-15 F5 a tooltip shown before the settings are loaded raises nothing; the settings then apply", function()
     local c = tipFixture({ unloaded = true })
     equal(TC.Config, nil, "no settings yet")
-    equal(tipLines(c, 502)[1], "TC: MODEL COLLECTED", "a line with no settings")
-    equal(tipLines(c, 701)[1], "TC: MODEL NOT COLLECTED", "no skip without settings")
+    equal(statusOf(c, 502), COLLECTED, "a line with no settings")
+    equal(statusOf(c, 701), notCollected("World Drop"), "no skip without settings")
     c.fire("ADDON_LOADED", "TransmogChecker")
     equal(#tipLines(c, 701), 0, "grey skipped once the settings are in")
     tipNoErrors(c, "unloaded settings")
@@ -9329,41 +9367,370 @@ test("TC-15 F5 /tc debug prints once per computation, not per show", function()
     tipNoErrors(c, "debug")
 end)
 
--- the lines up to and with the status line, joined (the ALT lines follow)
-local function head(lines)
-    local out = {}
-    for _, line in ipairs(lines) do
-        out[#out + 1] = line
-        if line:find("^TC: ") then break end
+---------------------------------------------------------------- Item tooltip, slice D1: the page's five cases
+
+-- item-tooltip v3's five items, feet in the fake: 1101 collected from
+-- itself (a tailored source); 1201 collected through 1203, which the list
+-- shows before 1202; 1301 not collected, binds when equipped; 1401 binds
+-- when picked up, one boss drop; 1501 not collected with five other items.
+-- Quality 2 is green (1EFF00). c.tooltipPre puts the game's name line first
+-- (white), with c.nameRight on its right when set, and Blizzard's own
+-- line after it when c.blizzardLine is set.
+local function pageFixture(opts)
+    local feet = Fake.CATEGORIES.Feet
+    local function item(name, quality, bindType, subClassID)
+        return { name = name, quality = quality, bindType = bindType, subType = "Boots", classID = 4,
+            subClassID = subClassID or 1, equipLoc = "INVTYPE_FEET" }
     end
-    return table.concat(out, "|")
+    local o = {
+        appearances = {
+            { id = 11, uiOrder = 5, category = feet, sources = { 111 }, sourceTypes = { 6 }, collectedSource = 111 },
+            { id = 12, uiOrder = 4, category = feet, sources = { 121, 122, 123 }, collectedSource = 123 },
+            { id = 13, uiOrder = 3, category = feet, sources = { 131 } },
+            { id = 14, uiOrder = 2, category = feet, sources = { 141 }, sourceTypes = { 1 } },
+            { id = 15, uiOrder = 1, category = feet, sources = { 151, 152, 153, 154, 155, 156 } },
+        },
+        sourceItems = { [111] = 1101, [121] = 1201, [122] = 1202, [123] = 1203, [131] = 1301, [141] = 1401,
+            [151] = 1501, [152] = 1506, [153] = 1505, [154] = 1504, [155] = 1503, [156] = 1502 },
+        items = {
+            [1101] = item("Runecloth Boots", 2, 2), [1201] = item("Abjurer's Boots of the Owl", 2, 2),
+            [1202] = item("Abjurer's Boots of Intellect", 2, 2), [1203] = item("Abjurer's Boots of Spirit", 2, 2),
+            [1301] = item("Feline Mantle", 2, 2, 2), [1401] = item("Cape of the Brotherhood", 3, 1),
+            [1501] = item("Ivycloth Boots of the Eagle", 2, 2), [1502] = item("Ivycloth Boots of Intellect", 2, 2),
+            [1503] = item("Ivycloth Boots of the Owl", 2, 2), [1504] = item("Ivycloth Boots of Spirit", 2, 2),
+            [1505] = item("Ivycloth Boots of Stamina", 2, 2), [1506] = item("Ivycloth Boots of the Whale", 2, 2),
+        },
+        drops = { [141] = { { encounter = "Edwin VanCleef", instance = "The Deadmines" } } },
+    }
+    for k, v in pairs(opts or {}) do o[k] = v end
+    local items = o.items
+    local c = boot(o)
+    c.fire("ADDON_LOADED", "TransmogChecker")
+    c.qualityColors = { [2] = { 30 / 255, 1, 0 }, [3] = { 0, 112 / 255, 221 / 255 } }
+    TRANSMOGRIFY_TOOLTIP_APPEARANCE_UNKNOWN = "You haven't collected this appearance"
+    c.tooltipPre = function(tip)
+        local name = items[c.idOf(tip.item)].name
+        if c.nameRight then tip:AddDoubleLine(name, c.nameRight, 1, 1, 1, 0.5, 0.5, 0.5) else tip:AddLine(name, 1, 1, 1) end
+        if c.blizzardLine then tip:AddLine(TRANSMOGRIFY_TOOLTIP_APPEARANCE_UNKNOWN, 0.53, 0.67, 1) end
+    end
+    return c
+end
+-- The browser checks the appearance and finds the item at copper (a click
+-- on its tile); the check ends within the 10 seconds advanced.
+local function priced(c, appearanceID, itemID, copper)
+    c.ah.listings = { listing(C_Item.GetItemInfo(itemID), itemID, copper) }
+    TC.BrowserState.ClickTile({ id = appearanceID, slot = "feet", category = Fake.CATEGORIES.Feet })
+    c.advance(10)
+end
+local function lines(list) return table.concat(list, "\n") end
+local CASE3_FULL = { "FFFFFF:Feline Mantle", "-: ", ORANGE .. ":[bag]Not collected | FFFFFF:World Drop", WHITE .. ":" .. IN_BAGS }
+local CASE5_HEAD = { "FFFFFF:Ivycloth Boots of the Eagle", "-: ", ORANGE .. ":[bag]Not collected | FFFFFF:World Drop", WHITE .. ":" .. IN_BAGS }
+local CASE5_LIST = { "-: ", GOLD .. ":Other items using this appearance:", "1EFF00:Ivycloth Boots of Intellect | FFFFFF:World Drop",
+    "1EFF00:Ivycloth Boots of the Owl | FFFFFF:World Drop", "1EFF00:Ivycloth Boots of Spirit | FFFFFF:World Drop", GREY .. ":and 2 more items" }
+local function join(...)
+    local out = {}
+    for _, list in ipairs({ ... }) do for _, line in ipairs(list) do out[#out + 1] = line end end
+    return lines(out)
 end
 
-test("TC-15 F5 /tc blizz hides Blizzard's line only while on and only when the line is there", function()
-    local NOT_COLLECTED = "You haven't collected this appearance"
-    local function boot2(blizzardLine)
-        local c = tipFixture()
-        TRANSMOGRIFY_TOOLTIP_APPEARANCE_UNKNOWN = NOT_COLLECTED
-        c.tooltipPre = function(tip)
-            tip:AddLine("Felcloth Boots")
-            if blizzardLine then tip:AddLine(blizzardLine) end
-            tip:AddLine("Binds when picked up")
-        end
-        return c
-    end
-    local c = boot2(NOT_COLLECTED)
-    equal(head(tipLines(c, 504)), "Felcloth Boots||Binds when picked up|TC: MODEL NOT COLLECTED",
-        "on: Blizzard's line emptied, the others kept")
-    SlashCmdList.TC("blizz")
-    equal(head(tipLines(c, 504)),
-        "Felcloth Boots|" .. NOT_COLLECTED .. "|Binds when picked up|TC: MODEL NOT COLLECTED", "off: untouched")
-    c = boot2(nil)
-    equal(head(tipLines(c, 504)), "Felcloth Boots|Binds when picked up|TC: MODEL NOT COLLECTED",
-        "on, no Blizzard line: nothing touched")
-    for _, line in ipairs(GameTooltip.lines) do check(not line.hidden, "no line hidden") end
-    TRANSMOGRIFY_TOOLTIP_APPEARANCE_UNKNOWN = nil
-    tipNoErrors(c, "blizz")
+test("D1 Full, the five cases without a price, line for line", function()
+    local c = pageFixture()
+    equal(shown(c, 1101, true), lines({ "FFFFFF:Runecloth Boots", "-: ", COLLECTED }), "1 collected from this item")
+    equal(shown(c, 1201, true), lines({ "FFFFFF:Abjurer's Boots of the Owl", "-: ", COLLECTED }), "2 collected from another item")
+    equal(shown(c, 1301, true), lines(CASE3_FULL), "3 not collected, binds when equipped, in the bags")
+    equal(GameTooltip.lines[3].wrap, false, "3: the status does not wrap")
+    equal(GameTooltip.lines[4].wrap, true, "3: the sentence wraps")
+    equal(shown(c, 1401), lines({ "FFFFFF:Cape of the Brotherhood", "-: ",
+        ORANGE .. ":Not collected | FFFFFF:Drop: Edwin VanCleef (The Deadmines)" }), "4 binds when picked up, a chat link")
+    equal(shown(c, 1501, true), join(CASE5_HEAD, CASE5_LIST), "5 five other items")
+    tipNoErrors(c, "full")
 end)
+
+test("D1 Full, cases 3 and 5 with the price the browser saw 3 min ago, line for line", function()
+    local c = pageFixture()
+    priced(c, 13, 1301, 7450)
+    priced(c, 15, 1501, 4150)
+    local touches = #c.auctionTouches
+    c.advance(180)
+    equal(shown(c, 1301, true), join(CASE3_FULL, { GOLD .. ":Lowest price |cFF8080803 min ago|r | FFFFFF:74s 50c" }), "3 with a price")
+    equal(shown(c, 1501, true), join(CASE5_HEAD, { GOLD .. ":Lowest price |cFF8080803 min ago|r | FFFFFF:41s 50c" }, CASE5_LIST),
+        "5 with a price")
+    equal(#c.auctionTouches, touches, "the tooltip touched no auction house call")
+    noErrors(c, "full with a price")
+end)
+
+test("D1 Compact, the five cases, line for line: the status on the name line, one line only for the bags' sentence", function()
+    local c = pageFixture()
+    TC.SetSetting("tooltipStyle", "compact")
+    priced(c, 13, 1301, 7450)
+    equal(shown(c, 1101, true), "FFFFFF:Runecloth Boots | " .. COLLECTED, "1")
+    equal(shown(c, 1201, true), "FFFFFF:Abjurer's Boots of the Owl | " .. COLLECTED, "2")
+    equal(shown(c, 1301, true), lines({ "FFFFFF:Feline Mantle | " .. ORANGE .. ":Not collected", WHITE .. ":[bag]" .. IN_BAGS }),
+        "3: no price in Compact")
+    equal(GameTooltip.lines[2].wrap, true, "3: the sentence wraps")
+    equal(shown(c, 1401), "FFFFFF:Cape of the Brotherhood | " .. ORANGE .. ":Not collected", "4")
+    equal(shown(c, 1501, true), lines({ "FFFFFF:Ivycloth Boots of the Eagle | " .. ORANGE .. ":Not collected |cFF808080+5 items|r",
+        WHITE .. ":[bag]" .. IN_BAGS }), "5")
+    noErrors(c, "compact")
+end)
+
+test("D1 Compact's fallback: the name line's right side taken, writing it failing, or no such region: the status as a line", function()
+    local c = pageFixture()
+    TC.SetSetting("tooltipStyle", "compact")
+    c.nameRight = "Item Level 22"
+    equal(shown(c, 1501, true), lines({ "FFFFFF:Ivycloth Boots of the Eagle | 808080:Item Level 22",
+        ORANGE .. ":Not collected |cFF808080+5 items|r", WHITE .. ":[bag]" .. IN_BAGS }), "5, taken: the other addon's text kept")
+    c.nameRight = nil
+    c.rightWriteFails = true
+    equal(shown(c, 1101, true), lines({ "FFFFFF:Runecloth Boots", COLLECTED }), "1, the write does not hold")
+    check(not GameTooltip.lines[1].rightShown, "1: the right side left hidden")
+    c.rightWriteFails = false
+    c.noRightRegions = true
+    equal(shown(c, 1401), lines({ "FFFFFF:Cape of the Brotherhood", ORANGE .. ":Not collected" }), "4, no right region")
+    tipNoErrors(c, "fallback")
+end)
+
+test("D1 the other items' cap: 1, 3 and 4 listed in full, 9 as 3 and and 6 more items; the item never lists itself", function()
+    for _, n in ipairs({ 1, 3, 4, 9 }) do
+        local sources, sourceItems, items = { 200, 199 }, { [200] = 2000, [199] = 2000 }, { [2000] = { name = "Own Boots",
+            quality = 2, bindType = 1, subType = "Boots", classID = 4, subClassID = 1, equipLoc = "INVTYPE_FEET" } }
+        for i = 1, n do
+            sources[#sources + 1], sourceItems[200 + i] = 200 + i, 2000 + i
+            items[2000 + i] = { name = "Boots " .. i, quality = 2, bindType = 1, subType = "Boots", classID = 4, subClassID = 1 }
+        end
+        local c = boot({ appearances = { { id = 20, uiOrder = 1, category = Fake.CATEGORIES.Feet, sources = sources } },
+            sourceItems = sourceItems, items = items })
+        c.fire("ADDON_LOADED", "TransmogChecker")
+        local text = shown(c, 2000)
+        local rows, more = 0, nil
+        for _, line in ipairs(GameTooltip.lines) do
+            if line.text:find("^Boots %d") then rows = rows + 1 end
+            if line.text:find("more items", 1, true) then more = line.text end
+            check(not line.text:find("Own Boots", 1, true), n .. ": the item lists itself\n" .. text)
+        end
+        equal(rows, n <= 4 and n or 3, n .. " other items: rows")
+        equal(more, n > 4 and ("and " .. (n - 3) .. " more items") or nil, n .. " other items: and N more")
+        equal(#GameTooltip.lines, 4 + rows + (more and 1 or 0), n .. ": lines")
+        noErrors(c, n .. " others")
+    end
+end)
+
+test("D1 the price line: just now, then its age; absent without a price, with the setting off, for a collected look", function()
+    local c = pageFixture()
+    check(not shown(c, 1301, true):find("Lowest price", 1, true), "no price before the browser saw one")
+    priced(c, 13, 1301, 7450)
+    check(shown(c, 1301, true):find("\n" .. GOLD .. ":Lowest price |cFF808080just now|r | FFFFFF:74s 50c", 1, true), "just now")
+    c.advance(130)
+    check(shown(c, 1301, true):find("Lowest price |cFF8080802 min ago|r", 1, true), "the age moves on while kept: 2 min")
+    check(TC.SetSetting("lowestPrice", false), "the setting is taken")
+    check(not shown(c, 1301, true):find("Lowest price", 1, true), "setting off")
+    TC.SetSetting("lowestPrice", true)
+    priced(c, 11, 1101, 900)
+    check(not shown(c, 1101, true):find("Lowest price", 1, true), "a collected look shows no price")
+    noErrors(c, "price line")
+end)
+
+test("D1 the session price survives the auction window closing and reopening, reads no auction house, follows the latest check", function()
+    local c = pageFixture()
+    priced(c, 13, 1301, 7450)
+    TC.BrowserState.Leave()
+    TC.BrowserState.Reset()
+    local touches, sends = #c.auctionTouches, #c.ah.sends
+    check(shown(c, 1301, true):find("FFFFFF:74s 50c", 1, true), "kept after the visit ended")
+    TC.BrowserState.Enter()
+    TC.BrowserState.Reset()
+    check(shown(c, 1301, true):find("FFFFFF:74s 50c", 1, true), "kept on the next visit")
+    equal(#c.auctionTouches .. "/" .. #c.ah.sends, touches .. "/" .. sends, "hovers read no auction house")
+    equal(select(1, TC.BrowserState.SessionPrice(13)), 7450, "the state's one function")
+    -- a later check that finds nothing for sale: no price
+    c.ah.listings = {}
+    TC.BrowserState.ClickTile({ id = 13, slot = "feet", category = Fake.CATEGORIES.Feet })
+    c.advance(10)
+    check(not shown(c, 1301, true):find("Lowest price", 1, true), "not for sale now: no price line")
+    noErrors(c, "session price")
+end)
+
+test("D1 the session price from a scan of the slot", function()
+    local c = pageFixture()
+    c.ah.listings = { listing("Feline Mantle", 1301, 7450), listing("Ivycloth Boots of Spirit", 1504, 4150) }
+    TC.BrowserState.SelectSlot("feet")
+    TC.BrowserState.ScanAgain()
+    c.advance(10)
+    equal(select(1, TC.BrowserState.SessionPrice(13)), 7450, "the scan's lowest price kept")
+    check(shown(c, 1501, true):find("Lowest price |cFF808080just now|r | FFFFFF:41s 50c", 1, true), "on the tooltip of an item of the look")
+    -- the next scan of the slot finds 13 no longer: its price goes
+    c.ah.listings = { listing("Ivycloth Boots of Spirit", 1504, 4150) }
+    TC.BrowserState.ScanAgain()
+    c.advance(10)
+    equal(TC.BrowserState.SessionPrice(13), nil, "gone with the next scan")
+    noErrors(c, "scan price")
+end)
+
+test("D1 pending: in the bags from the tooltip or the bag read, bought from a purchase; a chat link not pending has the bind sentence", function()
+    local c = pageFixture()
+    equal(shown(c, 1301), lines({ "FFFFFF:Feline Mantle", "-: ", notCollected("World Drop"), WHITE .. ":" .. BIND_SENTENCE }),
+        "a chat link, nothing pending")
+    TC.BrowserState.SetBags({ [13] = true })
+    equal(shown(c, 1301), lines(CASE3_FULL), "the browser's bag read says in the bags")
+    TC.BrowserState.SetBags({})
+    TC.BrowserState.BuyFinished("completed", { appearance = { id = 13 } })
+    equal(shown(c, 1301), lines({ "FFFFFF:Feline Mantle", "-: ", ORANGE .. ":[bag]Not collected | FFFFFF:World Drop",
+        WHITE .. ":" .. BOUGHT_TEXT }), "bought")
+    TC.SetSetting("tooltipStyle", "compact")
+    equal(shown(c, 1301), lines({ "FFFFFF:Feline Mantle | " .. ORANGE .. ":Not collected", WHITE .. ":[bag]" .. BOUGHT_TEXT }),
+        "bought, Compact")
+    equal(shown(c, 1301, true), lines({ "FFFFFF:Feline Mantle | " .. ORANGE .. ":Not collected", WHITE .. ":[bag]" .. IN_BAGS }),
+        "in the bags comes first")
+    tipNoErrors(c, "pending")
+end)
+
+test("D1 the Not collected colour: orange by default, light blue and white as presets, in both styles; nothing else changes", function()
+    local c = pageFixture()
+    for _, case in ipairs({ { "orange", "FF7F00" }, { "lightBlue", "87ABFF" }, { "white", "FFFFFF" } }) do
+        check(TC.SetSetting("notCollectedColor", case[1]), case[1] .. " taken")
+        TC.SetSetting("tooltipStyle", "full")
+        equal(shown(c, 1301, true), lines({ "FFFFFF:Feline Mantle", "-: ", case[2] .. ":[bag]Not collected | FFFFFF:World Drop",
+            WHITE .. ":" .. IN_BAGS }), case[1] .. ", Full")
+        TC.SetSetting("tooltipStyle", "compact")
+        equal(shown(c, 1501), "FFFFFF:Ivycloth Boots of the Eagle | " .. case[2] .. ":Not collected |cFF808080+5 items|r", case[1] .. ", Compact")
+    end
+    equal(TC.SetSetting("notCollectedColor", "red"), false, "a colour that is no preset is refused")
+    equal(TC.Config.notCollectedColor, "white", "and changes nothing")
+    tipNoErrors(c, "colours")
+end)
+
+test("D1 other items Off: no list in Full, no count in Compact", function()
+    local c = pageFixture()
+    TC.SetSetting("otherItems", "off")
+    equal(shown(c, 1501, true), lines(CASE5_HEAD), "Full")
+    TC.SetSetting("tooltipStyle", "compact")
+    equal(shown(c, 1501, true), lines({ "FFFFFF:Ivycloth Boots of the Eagle | " .. ORANGE .. ":Not collected", WHITE .. ":[bag]" .. IN_BAGS }),
+        "Compact")
+    TC.SetSetting("otherItems", "always")
+    equal(shown(c, 1201), "FFFFFF:Abjurer's Boots of the Owl | " .. COLLECTED, "Compact, collected: the check alone")
+    noErrors(c, "others off")
+end)
+
+test("D1 Show on item tooltips off: no line and no name line write; Blizzard's line left alone", function()
+    local c = pageFixture()
+    c.blizzardLine = true
+    check(TC.SetSetting("tooltipShow", false), "taken")
+    equal(shown(c, 1501, true), "FFFFFF:Ivycloth Boots of the Eagle\n87ABFF:You haven't collected this appearance", "Full off")
+    TC.SetSetting("tooltipStyle", "compact")
+    equal(shown(c, 1501, true), "FFFFFF:Ivycloth Boots of the Eagle\n87ABFF:You haven't collected this appearance", "Compact off")
+    TC.SetSetting("tooltipShow", true)
+    check(shown(c, 1501, true):find("Not collected", 1, true), "on again at once")
+    tipNoErrors(c, "show off")
+end)
+
+test("D1 Blizzard's own line is hidden whenever ours show, in both styles; left alone for a grey item skipped or no appearance", function()
+    local c = pageFixture()
+    c.blizzardLine = true
+    shown(c, 1501, true)
+    check(GameTooltip.lines[2].hidden and GameTooltip.lines[2].text == "", "Full: hidden")
+    TC.SetSetting("tooltipStyle", "compact")
+    shown(c, 1301, true)
+    check(GameTooltip.lines[2].hidden and GameTooltip.lines[2].text == "", "Compact: hidden")
+    TRANSMOGRIFY_TOOLTIP_APPEARANCE_UNKNOWN = nil
+    local d = tipFixture()
+    TRANSMOGRIFY_TOOLTIP_APPEARANCE_UNKNOWN = "You haven't collected this appearance"
+    d.tooltipPre = function(tip)
+        tip:AddLine("Shoes")
+        tip:AddLine(TRANSMOGRIFY_TOOLTIP_APPEARANCE_UNKNOWN)
+    end
+    for _, itemID in ipairs({ 701, 950 }) do
+        equal(lines(tipLines(d, itemID)), "Shoes\nYou haven't collected this appearance", itemID .. ": untouched")
+        for _, line in ipairs(GameTooltip.lines) do check(not line.hidden, itemID .. ": no line hidden") end
+    end
+    TRANSMOGRIFY_TOOLTIP_APPEARANCE_UNKNOWN = nil
+    tipNoErrors(d, "blizzard line")
+end)
+
+---------------------------------------------------------------- Slice D1: the tooltip's settings and the slash commands
+
+local TOOLTIP_KEYS = { "tooltipShow", "tooltipStyle", "notCollectedColor", "otherItems", "lowestPrice", "skipPoorAndCommon", "debug" }
+local function tooltipSettings()
+    local out = {}
+    for i, k in ipairs(TOOLTIP_KEYS) do out[i] = tostring(TransmogCheckerDB[k]) end
+    return table.concat(out, "/")
+end
+
+test("D1 settings: the defaults on a first run; Blizzard's line is no setting", function()
+    local c = boot({ saved = false })
+    c.fire("ADDON_LOADED", "TransmogChecker")
+    equal(tooltipSettings(), "true/full/orange/notCollected/true/true/false", "the defaults")
+    equal(TransmogCheckerDB.filterBlizzNotCollectedLine, nil, "no Blizzard line setting written")
+    equal(TransmogCheckerDB.hideCollectedAlts, nil, "no old alts setting written")
+    noErrors(c, "defaults")
+end)
+
+test("D1 settings: malformed values load as the defaults; an existing user's values carry over, the old fields left on disk", function()
+    local c = boot({ saved = false })
+    TransmogCheckerDB = { tooltipShow = "yes", tooltipStyle = "big", notCollectedColor = 5, otherItems = {}, lowestPrice = 1,
+        skipPoorAndCommon = "no", debug = "x" }
+    c.fire("ADDON_LOADED", "TransmogChecker")
+    equal(tooltipSettings(), "true/full/orange/notCollected/true/true/false", "malformed")
+    for _, case in ipairs({ { false, "always" }, { true, "notCollected" } }) do
+        local d = boot({ saved = false })
+        TransmogCheckerDB = { hideCollectedAlts = case[1], filterBlizzNotCollectedLine = false, skipPoorAndCommon = false, debug = true }
+        d.fire("ADDON_LOADED", "TransmogChecker")
+        equal(tooltipSettings(), "true/full/orange/" .. case[2] .. "/true/false/true", tostring(case[1]) .. ": carried over")
+        equal(tostring(TransmogCheckerDB.hideCollectedAlts) .. "/" .. tostring(TransmogCheckerDB.filterBlizzNotCollectedLine),
+            tostring(case[1]) .. "/false", "the old fields left alone")
+        noErrors(d, "carried over")
+    end
+    noErrors(c, "malformed")
+end)
+
+test("D1 settings: TC.SetSetting stores a valid value and answers true, refuses anything else; TC.Setting reads", function()
+    local c = boot({ saved = false })
+    equal(TC.SetSetting("tooltipStyle", "compact"), false, "before the saved table is loaded")
+    c.fire("ADDON_LOADED", "TransmogChecker")
+    for _, case in ipairs({ { "tooltipShow", false }, { "tooltipStyle", "compact" }, { "notCollectedColor", "lightBlue" },
+        { "otherItems", "off" }, { "lowestPrice", false }, { "skipPoorAndCommon", false } }) do
+        equal(TC.SetSetting(case[1], case[2]), true, case[1])
+        equal(TransmogCheckerDB[case[1]], case[2], case[1] .. " stored")
+        equal(TC.Setting(case[1]), case[2], case[1] .. " read")
+    end
+    equal(TC.SetSetting("tooltipStyle", "huge"), false, "a bad value")
+    equal(TC.SetSetting("lowestPrice", "no"), false, "a bad boolean")
+    equal(TC.SetSetting("filterBlizzNotCollectedLine", true), false, "no longer a setting")
+    equal(TC.SetSetting("nonsense", 1), false, "an unknown key")
+    equal(TransmogCheckerDB.tooltipStyle, "compact", "unchanged by the refusals")
+    noErrors(c, "set setting")
+end)
+
+test("D1 slash: /tc alts and /tc skipgreys flip their setting and print it; /tc blizz says the line is always hidden; help", function()
+    local c = boot({ saved = false })
+    c.fire("ADDON_LOADED", "TransmogChecker")
+    local function said(msg)
+        local from = #c.printed
+        SlashCmdList.TC(msg)
+        local out = {}
+        for i = from + 1, #c.printed do out[#out + 1] = plain(c.printed[i]) end
+        return table.concat(out, "\n")
+    end
+    equal(said("alts"), "TC: Other items on item tooltips: always", "alts")
+    equal(TransmogCheckerDB.otherItems, "always", "alts flipped")
+    equal(said("alts"), "TC: Other items on item tooltips: when not collected", "alts back")
+    TC.SetSetting("otherItems", "off")
+    said("alts")
+    equal(TransmogCheckerDB.otherItems, "always", "from off")
+    equal(said("skipgreys"), "TC: Skip grey/white items disabled", "skipgreys")
+    equal(TransmogCheckerDB.skipPoorAndCommon, false, "skipgreys flipped")
+    equal(said("skipgreys"), "TC: Skip grey/white items enabled", "skipgreys back")
+    local before = tooltipSettings()
+    equal(said("blizz"), "TC: Blizzard's \"not collected\" line is now always hidden while TransmogChecker's lines show.", "blizz")
+    equal(tooltipSettings(), before, "blizz changes nothing")
+    equal(said("debug"), "TC: Debug mode enabled", "debug")
+    equal(said("debug"), "TC: Debug mode disabled", "debug off")
+    local help = "TC: /tc lists these commands.\nTC: /tc help lists these commands.\nTC: /tc debug turns debug output on or off."
+    equal(said("help"), help, "help")
+    equal(said(""), help, "/tc alone prints the help")
+    equal(said("whatever"), help, "an unknown word prints the help")
+    noErrors(c, "slash")
+end)
+end
 
 ---------------------------------------------------------------- Slice B: one view, filters, sort, Scan when shown, saved choices
 
@@ -9742,8 +10109,8 @@ test("slice B saved: the defaults on a first run, the tooltip's settings beside 
     equal(table.concat(keys, ","), "forSaleOnly,scanWhenShown,show,slot,sort", "the five values only (slice C: the slot)")
     local v = TC.BrowserState.View()
     equal(v.filter .. "/" .. tostring(v.forSaleOnly) .. "/" .. tostring(v.scanWhenShown), "All/false/true", "the view")
-    equal(table.concat({ tostring(TC.Config.hideCollectedAlts), tostring(TC.Config.filterBlizzNotCollectedLine),
-        tostring(TC.Config.skipPoorAndCommon), tostring(TC.Config.debug) }, "/"), "true/true/true/false", "the tooltip's defaults")
+    equal(table.concat({ TC.Config.tooltipStyle, tostring(TC.Config.otherItems), tostring(TC.Config.filterBlizzNotCollectedLine),
+        tostring(TC.Config.skipPoorAndCommon), tostring(TC.Config.debug) }, "/"), "full/notCollected/nil/true/false", "the tooltip's defaults (slice D1)")
     noErrors(c, "first run")
 end)
 
@@ -9795,10 +10162,10 @@ test("slice B saved: Bought, not collected loads as All; malformed values and a 
         equal(table.concat({ tostring(b.scanWhenShown), b.show, tostring(b.forSaleOnly), b.sort }, "/"), case[2], what .. ": saved")
         local v = TC.BrowserState.View()
         equal(v.filter .. "/" .. tostring(v.forSaleOnly), b.show .. "/" .. tostring(b.forSaleOnly), what .. ": the view")
-        equal(tostring(TC.Config.hideCollectedAlts) .. "/" .. tostring(TC.Config.skipPoorAndCommon), "false/false",
-            what .. ": the tooltip's saved settings kept")
+        equal(tostring(TC.Config.otherItems) .. "/" .. tostring(TC.Config.skipPoorAndCommon), "always/false",
+            what .. ": the tooltip's saved settings kept (slice D1: hideCollectedAlts false is Always)")
         SlashCmdList.TC("alts")
-        equal(TC.Config.hideCollectedAlts, true, what .. ": /tc alts still toggles")
+        equal(TC.Config.otherItems, "notCollected", what .. ": /tc alts still toggles")
         equal(b.show, TransmogCheckerDB.browser.show, what .. ": and leaves the browser's values")
         noErrors(c, what)
     end
@@ -10587,6 +10954,13 @@ end)
 
 ---------------------------------------------------------------- run
 
+-- TC_ONLY=<text>: only the tests whose name holds the text (a developer's shortcut)
+local only = os.getenv("TC_ONLY")
+if only then
+    local kept = {}
+    for _, t in ipairs(tests) do if t.name:find(only, 1, true) then kept[#kept + 1] = t end end
+    tests = kept
+end
 for _, t in ipairs(tests) do
     local ok, err = pcall(t.fn)
     print = realPrint
