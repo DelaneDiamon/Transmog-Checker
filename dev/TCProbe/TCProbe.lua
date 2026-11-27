@@ -4705,3 +4705,67 @@ SlashCmdList["TCPROBE"] = function(msg)
     return base(msg)
 end
 end)()
+
+-- "/tcprobe compartment" (slice E, E5: the minimap's addon list). Reads
+-- only: whether AddonCompartmentFrame (Blizzard_Minimap/Camelot/
+-- AddonCompartment.xml:3, parent MinimapCluster, under GameTimeFrame)
+-- exists and shows, its parent and size, how many addons it lists
+-- (registeredAddons, Mainline/AddonCompartment.lua:102-150) and whether
+-- one is TransmogChecker (its entries keep only the title, so the folder's
+-- title is looked up and matched), the .toc's AddonCompartmentFunc and its
+-- global, and the conditions RegisterAddons applies: the enable state for
+-- the character (GetAddOnEnableState(index, UnitGUID("player")) must be
+-- All, :103-105), loadable or demand-loaded (:107-108), and the game rule
+-- that hides the frame (:170-172). No character name is printed.
+;(function()
+local FOLDER = "TransmogChecker"
+
+local function say(text)
+    print("TCProbe compartment: " .. text)
+    db.compartment = db.compartment or {}
+    if #db.compartment < 100 then db.compartment[#db.compartment + 1] = text end
+end
+
+local function probe()
+    local frame = rawget(_G, "AddonCompartmentFrame")
+    say("frame exists: " .. tostring(frame ~= nil))
+    if frame then
+        local parent = frame.GetParent and frame:GetParent()
+        say(("shown %s, visible %s; parent %s, parent shown %s; size %s x %s"):format(tostring(frame:IsShown()),
+            tostring(frame:IsVisible()), tostring(parent and parent.GetName and parent:GetName()),
+            tostring(parent and parent.IsShown and parent:IsShown()), tostring(frame:GetWidth()), tostring(frame:GetHeight())))
+        local listed = type(frame.registeredAddons) == "table" and frame.registeredAddons or nil
+        local title = C_AddOns and C_AddOns.GetAddOnInfo and select(2, C_AddOns.GetAddOnInfo(FOLDER))
+        local ours = false
+        for _, entry in ipairs(listed or {}) do
+            if type(entry) == "table" and title ~= nil and entry.text == title then ours = true end
+        end
+        say(("lists %s addons; %s among them: %s (by its title %q)"):format(listed and #listed or "no list of", FOLDER,
+            tostring(ours), tostring(title)))
+    end
+    local AddOns = C_AddOns
+    if not AddOns then return say("no C_AddOns; done.") end
+    local func = AddOns.GetAddOnMetadata and AddOns.GetAddOnMetadata(FOLDER, "AddonCompartmentFunc")
+    say(("AddonCompartmentFunc %q; that global is a function: %s"):format(tostring(func),
+        tostring(func ~= nil and type(_G[func]) == "function")))
+    local _, _, _, loadable, reason = AddOns.GetAddOnInfo(FOLDER)
+    say(("loadable %s, reason %s"):format(tostring(loadable), tostring(reason)))
+    local state = AddOns.GetAddOnEnableState and UnitGUID and AddOns.GetAddOnEnableState(FOLDER, UnitGUID("player"))
+    local all = Enum and Enum.AddOnEnableState and Enum.AddOnEnableState.All
+    say(("enable state for this character %s (0 None, 1 Some, 2 All); All, as the list asks: %s"):format(tostring(state),
+        tostring(state ~= nil and state == all)))
+    local rule = C_GameRules and C_GameRules.IsGameRuleActive and Enum and Enum.GameRule and Enum.GameRule.UserAddonsDisabled
+    say(("user addons disabled by a game rule: %s; done."):format(tostring(rule and C_GameRules.IsGameRuleActive(rule))))
+end
+
+local base = SlashCmdList["TCPROBE"]
+SlashCmdList["TCPROBE"] = function(msg)
+    local word = (msg or ""):match("^%s*(%S*)")
+    if word:lower() == "compartment" then
+        local ok, err = pcall(probe)
+        if not ok then say("raised: " .. tostring(err)) end
+        return
+    end
+    return base(msg)
+end
+end)()
