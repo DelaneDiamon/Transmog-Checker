@@ -131,6 +131,7 @@ TC.Locales.zhCN = { name = "简体中文", plural = function() return "other" en
     RESET_FILTERS = "重置过滤",
     MENU_SETTINGS = "设置…",
     ALL_WEAPON_TYPES = "所有武器类型",
+    ALL_ARMOR_TYPES = "所有护甲类型",
 
     -- the count, the status line and paging
     COUNT_APPEARANCES = { other = "%d 个外观" },
@@ -190,6 +191,8 @@ TC.Locales.zhCN = { name = "简体中文", plural = function() return "other" en
     NO_MATCHES = "没有匹配",
     EMPTY_NO_SLOT = "部位“%s”没有外观。",
     EMPTY_NO_SLOT_CLASS = "部位“%s”没有适用于%s的外观。",
+    EMPTY_NO_ARMOR_TYPE = "部位“%s”（%s）没有外观。",
+    EMPTY_NO_ARMOR_TYPE_CLASS = "部位“%s”（%s）没有适用于%s的外观。",
     EMPTY_NONE_COLLECTED = "部位“%s”没有已收集的外观。",
     EMPTY_NONE_COLLECTED_CLASS = "部位“%s”没有适用于%s的已收集外观。",
     EMPTY_NONE_PENDING = "部位“%s”没有已购买但未收集的外观。",

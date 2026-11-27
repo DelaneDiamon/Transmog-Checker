@@ -132,7 +132,8 @@ TC.Locales.frFR = { name = "Français", strings = {
     MENU_SCAN = "Analyser les prix à l'ouverture de l'onglet",
     RESET_FILTERS = "Réinitialiser les filtres",
     MENU_SETTINGS = "Paramètres…",
-    ALL_WEAPON_TYPES = "Tous les types d'armes",
+    ALL_WEAPON_TYPES = "Toutes les armes",
+    ALL_ARMOR_TYPES = "Toutes les armures",
 
     -- the count, the status line and paging
     COUNT_APPEARANCES = { one = "%d apparence", other = "%d apparences" },
@@ -192,6 +193,8 @@ TC.Locales.frFR = { name = "Français", strings = {
     NO_MATCHES = "Aucun résultat",
     EMPTY_NO_SLOT = "Aucune apparence pour l'emplacement %s.",
     EMPTY_NO_SLOT_CLASS = "Aucune apparence pour l'emplacement %s et la classe %s.",
+    EMPTY_NO_ARMOR_TYPE = "Aucune apparence pour l'emplacement %s (%s).",
+    EMPTY_NO_ARMOR_TYPE_CLASS = "Aucune apparence pour l'emplacement %s (%s) et la classe %s.",
     EMPTY_NONE_COLLECTED = "Aucune apparence collectionnée pour l'emplacement %s.",
     EMPTY_NONE_COLLECTED_CLASS = "Aucune apparence collectionnée pour l'emplacement %s et la classe %s.",
     EMPTY_NONE_PENDING = "Aucune apparence de l'emplacement %s n'est achetée et non collectionnée.",

@@ -26,7 +26,11 @@ _Avoid_: Learnable, usable, wearable
 
 **Class filter**:
 The choice of one class whose wearable armor and usable weapons the appearance browser is narrowed to, or All classes. It starts on the current character's class; All classes, once chosen, is kept between visits and sessions.
-_Avoid_: Armor type filter, usable filter, wearable filter
+_Avoid_: Usable filter, wearable filter
+
+**Armor type**:
+The appearance browser's choice, on the eight armor slots, of one armor type the class filter's class wears (Cloth, Leather, Mail, Plate, named as the game names them), or All armor types; the class filter's list keeps the appearances with an item of that type, and the item list only those items. Items of no armor type (Generic, Cosmetic, or none the game gives) show under All armor types only. One choice for every armor slot, kept between visits and sessions, back on All armor types when the class cannot wear it or wears one type alone; it shares the weapon type dropdown's place.
+_Avoid_: Armor type filter, armor filter, material
 
 **Slot**:
 The place on a character where an appearance is worn or held, such as chest, feet or main hand.

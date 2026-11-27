@@ -139,6 +139,7 @@ TC.Locales.ruRU = { name = "Русский", plural = plural, strings = {
     RESET_FILTERS = "Сбросить фильтры",
     MENU_SETTINGS = "Настройки…",
     ALL_WEAPON_TYPES = "Все типы оружия",
+    ALL_ARMOR_TYPES = "Все типы доспехов",
 
     -- the count, the status line and paging
     COUNT_APPEARANCES = { one = "%d модель", few = "%d модели", many = "%d моделей" },
@@ -198,6 +199,8 @@ TC.Locales.ruRU = { name = "Русский", plural = plural, strings = {
     NO_MATCHES = "Нет совпадений",
     EMPTY_NO_SLOT = "Нет моделей для ячейки «%s».",
     EMPTY_NO_SLOT_CLASS = "Нет моделей для ячейки «%s» (класс: %s).",
+    EMPTY_NO_ARMOR_TYPE = "Нет моделей для ячейки «%s» (%s).",
+    EMPTY_NO_ARMOR_TYPE_CLASS = "Нет моделей для ячейки «%s» (%s, класс: %s).",
     EMPTY_NONE_COLLECTED = "Нет собранных моделей для ячейки «%s».",
     EMPTY_NONE_COLLECTED_CLASS = "Нет собранных моделей для ячейки «%s» (класс: %s).",
     EMPTY_NONE_PENDING = "Нет купленных и не собранных моделей для ячейки «%s».",

@@ -133,7 +133,8 @@ end, strings = {
     MENU_SCAN = "Escanear precios al abrir la pestaña",
     RESET_FILTERS = "Restablecer filtros",
     MENU_SETTINGS = "Configuración…",
-    ALL_WEAPON_TYPES = "Todos los tipos de arma",
+    ALL_WEAPON_TYPES = "Todas las armas",
+    ALL_ARMOR_TYPES = "Todas las armaduras",
 
     -- the count, the status line and paging
     COUNT_APPEARANCES = { one = "%d apariencia", other = "%d apariencias" },
@@ -193,6 +194,8 @@ end, strings = {
     NO_MATCHES = "Sin resultados",
     EMPTY_NO_SLOT = "No hay apariencias de la ranura %s.",
     EMPTY_NO_SLOT_CLASS = "No hay apariencias de la ranura %s para %s.",
+    EMPTY_NO_ARMOR_TYPE = "No hay apariencias de la ranura %s (%s).",
+    EMPTY_NO_ARMOR_TYPE_CLASS = "No hay apariencias de la ranura %s (%s) para %s.",
     EMPTY_NONE_COLLECTED = "No hay apariencias conseguidas de la ranura %s.",
     EMPTY_NONE_COLLECTED_CLASS = "No hay apariencias conseguidas de la ranura %s para %s.",
     EMPTY_NONE_PENDING = "Ninguna apariencia de la ranura %s está comprada y sin conseguir.",

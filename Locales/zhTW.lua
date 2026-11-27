@@ -131,6 +131,7 @@ TC.Locales.zhTW = { name = "繁體中文", plural = function() return "other" en
     RESET_FILTERS = "重設篩選",
     MENU_SETTINGS = "設定…",
     ALL_WEAPON_TYPES = "所有武器類型",
+    ALL_ARMOR_TYPES = "所有護甲類型",
 
     -- the count, the status line and paging
     COUNT_APPEARANCES = { other = "%d 個外觀" },
@@ -190,6 +191,8 @@ TC.Locales.zhTW = { name = "繁體中文", plural = function() return "other" en
     NO_MATCHES = "沒有符合項目",
     EMPTY_NO_SLOT = "部位「%s」沒有外觀。",
     EMPTY_NO_SLOT_CLASS = "部位「%s」沒有適用於%s的外觀。",
+    EMPTY_NO_ARMOR_TYPE = "部位「%s」（%s）沒有外觀。",
+    EMPTY_NO_ARMOR_TYPE_CLASS = "部位「%s」（%s）沒有適用於%s的外觀。",
     EMPTY_NONE_COLLECTED = "部位「%s」沒有已收藏的外觀。",
     EMPTY_NONE_COLLECTED_CLASS = "部位「%s」沒有適用於%s的已收藏外觀。",
     EMPTY_NONE_PENDING = "部位「%s」沒有已購買但未收藏的外觀。",

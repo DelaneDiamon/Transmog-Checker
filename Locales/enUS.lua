@@ -133,6 +133,7 @@ TC.Locales.enUS = { name = "English", strings = {
     RESET_FILTERS = "Reset filters",
     MENU_SETTINGS = "Settings…",
     ALL_WEAPON_TYPES = "All weapon types",
+    ALL_ARMOR_TYPES = "All armor types",
 
     -- the count, the status line and paging
     COUNT_APPEARANCES = { one = "%d appearance", other = "%d appearances" },
@@ -192,6 +193,8 @@ TC.Locales.enUS = { name = "English", strings = {
     NO_MATCHES = "No matches",
     EMPTY_NO_SLOT = "No %s appearances.",
     EMPTY_NO_SLOT_CLASS = "No %s appearances for %s.",
+    EMPTY_NO_ARMOR_TYPE = "No %s appearances (%s).",
+    EMPTY_NO_ARMOR_TYPE_CLASS = "No %s appearances (%s) for %s.",
     EMPTY_NONE_COLLECTED = "No collected %s appearances.",
     EMPTY_NONE_COLLECTED_CLASS = "No collected %s appearances for %s.",
     EMPTY_NONE_PENDING = "No %s appearance is bought and not collected.",

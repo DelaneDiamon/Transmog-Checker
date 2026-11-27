@@ -674,6 +674,50 @@ function Appearances.UsableBy(appearance, classID)
     return false
 end
 
+-- The armor types classID wears (every one for nil or a class not in
+-- WEARS), in the order Cloth, Leather, Mail, Plate, each { value (its
+-- ItemArmorSubclass key), name (the client's subclass name) }; none
+-- without GetItemInfoInstant, which ItemArmorType needs.
+function Appearances.ArmorTypes(classID)
+    local types = {}
+    if not (C_Item and C_Item.GetItemInfoInstant and Enum and Enum.ItemArmorSubclass) then return types end
+    for _, value in ipairs(WEARS[classID] or ARMOR_TYPES) do
+        types[#types + 1] = { value = value, name = subclassName({ "Armor", value }) or value }
+    end
+    return types
+end
+
+-- The item's armor type, an ARMOR_TYPES key, from GetItemInfoInstant (no
+-- item data needed, ItemDocumentation.lua:659-679); nil for Generic,
+-- Cosmetic, any other item and an item the call gives nothing for.
+function Appearances.ItemArmorType(itemID)
+    local E, instant = Enum, C_Item and C_Item.GetItemInfoInstant
+    if not (E and E.ItemClass and E.ItemArmorSubclass and instant) then return nil end
+    local _, _, _, _, _, classID, subClassID = instant(itemID)
+    if classID ~= E.ItemClass.Armor or subClassID == nil then return nil end
+    for _, name in ipairs(ARMOR_TYPES) do
+        if E.ItemArmorSubclass[name] == subClassID then return name end
+    end
+    return nil
+end
+
+-- Whether one of the appearance's items has the armor type (an
+-- ARMOR_TYPES key); the types of its items are kept on the appearance once
+-- its sources gave any item (as ItemIDs keeps them).
+function Appearances.HasArmorType(appearance, armorType)
+    local types = appearance.itemArmorTypes
+    if not types then
+        types = {}
+        local ids = Appearances.ItemIDs(appearance)
+        for _, itemID in ipairs(ids) do
+            local own = Appearances.ItemArmorType(itemID)
+            if own then types[own] = true end
+        end
+        if ids[1] then appearance.itemArmorTypes = types end
+    end
+    return types[armorType] == true
+end
+
 -- The profession that makes a crafted item (TC-35): an inference from the
 -- item's type, applied only to a source the client itself marks as
 -- profession; the client cannot name the profession. Only the types one

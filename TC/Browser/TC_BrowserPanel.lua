@@ -178,7 +178,7 @@ local FUNNEL_FALLBACK, RESET_ATLAS = "Map-Filter-Button", "auctionhouse-ui-filte
 -- A checkbox's mark in the panel's own list menu, without Blizzard's menu.
 local TICKED, UNTICKED = "[x] ", "[ ] "
 -- The band under the header: the count at x 28, y 42, and the weapon type
--- dropdown (Collections' width, Blizzard_Wardrobe.lua:568) at x 598, its
+-- dropdown, the armor type's on armor slots (Collections' width, Blizzard_Wardrobe.lua:568) at x 598, its
 -- vertical centre at y 50 (a 22 high box from y 39, whatever height the
 -- dropdown template gives it); 8 higher than layout B put it, so the grid
 -- has room under it (testpass F3). The count has no width of its own.
@@ -1108,18 +1108,21 @@ local function inClassColour(text, classFile)
     return colour and ("|c" .. colour .. text .. "|r") or text
 end
 
--- The weapon type dropdown: the entries the state answers, the first entry
--- ("All weapon types") with a line under it; choosing an entry calls
--- pick(value). Blizzard's dropdown, its menu built as Collections' weapon
+-- The band's type dropdown: the weapon type on a weapon slot, the armor
+-- type on an armor slot, in one place. The entries the state answers, the
+-- first entry ("All weapon types", "All armor types") with a line under it;
+-- choosing an entry calls the answer's pick(value). Blizzard's dropdown, its
+-- menu built as Collections' weapon
 -- menu is (radios, the chosen one marked, Blizzard_Wardrobe.lua:877-891);
 -- its text is the state's, not the chosen radio's. Without it, a button that
--- opens a list under its right edge. It is hidden on armor slots.
-local function newDropdown(panel, width, pick)
+-- opens a list under its right edge. It is hidden when the state answers
+-- neither.
+local function newDropdown(panel, width)
     local current
     local dropdown = menuDropdown(panel, "WowStyle1DropdownTemplate", width, nil, "OverrideText", function(root)
         for i, shown in ipairs(current and current.entries or {}) do
             root:CreateRadio(shown.name, function(entry) return entry ~= nil and entry.selected end,
-                function(entry) if entry then pick(entry.value) end end, shown)
+                function(entry) if entry then current.pick(entry.value) end end, shown)
             if i == 1 then root:CreateDivider() end
         end
     end)
@@ -1141,7 +1144,7 @@ local function newDropdown(panel, width, pick)
         button:SetText(answer.text)
         local items = {}
         for i, shown in ipairs(answer.entries) do
-            items[i] = { text = shown.name, line = i == 2, action = function() pick(shown.value) end }
+            items[i] = { text = shown.name, line = i == 2, action = function() answer.pick(shown.value) end }
         end
         menu.fill(items)
     end
@@ -1405,7 +1408,7 @@ local function buildBrowser(panel)
     local search = newSearchBox(panel)
     search:SetPoint("TOPLEFT", panel, "TOPLEFT", SEARCH_X, -SEARCH_Y)
     local funnel = newFunnel(panel)
-    local weaponType = newDropdown(panel, WEAPON_WIDTH, State.SelectWeaponType)
+    local weaponType = newDropdown(panel, WEAPON_WIDTH)
     weaponType:SetPoint("LEFT", panel, "TOPLEFT", WEAPON_X, -WEAPON_CENTRE)
 
     -- the inset under the grid, the status line and paging; without the
@@ -1616,7 +1619,7 @@ local function buildBrowser(panel)
         local view = State.View()
         count:SetText(view.count)
         for i, button in ipairs(slotButtons) do button.ring:SetShown(view.slots[i].selected) end
-        weaponType.draw(view.weaponTypes)
+        weaponType.draw(view.weaponTypes or view.armorTypes)
         funnel.draw(view)
         search.draw(view.search)
         local openIndex

@@ -131,7 +131,8 @@ TC.Locales.itIT = { name = "Italiano", strings = {
     MENU_SCAN = "Scansiona i prezzi all'apertura della scheda",
     RESET_FILTERS = "Reimposta filtri",
     MENU_SETTINGS = "Impostazioni…",
-    ALL_WEAPON_TYPES = "Tutti i tipi di arma",
+    ALL_WEAPON_TYPES = "Tutte le armi",
+    ALL_ARMOR_TYPES = "Tutte le armature",
 
     -- the count, the status line and paging
     COUNT_APPEARANCES = { one = "%d aspetto", other = "%d aspetti" },
@@ -191,6 +192,8 @@ TC.Locales.itIT = { name = "Italiano", strings = {
     NO_MATCHES = "Nessun risultato",
     EMPTY_NO_SLOT = "Nessun aspetto per lo slot %s.",
     EMPTY_NO_SLOT_CLASS = "Nessun aspetto per lo slot %s e la classe %s.",
+    EMPTY_NO_ARMOR_TYPE = "Nessun aspetto per lo slot %s (%s).",
+    EMPTY_NO_ARMOR_TYPE_CLASS = "Nessun aspetto per lo slot %s (%s) e la classe %s.",
     EMPTY_NONE_COLLECTED = "Nessun aspetto raccolto per lo slot %s.",
     EMPTY_NONE_COLLECTED_CLASS = "Nessun aspetto raccolto per lo slot %s e la classe %s.",
     EMPTY_NONE_PENDING = "Nessun aspetto dello slot %s è stato comprato e non raccolto.",

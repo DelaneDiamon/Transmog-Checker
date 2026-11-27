@@ -36,16 +36,19 @@ local SORTS = { { value = "default", nameKey = "SORT_COLLECTIONS" }, { value = "
 -- The Source filter's entry for a source whose type it does not name.
 local OTHER_SOURCE = "other"
 
--- The six choices kept between sessions (slice B, the slot slice C, the
+-- The seven choices kept between sessions (slice B, the slot slice C, the
 -- class slice D2), each with its default: Scan when shown, Show, For sale
--- only, the sort, the slot (the first of the slot row, Head) and the class:
+-- only, the sort, the slot (the first of the slot row, Head), the class:
 -- "all" for All classes, else "own", the character's own (a single other
 -- class is not kept, addon-settings v1: it would follow the player onto
--- another character). saved is the table they are kept in:
+-- another character), and the armor type: "all" for All armor types, else
+-- its key (ARMOR_TYPES). saved is the table they are kept in:
 -- TransmogCheckerDB.browser once State.Bind handed it over, a table of this
 -- file's own before.
 local DEFAULTS = { scanWhenShown = true, show = "notCollected", forSaleOnly = false, sort = "priceLow", slot = TC.Slots[1].key,
-    class = "own" }
+    class = "own", armorType = "all" }
+-- The armor type dropdown's values (TC.Appearances.ArmorTypes).
+local ARMOR_TYPES = { Cloth = true, Leather = true, Mail = true, Plate = true }
 local saved = {}
 
 local function isSort(value)
@@ -72,7 +75,8 @@ local function savedValues(t)
     local slot = type(t.slot) == "string" and TC.Slots[t.slot] and t.slot or DEFAULTS.slot
     return { scanWhenShown = flag(t.scanWhenShown, DEFAULTS.scanWhenShown), show = show,
         forSaleOnly = flag(t.forSaleOnly, DEFAULTS.forSaleOnly), sort = isSort(t.sort) and t.sort or DEFAULTS.sort,
-        slot = slot, class = t.class == "all" and "all" or DEFAULTS.class }
+        slot = slot, class = t.class == "all" and "all" or DEFAULTS.class,
+        armorType = ARMOR_TYPES[t.armorType] and t.armorType or DEFAULTS.armorType }
 end
 -- Takes t as the saved table: its values as the state takes them are
 -- written back into it, so it holds no malformed value.
@@ -170,10 +174,12 @@ local function startView()
     -- class: a class id or ALL_CLASSES, nil for the character's own class;
     -- search: the Search box's text; filter: Show; forSaleOnly, sort: as
     -- saved; sourcesOff: the Source filter's unticked entries (a source
-    -- type, or OTHER_SOURCE), none at the start
+    -- type, or OTHER_SOURCE), none at the start; armorType: as saved, nil
+    -- for All armor types
     local start = savedValues(saved)
     return { slot = start.slot, filter = start.show, forSaleOnly = start.forSaleOnly, sort = start.sort,
-        class = start.class == "all" and ALL_CLASSES or nil, sourcesOff = {}, page = 1, search = "" }
+        class = start.class == "all" and ALL_CLASSES or nil, sourcesOff = {}, page = 1, search = "",
+        armorType = start.armorType ~= "all" and start.armorType or nil }
 end
 view = startView()
 
@@ -218,6 +224,31 @@ end
 local function weaponTypesOf(slot, class)
     if learnt == nil or not TC.Slots[slot].weapon then return nil end
     return TC.Appearances.WeaponTypes(slot, learnt, class)
+end
+
+-- The armor types the armor type dropdown offers for the class (nil: every
+-- class): those it wears, none when it wears one alone.
+local function armorTypesOf(class)
+    local types = TC.Appearances.ArmorTypes(class)
+    return types[2] and types or {}
+end
+
+-- The chosen armor type where it narrows: on an armor slot (not a weapon,
+-- not Back, Shirt or Tabard), else nil.
+local function armorTypeOn(slot)
+    local entry = TC.Slots[slot]
+    if not entry or entry.weapon or entry.anyClass then return nil end
+    return view.armorType
+end
+
+-- The armor type goes back to All armor types, saved, when the chosen
+-- class is not offered it, as the weapon type does (fitWeaponType).
+local function fitArmorType()
+    if view.armorType == nil then return end
+    for _, armor in ipairs(armorTypesOf(chosenClass())) do
+        if armor.value == view.armorType then return end
+    end
+    view.armorType, saved.armorType = nil, DEFAULTS.armorType
 end
 
 local function keyText(key)
@@ -304,23 +335,28 @@ local function priceOf(id)
     return result and result.rows[1] and result.rows[1].minPrice
 end
 
--- The list narrowed to the weapon type and the class filter, on the client
--- (A3). An armor slot: the appearances the class can use. A weapon slot:
+-- The list narrowed to the weapon type or the armor type and the class
+-- filter, on the client (A3). An armor slot: the appearances the class can
+-- use, and with an armor type those one of whose items has it. A weapon slot:
 -- those of the chosen weapon type, else of the class's weapon types (TC-38),
 -- each weapon type's in its own order, in the order of the weapon types, an
 -- appearance once; an appearance of two weapon types shows under each.
 local function typed()
     local class = chosenClass()
+    local armorType = armorTypeOn(view.slot)
     local kinds = view.weaponType and { view.weaponType }
     if not kinds and class ~= nil and TC.Slots[view.slot].weapon then
         kinds = {}
         for i, weapon in ipairs(weaponTypesOf(view.slot, class) or {}) do kinds[i] = weapon.category end
     end
-    if kinds == nil and class == nil then return list or {} end
+    if kinds == nil and class == nil and armorType == nil then return list or {} end
     local out = {}
     if kinds == nil then
         for _, appearance in ipairs(list or {}) do
-            if TC.Appearances.UsableBy(appearance, class) then out[#out + 1] = appearance end
+            if TC.Appearances.UsableBy(appearance, class)
+                and (armorType == nil or TC.Appearances.HasArmorType(appearance, armorType)) then
+                out[#out + 1] = appearance
+            end
         end
         return out
     end
@@ -803,12 +839,14 @@ function State.Reset()
         or view.forSaleOnly ~= start.forSaleOnly or view.sort ~= start.sort or next(view.sourcesOff) ~= nil
         or view.page ~= 1 or view.open ~= nil or next(latest) ~= nil or next(checking) ~= nil or next(scans) ~= nil
         or scan ~= nil or next(failures) ~= nil or view.search ~= "" or view.class ~= start.class
+        or view.armorType ~= start.armorType
     if TC.Buy then TC.Buy.Close() end
     stopReads()
     TC.Appearances.StopWeaponTypes()
     TC.Appearances.StopLists()
     visit = visit + 1
     view = start
+    fitArmorType()
     clearResults()
     TC.Appearances.ResetLoads()
     if changed then notify() end
@@ -941,6 +979,22 @@ function State.SelectWeaponType(category)
     notify()
 end
 
+-- The armor type dropdown: an armor type the chosen class is offered
+-- (armorTypesOf), or nil for All armor types. One choice for every armor
+-- slot, kept between visits and sessions; it narrows on the client, reads
+-- nothing and goes to page 1.
+function State.SelectArmorType(value)
+    if value == view.armorType then return end
+    if value ~= nil then
+        local offered = false
+        for _, armor in ipairs(armorTypesOf(chosenClass())) do offered = offered or armor.value == value end
+        if not offered then return end
+    end
+    view.armorType, saved.armorType, view.page = value, value or DEFAULTS.armorType, 1
+    settle()
+    notify()
+end
+
 -- The weapon type goes back to all weapon types when the chosen class has
 -- not got it (TC-38).
 local function fitWeaponType()
@@ -952,8 +1006,8 @@ local function fitWeaponType()
 end
 
 -- The funnel's class choice: a class id, or ALL_CLASSES. It narrows on the client
--- (A3), keeps the slot, the other filters, the weapon type when the class
--- has it, the search and the sort, goes to page 1 and reads nothing. All
+-- (A3), keeps the slot, the other filters, the weapon type and the armor
+-- type when the class has them, the search and the sort, goes to page 1 and reads nothing. All
 -- classes is kept between visits and sessions, any other choice as the
 -- character's own.
 function State.SelectClass(value)
@@ -962,6 +1016,7 @@ function State.SelectClass(value)
     view.class, view.page = value, 1
     saved.class = value == ALL_CLASSES and "all" or "own"
     fitWeaponType()
+    fitArmorType()
     settle()
     notify()
 end
@@ -1095,13 +1150,16 @@ end
 -- The saved table (TransmogCheckerDB.browser), handed over once the client
 -- has loaded it (TransmogChecker.lua, ADDON_LOADED): its values, malformed
 -- ones as the defaults, become the view's, and each change is written into
--- it. The six values are Scan when shown, Show, For sale only, the sort,
--- the slot and the class.
+-- it. The seven values are Scan when shown, Show, For sale only, the sort,
+-- the slot, the class and the armor type (back on All armor types, saved,
+-- when the class is not offered it).
 function State.Bind(t)
     if type(t) ~= "table" then return end
     useSaved(t)
     view.filter, view.forSaleOnly, view.sort, view.page = t.show, t.forSaleOnly, t.sort, 1
     view.class = t.class == "all" and ALL_CLASSES or nil
+    view.armorType = t.armorType ~= "all" and t.armorType or nil
+    fitArmorType()
     if view.slot ~= t.slot then view.slot, view.weaponType, list = t.slot, nil, lists[t.slot] end
     settle()
 end
@@ -1114,11 +1172,11 @@ end
 
 -- Whether Reset filters would change nothing: Show Not collected (slice G),
 -- For sale only off,
--- every Source entry ticked, a neutral class, all weapon types, no search
--- text and the sort Price: low to high.
+-- every Source entry ticked, a neutral class, all weapon types, all armor
+-- types, no search text and the sort Price: low to high.
 local function filtersAtStart()
     return view.filter == DEFAULTS.show and view.forSaleOnly == DEFAULTS.forSaleOnly and not next(view.sourcesOff)
-        and classNeutral() and view.weaponType == nil and view.search == ""
+        and classNeutral() and view.weaponType == nil and view.armorType == nil and view.search == ""
         and view.sort == DEFAULTS.sort
 end
 
@@ -1130,6 +1188,7 @@ function State.ResetFilters()
     saved.show, saved.forSaleOnly, saved.sort = view.filter, view.forSaleOnly, view.sort
     if not classNeutral() then view.class, saved.class = nil, DEFAULTS.class end
     view.weaponType, view.search = nil, ""
+    view.armorType, saved.armorType = nil, DEFAULTS.armorType
     narrowed()
 end
 
@@ -1358,11 +1417,33 @@ end
 -- which lists the items it had learnt. The body comes from the newest read,
 -- a check or the slot's scan. A row's name is nil while it has not loaded;
 -- a found row carries its item's id, for the head's icon.
--- The foot's button is off while a check runs.
+-- The foot's button is off while a check runs. With an armor type chosen,
+-- only the items of that type are listed, in the rows and in the head.
 local function itemList()
     local appearance = view.open
     local id = appearance.id
     local run, result, know = checking[id], latest[id] or scanResult(id), known[id]
+    local armorType = armorTypeOn(appearance.slot)
+    if armorType then
+        local function ofType(itemID) return TC.Appearances.ItemArmorType(itemID) == armorType end
+        local function only(entries, idOf)
+            if not entries then return nil end
+            local out = {}
+            for _, entry in ipairs(entries) do
+                if ofType(idOf(entry)) then out[#out + 1] = entry end
+            end
+            return out
+        end
+        local function itemID(item) return item.itemID end
+        if know then know = { items = only(know.items, itemID), all = only(know.all, itemID) } end
+        if result then
+            local narrow = {}
+            for k, v in pairs(result) do narrow[k] = v end
+            narrow.items = only(result.items, itemID)
+            narrow.rows = only(result.rows, function(row) return row.itemKey.itemID end)
+            result = narrow
+        end
+    end
     local slot = TC.Slots[appearance.slot]
     local out = {
         appearance = appearance, collected = collected[id] == true, weapon = slot.weapon,
@@ -1480,7 +1561,32 @@ local function weaponDropdown()
         entries[#entries + 1] = { name = weapon.name, value = weapon.category, selected = selected }
         if selected then text = weapon.name end
     end
-    return { text = text, entries = entries }
+    return { text = text, entries = entries, pick = State.SelectWeaponType }
+end
+
+-- The armor type dropdown of an armor slot, in the weapon type's place:
+-- "All armor types" first (value nil), then the armor types the chosen
+-- class wears, named by the client; nil on the other slots and for a
+-- class of one armor type.
+local function armorDropdown()
+    local slot, types = TC.Slots[view.slot], armorTypesOf(chosenClass())
+    if slot.weapon or slot.anyClass or not types[1] then return nil end
+    local entries = { { name = L.ALL_ARMOR_TYPES, selected = view.armorType == nil } }
+    local text = L.ALL_ARMOR_TYPES
+    for _, armor in ipairs(types) do
+        local selected = armor.value == view.armorType
+        entries[#entries + 1] = { name = armor.name, value = armor.value, selected = selected }
+        if selected then text = armor.name end
+    end
+    return { text = text, entries = entries, pick = State.SelectArmorType }
+end
+
+-- The name of the chosen armor type, as the dropdown gives it.
+local function armorName(value)
+    for _, armor in ipairs(TC.Appearances.ArmorTypes(nil)) do
+        if armor.value == value then return armor.name end
+    end
+    return value
 end
 
 -- The funnel's Show entries: the Filter's values, the chosen one marked;
@@ -1942,7 +2048,7 @@ function State.View()
     end
     local answer = {
         filter = filterName, page = view.page, slots = slotRow(),
-        weaponTypes = weaponDropdown(), classes = classDropdown(), search = view.search,
+        weaponTypes = weaponDropdown(), armorTypes = armorDropdown(), classes = classDropdown(), search = view.search,
         filters = showEntries(view.filter), forSaleOnly = view.forSaleOnly, sources = sourceEntriesOf(),
         sorts = sortEntries(), scanWhenShown = saved.scanWhenShown, filtersChanged = not filtersAtStart(),
         tiles = {}, count = "", pageText = "", paging = false, previousEnabled = false, nextEnabled = false,
@@ -2007,6 +2113,12 @@ function State.View()
     end
     if scanning or #appearances > 0 then
         -- tiles, or placeholders while the scan runs
+    elseif not typed()[1] and armorTypeOn(view.slot) then
+        -- the armor type leaves nothing of the slot
+        local armor = armorName(view.armorType)
+        answer.empty = { title = L.NO_MATCHES, text = className
+            and L.EMPTY_NO_ARMOR_TYPE_CLASS:format(slotName, armor, className)
+            or L.EMPTY_NO_ARMOR_TYPE:format(slotName, armor) }
     elseif not typed()[1] then
         -- the class filter or the weapon type leaves nothing of the slot (spec 2.9)
         answer.empty = { title = L.NO_MATCHES, text = forSlot(L.EMPTY_NO_SLOT, L.EMPTY_NO_SLOT_CLASS) }

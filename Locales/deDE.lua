@@ -132,6 +132,7 @@ TC.Locales.deDE = { name = "Deutsch", strings = {
     RESET_FILTERS = "Filter zurücksetzen",
     MENU_SETTINGS = "Einstellungen…",
     ALL_WEAPON_TYPES = "Alle Waffentypen",
+    ALL_ARMOR_TYPES = "Alle Rüstungstypen",
 
     -- the count, the status line and paging
     COUNT_APPEARANCES = { one = "%d Vorlage", other = "%d Vorlagen" },
@@ -191,6 +192,8 @@ TC.Locales.deDE = { name = "Deutsch", strings = {
     NO_MATCHES = "Keine Treffer",
     EMPTY_NO_SLOT = "Keine %s-Vorlagen.",
     EMPTY_NO_SLOT_CLASS = "Keine %s-Vorlagen für %s.",
+    EMPTY_NO_ARMOR_TYPE = "Keine %s-Vorlagen (%s).",
+    EMPTY_NO_ARMOR_TYPE_CLASS = "Keine %s-Vorlagen (%s) für %s.",
     EMPTY_NONE_COLLECTED = "Keine gesammelten %s-Vorlagen.",
     EMPTY_NONE_COLLECTED_CLASS = "Keine gesammelten %s-Vorlagen für %s.",
     EMPTY_NONE_PENDING = "Keine %s-Vorlage ist gekauft und nicht gesammelt.",

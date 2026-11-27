@@ -3439,8 +3439,37 @@ test("whole: weapon tiles show on their own 24 model frames, made on the first w
         "the head's type line")
     equal(models(), 24 + 18, "no model made for the item list")
     buttons[1].scripts.OnClick(buttons[1])
-    check(not visible(dropdown), "the dropdown hidden on head")
+    -- the armor type takes its place on head
+    check(visible(dropdown) and dropdown.text == "All armor types", "the armor type dropdown on head")
     check(visible(frames[1].model) and not visible(frames[1].weaponModel), "armor model back on head")
+    equal(#c.misuse, 0, "misuse of the fake: " .. table.concat(c.misuse, "; "))
+end)
+
+test("whole: the armor type dropdown sits in the weapon type's place on armor slots, narrows the tiles and is hidden on Back and weapon slots", function()
+    local c, tabs = visitTwice({ appearances = manySlots() })
+    tabs[1].scripts.OnClick(tabs[1])
+    local dropdown = selector(c, 157)
+    check(dropdown and not visible(dropdown), "hidden on head for a Warlock (cloth only)")
+    TC.BrowserState.SelectClass(1)
+    check(visible(dropdown), "shown on head for a Warrior")
+    equal(dropdown.text, "All armor types", "its text")
+    local texts, choose = openMenu(c, dropdown)
+    equal(table.concat(texts, "|"), "All armor types|-|Subclass 4.1|Subclass 4.2|Subclass 4.3|Subclass 4.4", "its entries")
+    local sends = #c.ah.sends
+    check(choose("Subclass 4.4"), "a Plate entry")
+    equal(dropdown.text, "Subclass 4.4", "its text after the choice")
+    -- manySlots' items are the fake's cloth default: no plate head
+    check(textShown(c, "No Head appearances (Subclass 4.4) for Warrior."), "the empty state")
+    equal(#c.ah.sends, sends, "no browse for the armor type")
+    local buttons = slotButtons(c)
+    buttons[3].scripts.OnClick(buttons[3])
+    check(not visible(dropdown), "hidden on back")
+    buttons[12].scripts.OnClick(buttons[12])
+    c.advance(1)
+    check(visible(dropdown), "the weapon type on main hand")
+    equal(dropdown.text, "All weapon types", "the weapon type's text")
+    buttons[10].scripts.OnClick(buttons[10])
+    equal(dropdown.text, "Subclass 4.4", "Plate again on legs")
     equal(#c.misuse, 0, "misuse of the fake: " .. table.concat(c.misuse, "; "))
 end)
 
@@ -3866,6 +3895,205 @@ test("class: without the class list calls the dropdown holds All classes and the
     equal(table.concat(names, "|"), "All classes|Warlock (this character)", "entries")
     equal(d.text, "Warlock", "chosen")
 end)
+
+---------------------------------------------------------------- Armor type
+
+-- in a block of its own, for the 200-local limit of the main chunk
+do
+-- The armor type dropdown's entry names, "|" between them, or "hidden".
+local function armorNames()
+    local d = TC.BrowserState.View().armorTypes
+    if not d then return "hidden" end
+    local names = {}
+    for i, e in ipairs(d.entries) do names[i] = e.name end
+    return table.concat(names, "|")
+end
+local ALL_FOUR = "All armor types|Subclass 4.1|Subclass 4.2|Subclass 4.3|Subclass 4.4"
+
+test("armor type: All armor types, then the types the class wears in Cloth, Leather, Mail, Plate order, named by the client; hidden for a class of one type", function()
+    classState()
+    equal(armorNames(), "hidden", "Warlock wears cloth only")
+    TC.BrowserState.SelectClass(1)
+    equal(armorNames(), ALL_FOUR, "Warrior")
+    local d = TC.BrowserState.View().armorTypes
+    equal(d.text, "All armor types", "the text at the start")
+    equal(d.entries[1].selected and d.entries[1].value == nil, true, "All armor types chosen, value nil")
+    equal(d.entries[5].value, "Plate", "Plate's value")
+    TC.BrowserState.SelectClass(3)
+    equal(armorNames(), "All armor types|Subclass 4.1|Subclass 4.2|Subclass 4.3", "Hunter")
+    TC.BrowserState.SelectClass(11)
+    equal(armorNames(), "All armor types|Subclass 4.1|Subclass 4.2", "Druid")
+    TC.BrowserState.SelectClass(8)
+    equal(armorNames(), "hidden", "Mage")
+    TC.BrowserState.SelectClass("all")
+    equal(armorNames(), ALL_FOUR, "All classes")
+end)
+
+test("armor type: shown on the eight armor slots only, never with the weapon type", function()
+    classState()
+    TC.BrowserState.SelectClass(1)
+    local armor = { head = true, shoulder = true, chest = true, waist = true, legs = true, feet = true, wrist = true, hands = true }
+    for _, slot in ipairs(TC.Slots) do
+        TC.BrowserState.SelectSlot(slot.key)
+        local v = TC.BrowserState.View()
+        equal(v.armorTypes ~= nil, armor[slot.key] == true, slot.key .. ": the armor type dropdown")
+        check(not (v.armorTypes and v.weaponTypes), slot.key .. ": never both")
+    end
+end)
+
+test("armor type: a choice narrows the list and its count to appearances with an item of that type; no type and Generic show under All armor types only", function()
+    local c = classState()
+    TC.BrowserState.SelectClass(1)
+    local sends = #c.ah.sends
+    TC.BrowserState.SelectArmorType("Plate")
+    equal(shownIDs(), "104,107", "Plate: the plate helm and the plate-and-leather one")
+    equal(TC.BrowserState.View().count, "2 appearances", "the count")
+    equal(TC.BrowserState.View().armorTypes.text, "Subclass 4.4", "the text names the type")
+    TC.BrowserState.SelectArmorType("Leather")
+    equal(shownIDs(), "102,107", "Leather")
+    TC.BrowserState.SelectArmorType("Mail")
+    equal(shownIDs(), "103", "Mail")
+    TC.BrowserState.SelectArmorType("Cloth")
+    equal(shownIDs(), "101", "Cloth")
+    TC.BrowserState.SelectArmorType(nil)
+    equal(shownIDs(), "101,102,103,104,105,106,107", "All armor types: as before")
+    equal(#c.ah.sends, sends, "nothing read from the auction house")
+end)
+
+test("armor type: the choice applies before Show, For sale only, Search and the sort, and goes to page 1", function()
+    local o = classFixture(30)
+    local c = bootState(o)
+    TC.BrowserState.Refresh()
+    TC.BrowserState.SetFilter("all")
+    TC.BrowserState.SelectClass("all")
+    TC.BrowserState.NextPage()
+    equal(TC.BrowserState.View().page, 2, "page 2 of 37 appearances")
+    TC.BrowserState.SelectArmorType("Leather")
+    local v = TC.BrowserState.View()
+    equal(v.page, 1, "page 1 after the choice")
+    equal(v.paging, false, "one page")
+    TC.BrowserState.SetSearch("mixed")
+    equal(shownIDs(), "107", "Search on the narrowed list")
+    TC.BrowserState.SetSearch("")
+    for _, itemID in ipairs({ 1021, 1041 }) do
+        c.ah.listings[#c.ah.listings + 1] = listing(o.items[itemID].name, itemID, itemID)
+    end
+    sweep()
+    c.advance(10)
+    equal(shownIDs(), "102", "For sale only on the narrowed list")
+    equal(TC.BrowserState.View().count, "1 appearance, 1 for sale", "the count")
+end)
+
+test("armor type: the item list of an appearance of two types lists only the items of the chosen type", function()
+    local c = classState()
+    TC.BrowserState.SelectClass(1)
+    openChecked(c, tileOf(107))
+    local function rows()
+        local out = {}
+        for i, row in ipairs(TC.BrowserState.View().list.rows) do out[i] = row.name end
+        return table.concat(out, ",")
+    end
+    equal(rows(), "Mixed Helm,Mixed Cap", "All armor types: both items, as before")
+    TC.BrowserState.SelectArmorType("Plate")
+    equal(rows(), "Mixed Helm", "Plate: the plate item")
+    TC.BrowserState.SelectArmorType("Leather")
+    equal(rows(), "Mixed Cap", "Leather: the leather item")
+end)
+
+test("armor type: kept between visits and sessions, one choice for every armor slot", function()
+    local c = classState()
+    TC.BrowserState.SelectClass("all")
+    TC.BrowserState.SelectArmorType("Plate")
+    equal(TransmogCheckerDB.browser.armorType, "Plate", "saved")
+    TC.BrowserState.SelectSlot("legs")
+    equal(TC.BrowserState.View().armorTypes.text, "Subclass 4.4", "Plate on legs")
+    TC.BrowserState.SelectSlot("back")
+    TC.BrowserState.SelectSlot("head")
+    equal(TC.BrowserState.View().armorTypes.text, "Subclass 4.4", "Plate after Back")
+    TC.BrowserState.Reset()
+    TC.BrowserState.Refresh()
+    equal(TC.BrowserState.View().armorTypes.text, "Subclass 4.4", "a new visit keeps Plate")
+    equal(shownIDs(), "104,107", "and narrows by it")
+    -- after a reload
+    local o = classFixture()
+    o.saved = { show = "all", class = "all", armorType = "Mail" }
+    bootState(o)
+    TC.BrowserState.Refresh()
+    equal(TC.BrowserState.View().armorTypes.text, "Subclass 4.3", "restored after a reload")
+    equal(shownIDs(), "103", "and narrows by it")
+    -- a malformed value is All armor types
+    o.saved = { show = "all", class = "all", armorType = "Silk" }
+    bootState(o)
+    equal(TC.BrowserState.View().armorTypes.text, "All armor types", "a malformed value")
+    equal(o.saved.armorType, "all", "written back as all")
+end)
+
+test("armor type: a class that cannot wear the chosen type goes back to All armor types, and that is saved", function()
+    classState()
+    TC.BrowserState.SelectClass(1)
+    TC.BrowserState.SelectArmorType("Leather")
+    TC.BrowserState.SelectClass(3)
+    equal(TC.BrowserState.View().armorTypes.text, "Subclass 4.2", "Hunter keeps Leather")
+    TC.BrowserState.SelectArmorType("Mail")
+    TC.BrowserState.SelectClass(4)
+    equal(TC.BrowserState.View().armorTypes.text, "All armor types", "Rogue has no Mail")
+    equal(TransmogCheckerDB.browser.armorType, "all", "saved")
+    TC.BrowserState.SelectClass(1)
+    equal(TC.BrowserState.View().armorTypes.text, "All armor types", "back on Warrior: still All")
+    TC.BrowserState.SelectArmorType("Cloth")
+    TC.BrowserState.SelectClass(8)
+    TC.BrowserState.SelectClass(1)
+    equal(TC.BrowserState.View().armorTypes.text, "All armor types", "Mage hides the dropdown, so Cloth is dropped")
+    -- a saved type the own class (Warlock) cannot wear, after a reload
+    local o = classFixture()
+    o.saved = { show = "all", armorType = "Plate" }
+    bootState(o)
+    TC.BrowserState.Refresh()
+    equal(shownIDs(), "101,105,106", "the Warlock's list, not narrowed")
+    equal(o.saved.armorType, "all", "saved as all")
+end)
+
+test("armor type: Reset filters clears it; a chosen type lights the mark as the weapon type does", function()
+    classState()
+    TC.BrowserState.SelectClass("all")
+    TC.BrowserState.ResetFilters()
+    equal(TC.BrowserState.View().filtersChanged, false, "nothing to reset")
+    TC.BrowserState.SelectArmorType("Mail")
+    equal(TC.BrowserState.View().filtersChanged, true, "a chosen type is an active filter")
+    TC.BrowserState.ResetFilters()
+    local v = TC.BrowserState.View()
+    equal(v.armorTypes.text, "All armor types", "back on All armor types")
+    equal(TransmogCheckerDB.browser.armorType, "all", "saved")
+    equal(v.filtersChanged, false, "nothing to reset after")
+    equal(v.filter, "Not collected", "Show back on its default too")
+end)
+
+test("armor type: an empty list names the slot and the type, and the class where one is chosen", function()
+    local o = classFixture()
+    local list = {}
+    for _, a in ipairs(o.appearances) do if a.id == 104 then list[#list + 1] = a end end
+    o.appearances = list
+    bootState(o)
+    TC.BrowserState.Refresh()
+    TC.BrowserState.SetFilter("all")
+    TC.BrowserState.SelectClass("all")
+    TC.BrowserState.SelectArmorType("Cloth")
+    local v = TC.BrowserState.View()
+    equal(v.count, "0 appearances", "the count")
+    equal(v.empty and v.empty.title, "No matches", "the title")
+    equal(v.empty and v.empty.text, "No Head appearances (Subclass 4.1).", "All classes")
+    TC.BrowserState.SelectClass(1)
+    v = TC.BrowserState.View()
+    equal(v.empty and v.empty.text, "No Head appearances (Subclass 4.1) for Warrior.", "Warrior")
+end)
+
+test("armor type: without GetItemInfoInstant there is no dropdown and nothing is hidden", function()
+    classState(0, { noItemInstant = true })
+    TC.BrowserState.SelectClass(1)
+    equal(armorNames(), "hidden", "no dropdown")
+    equal(shownIDs(), "101,102,103,104,105,106,107", "the whole list")
+end)
+end
 
 ---------------------------------------------------------------- Search (TC-32)
 
@@ -10284,8 +10512,9 @@ test("slice B saved: the defaults on a first run, the tooltip's settings beside 
     local keys = {}
     for k in pairs(b) do keys[#keys + 1] = k end
     table.sort(keys)
-    -- ledger (slice D2): the class is the sixth saved value
-    equal(table.concat(keys, ","), "class,forSaleOnly,scanWhenShown,show,slot,sort", "the six values only (slice C: the slot, D2: the class)")
+    -- ledger (slice D2): the class is the sixth saved value; the armor type the seventh
+    equal(table.concat(keys, ","), "armorType,class,forSaleOnly,scanWhenShown,show,slot,sort", "the seven values only (slice C: the slot, D2: the class, the armor type)")
+    equal(b.armorType, "all", "the armor type: All armor types")
     equal(b.class, "own", "the class: your own")
     local v = TC.BrowserState.View()
     equal(v.filter .. "/" .. tostring(v.forSaleOnly) .. "/" .. tostring(v.scanWhenShown), "Not collected/false/true", "the view")
@@ -10312,8 +10541,8 @@ test("slice B saved: each value is written on change and loaded in the next sess
         "false/collected/true/priceHigh", "written on change")
     local n = 0
     for _ in pairs(saved) do n = n + 1 end
-    -- ledger (slice D2): the class is saved too, a single class as your own
-    equal(n, 6, "Source and search are not saved (the fifth is the slot, slice C, the sixth the class, D2)")
+    -- ledger (slice D2): the class is saved too, a single class as your own; the armor type too
+    equal(n, 7, "Source and search are not saved (the fifth is the slot, slice C, the sixth the class, D2, the seventh the armor type)")
     equal(saved.class, "own", "Mage is kept as your own class")
     -- the next session: the saved table as the client loads it
     local d = boot({ saved = false })
@@ -12843,6 +13072,34 @@ test("i18n C widths: in every language the auction house tab is as wide as its l
         noErrors(c, code)
     end
     equal(table.concat(out, "; "), "", "tabs cut")
+end)
+
+-- The band dropdown's text room: from 8 in from its left to its arrow,
+-- which ends 1 past its right edge (MenuTemplates.xml:15-25) and is as wide
+-- as its atlas, 32 as the fake's GetAtlasInfo answers (the client's size is
+-- unverified).
+local function bandRoom(dropdown) return dropdown.width - 8 - 32 + 1 end
+test("i18n widths: in every language the band dropdown fits All weapon types and All armor types", function()
+    local out = {}
+    for _, code in ipairs({ "enUS", unpack(CODES) }) do
+        local c, tabs = visitTwice({ locale = code, appearances = manySlots() })
+        tabs[1].scripts.OnClick(tabs[1])
+        TC.BrowserState.SelectClass(1)
+        local dropdown = selector(c, 157)
+        local buttons = slotButtons(c)
+        for _, at in ipairs({ { 1, TC.L.ALL_ARMOR_TYPES }, { 12, TC.L.ALL_WEAPON_TYPES } }) do
+            buttons[at[1]].scripts.OnClick(buttons[at[1]])
+            c.advance(1)
+            check(visible(dropdown), code .. ": the dropdown on slot " .. at[1])
+            equal(dropdown.text, at[2], code .. ": its text")
+            local width = Fake.columns(dropdown.text) * 6
+            if width > bandRoom(dropdown) then
+                out[#out + 1] = ("%s %q: %d wide, the dropdown has %d"):format(code, dropdown.text, width, bandRoom(dropdown))
+            end
+        end
+        noErrors(c, code)
+    end
+    equal(table.concat(out, "; "), "", "texts cut")
 end)
 
 test("i18n C widths: in every language the funnel's own list fits each entry; Blizzard's menu is given no maximum width", function()

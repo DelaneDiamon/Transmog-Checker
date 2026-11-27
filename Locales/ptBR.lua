@@ -133,7 +133,8 @@ end, strings = {
     MENU_SCAN = "Verificar preços ao abrir a aba",
     RESET_FILTERS = "Redefinir filtros",
     MENU_SETTINGS = "Configurações…",
-    ALL_WEAPON_TYPES = "Todos os tipos de arma",
+    ALL_WEAPON_TYPES = "Todas as armas",
+    ALL_ARMOR_TYPES = "Todas as armaduras",
 
     -- the count, the status line and paging
     COUNT_APPEARANCES = { one = "%d aparência", other = "%d aparências" },
@@ -193,6 +194,8 @@ end, strings = {
     NO_MATCHES = "Nenhum resultado",
     EMPTY_NO_SLOT = "Nenhuma aparência no espaço %s.",
     EMPTY_NO_SLOT_CLASS = "Nenhuma aparência no espaço %s para %s.",
+    EMPTY_NO_ARMOR_TYPE = "Nenhuma aparência no espaço %s (%s).",
+    EMPTY_NO_ARMOR_TYPE_CLASS = "Nenhuma aparência no espaço %s (%s) para %s.",
     EMPTY_NONE_COLLECTED = "Nenhuma aparência coletada no espaço %s.",
     EMPTY_NONE_COLLECTED_CLASS = "Nenhuma aparência coletada no espaço %s para %s.",
     EMPTY_NONE_PENDING = "Nenhuma aparência do espaço %s está comprada e não coletada.",

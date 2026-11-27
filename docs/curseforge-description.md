@@ -41,7 +41,7 @@ The **Filter** button holds the filters and the sort:
 - Reset filters, while a filter or the sort differs from the start.
 - Settings….
 
-Weapon slots also have a weapon type dropdown, and the Search box narrows the tiles by item name. **Scan slot** reads the slot again whenever you want fresh prices.
+Weapon slots also have a weapon type dropdown, and the Search box narrows the tiles by item name. Armor slots have an armor type dropdown (All armor types, then each type your chosen class can wear), kept between sessions. **Scan slot** reads the slot again whenever you want fresh prices.
 
 [Screenshot 5: the Filter menu]
 
