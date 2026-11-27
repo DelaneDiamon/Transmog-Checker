@@ -157,6 +157,34 @@ end
 --   sets, setInfo, noSets: C_TransmogSets (see there)
 --   items also take minLevel and equipLoc (GetItemInfo, GetItemInfoInstant)
 --   an appearance's sourceTypes: the source type of each source (default 4)
+--   filterCategory  Collections' search-and-filter category at the start
+--                   (TC-43, measured in game on 2026-11-26): the one category
+--                   whose list Collections' filters narrow. Its list leaves
+--                   out the not collected appearances while uncollectedShown
+--                   is false, the collected ones while collectedShown is
+--                   false, and an appearance whose filteredOut is true (what
+--                   else narrowed 245 to 80 in game); hidden visuals stay.
+--                   GetCategoryTotal is never narrowed;
+--                   GetFilteredCategoryTotal is the total less what the
+--                   filters leave out, so below it only for that category.
+--                   An appearance whose unlisted is true is counted in both
+--                   totals and never listed (a category short for another
+--                   reason, TC-43 QA E1).
+--   filterLag      when a SetSearchAndFilterCategory write reaches a list
+--                   read: nil at once, "frame" on the next frame, "never"
+--   filterCategoryFires  SetSearchAndFilterCategory fires
+--                   TRANSMOG_COLLECTION_UPDATED at once
+--   noFilterCategorySet  C_TransmogCollection.SetSearchAndFilterCategory is nil
+--   noCategoryTotal C_TransmogCollection.GetCategoryTotal is nil
+--   listRaisesOn    { [n] = true }: the nth GetCategoryAppearances call raises
+--   listRaisesAway  GetCategoryAppearances raises while the filter category
+--                   read is Paired (29)
+--   noFilteredTotal C_TransmogCollection.GetFilteredCategoryTotal is nil
+--   totalRaises     GetCategoryTotal raises
+--   categoryRaisesOn { [n] = true }: the nth SetSearchAndFilterCategory call
+--                   raises and changes nothing (not in c.writes)
+--   c.writes: every write to Collections' class filter and search-and-filter
+--   category, in order, as { kind = "class" or "category", value, at }
 function Fake.new(opts)
     opts = opts or {}
     local c = {
@@ -167,8 +195,9 @@ function Fake.new(opts)
             uncollectedShown = opts.uncollectedShown == nil and false or opts.uncollectedShown,
             collectedShown = opts.collectedShown == nil and true or opts.collectedShown,
             search = opts.search or "",
+            filterCategory = opts.filterCategory,
         },
-        listCalls = 0, listed = {}, categoryInfoCalls = 0, itemAppearances = {},
+        writes = {}, listCalls = 0, listed = {}, categoryInfoCalls = 0, itemAppearances = {},
     }
     local appearances = opts.appearances or Fake.appearances(370, 5)
     local byID, collectedSources = {}, {}
@@ -1351,6 +1380,13 @@ function Fake.new(opts)
     -- the class filter before the latest write, while that write is in this
     -- frame: what GetCategoryInfo answers by under lagByOne
     local lagged
+    -- the search-and-filter category list reads are narrowed by (filterLag)
+    local applied = col.filterCategory
+    local function narrowedOut(a)
+        if a.hide then return false end
+        local isCollected = a.collectedSource ~= nil
+        return a.filteredOut or (isCollected and not col.collectedShown) or (not isCollected and not col.uncollectedShown)
+    end
     local T = {
         GetCategoryAppearances = function(category, location)
             c.listCalls = c.listCalls + 1
@@ -1358,6 +1394,8 @@ function Fake.new(opts)
             misuse(SLOT_OF_CATEGORY[category] ~= nil, "GetCategoryAppearances category " .. tostring(category))
             misuse(type(location) == "table" and location.slotID == SLOT_OF_CATEGORY[category] and location.type == 0
                 and location.modification == 0, "GetCategoryAppearances location for " .. tostring(category))
+            if (opts.listRaisesOn or {})[c.listCalls] then error("fake: GetCategoryAppearances failed") end
+            if opts.listRaisesAway and applied == 29 then error("fake: GetCategoryAppearances failed pointed away") end
             if opts.listRaisesFor == category then error("fake: GetCategoryAppearances failed for " .. category) end
             if opts.listRaises == true or (tonumber(opts.listRaises) or 0) >= c.listCalls then
                 error("fake: GetCategoryAppearances failed")
@@ -1368,7 +1406,7 @@ function Fake.new(opts)
             -- the client's own order is by id, descending: not Collections' order
             for i = #appearances, 1, -1 do
                 local a = appearances[i]
-                if a.category == category then
+                if a.category == category and not a.unlisted and not (category == applied and narrowedOut(a)) then
                     -- the fields of TransmogCategoryAppearanceInfo
                     -- (TransmogItemsDocumentation.lua:1190-1207)
                     result[#result + 1] = { visualID = a.id, uiOrder = a.uiOrder, minIlvl = a.minIlvl,
@@ -1378,6 +1416,45 @@ function Fake.new(opts)
                 end
             end
             return result
+        end,
+        -- TransmogItemsDocumentation.lua:317-330: every appearance of the
+        -- category, hidden visuals too, under no filter (in game: feet 371
+        -- of 371 entries, head 245 while its list had 1). While listNil or
+        -- listEmpty makes the list answer nothing, the total is 0 too: a
+        -- category the client has not loaded (assumed, unverified in game).
+        GetCategoryTotal = function(category)
+            if opts.totalRaises then error("fake: GetCategoryTotal failed") end
+            if opts.listNil or (opts.listEmpty or 0) >= c.listCalls then return 0 end
+            local n = 0
+            for _, a in ipairs(appearances) do
+                if a.category == category then n = n + 1 end
+            end
+            return n
+        end,
+        -- TransmogItemsDocumentation.lua:432-445; Collections' progress bar
+        -- (Blizzard_Wardrobe.lua:1189-1190). In game: head 1 of 245 while
+        -- the filter category was Head, feet 371 of 371.
+        GetFilteredCategoryTotal = function(category)
+            if opts.listNil or (opts.listEmpty or 0) >= c.listCalls then return 0 end
+            local n = 0
+            for _, a in ipairs(appearances) do
+                if a.category == category and not (category == applied and narrowedOut(a)) then n = n + 1 end
+            end
+            return n
+        end,
+        -- TransmogItemsDocumentation.lua:1085-1093
+        SetSearchAndFilterCategory = function(category)
+            misuse(type(category) == "number", "SetSearchAndFilterCategory with " .. type(category))
+            c.categorySetCalls = (c.categorySetCalls or 0) + 1
+            if (opts.categoryRaisesOn or {})[c.categorySetCalls] then error("fake: SetSearchAndFilterCategory failed") end
+            c.writes[#c.writes + 1] = { kind = "category", value = category, at = c.now }
+            col.filterCategory = category
+            if opts.filterLag == "frame" then
+                after(c.FRAME, function() applied = col.filterCategory end)
+            elseif opts.filterLag ~= "never" then
+                applied = category
+            end
+            if opts.filterCategoryFires then c.fire("TRANSMOG_COLLECTION_UPDATED") end
         end,
         GetAllAppearanceSources = function(id)
             local a = byID[id]
@@ -1465,6 +1542,7 @@ function Fake.new(opts)
         end,
         SetClassFilter = function(classID)
             c.setClassCalls = (c.setClassCalls or 0) + 1
+            c.writes[#c.writes + 1] = { kind = "class", value = classID, at = c.now }
             if opts.setClassIgnoredFor == classID then return end
             for _, n in ipairs(opts.setClassIgnoredAt or {}) do
                 if n == c.setClassCalls then return end
@@ -1490,6 +1568,9 @@ function Fake.new(opts)
         PlayerHasTransmog = forbid("PlayerHasTransmog"),
     }
     if opts.noList then T.GetCategoryAppearances = nil end
+    if opts.noFilterCategorySet then T.SetSearchAndFilterCategory = nil end
+    if opts.noCategoryTotal then T.GetCategoryTotal = nil end
+    if opts.noFilteredTotal then T.GetFilteredCategoryTotal = nil end
     if opts.noItemTransmog then T.GetItemInfo = nil end
     C_TransmogCollection = not opts.noTransmog and T or nil
     -- ContainerDocumentation.lua:175-190, 313-325: the player's bags,

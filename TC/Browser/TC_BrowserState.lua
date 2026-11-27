@@ -79,8 +79,10 @@ local view, listener
 -- slot. learnt: every class's weapon types (LearnWeaponTypes), learnt once
 -- per visit on the first weapon slot, nil before; learning: that pass runs.
 -- noneFound: the slots whose last list read answered no appearance or raised
--- (testpass F9); they are read again on the next Refresh.
-local list, lists, collected, learnt, learning, noneFound
+-- (testpass F9); they are read again on the next Refresh. partial: the
+-- slots whose list is shown but not final (TC-43: narrowed while
+-- Collections is shown); read again on the next Refresh.
+local list, lists, collected, learnt, learning, noneFound, partial
 -- The weapon slot Scan when shown left waiting for that pass, or nil.
 local waitingSlot
 -- True while a Refresh runs: changing Collections' class filter to learn
@@ -107,7 +109,9 @@ local kept, latest, checking, waitingChecks, active, known, reading, variantName
 local scans, scan, failures, stoppedScan
 -- The source types of each appearance, read once per visit and only while
 -- the Source filter narrows: by appearance id, a set of Source entries.
-local sourcesOf
+-- unsure: the same for an appearance one of whose types the client did not
+-- give (sourceKeys).
+local sourcesOf, unsure
 -- Item variant names (TC-32). keyState: by item key, "asked" once
 -- GetItemKeyInfo was called for it, "ready" when its item's event arrived
 -- (one more read is allowed), "done" after that read. keyOf: the keys asked,
@@ -159,8 +163,8 @@ view = startView()
 
 local function clearResults()
     kept, latest, checking, waitingChecks, active, known, reading, variantNames, noAnswer = {}, {}, {}, {}, nil, {}, {}, {}, {}
-    scans, scan, failures, stoppedScan, sourcesOf = {}, nil, {}, nil, {}
-    list, lists, collected, learnt, learning, noneFound, waitingSlot = nil, {}, {}, nil, false, {}, nil
+    scans, scan, failures, stoppedScan, sourcesOf, unsure = {}, nil, {}, nil, {}, {}
+    list, lists, collected, learnt, learning, noneFound, waitingSlot, partial = nil, {}, {}, nil, false, {}, nil, {}
     keyState, keyOf, keyQueue, keyTicking = {}, {}, {}, false
     keyGen = keyGen + 1
 end
@@ -361,10 +365,11 @@ end
 -- GetAppearanceSources call, no item data asked for), a type the filter
 -- does not name, none or a read that raises as Other. Read once per visit,
 -- unless a source's type came back nil (Nilable before its item data is in,
--- AppearanceSourceDocumentation.lua:21): then it is read again on the next
--- narrowing, until every type is known.
+-- AppearanceSourceDocumentation.lua:21; for some items for good, TC-43):
+-- then it is kept only until the next Refresh or the next item names that
+-- arrive (unsure), and read again after, until every type is known.
 local function sourceKeys(appearance)
-    local keys = sourcesOf[appearance.id]
+    local keys = sourcesOf[appearance.id] or unsure[appearance.id]
     if keys then return keys end
     keys = {}
     local named, unknown = {}, false
@@ -377,7 +382,7 @@ local function sourceKeys(appearance)
         keys[(type(n) == "number" and named[n]) and n or OTHER_SOURCE] = true
     end
     if not next(keys) then keys[OTHER_SOURCE] = true end
-    if not unknown then sourcesOf[appearance.id] = keys end
+    if unknown then unsure[appearance.id] = keys else sourcesOf[appearance.id] = keys end
     return keys
 end
 
@@ -648,9 +653,21 @@ local function tryPending()
     return false
 end
 
+-- A list read that waited (TC-43) can be read again; its note is kept in
+-- lastError. Nothing is read while the tab is not shown.
+local function listReady(note)
+    if note then State.lastError = note end
+    if not away then State.Refresh() end
+end
+-- Collections' filter category not put back (TC-43) is kept in lastError.
+TC.Appearances.SetListErrorListener(function(text) State.lastError = text end)
+
 -- Reads the list if there is none and whether each appearance is collected;
 -- answers whether anything changed. An empty or failed read keeps no list,
--- so the next Refresh reads again. A weapon slot waits for its weapon types.
+-- so the next Refresh reads again. A weapon slot waits for its weapon types;
+-- a read that waits (TC.Appearances.List answers nil) is no list yet, as
+-- while it loads, and listReady reads again; a list not final (partial) is
+-- shown and read again.
 -- Answers also the error text when the list read raised.
 local function read()
     local changed = updatePending()
@@ -660,17 +677,21 @@ local function read()
         if learnt == nil then return changed end
         changed = true
     end
-    if not list then
-        local ok, result = pcall(TC.Appearances.List, slot, nil, weaponTypesOf(slot))
+    if not list or partial[slot] then
+        local ok, result, note, notFinal = pcall(TC.Appearances.List, slot, nil, weaponTypesOf(slot), listReady)
+        if ok and note then State.lastError = note end
+        if ok and result == nil then return changed end
         if not ok or type(result) ~= "table" or not result[1] then
             changed = changed or not noneFound[slot]
-            noneFound[slot] = true
+            noneFound[slot], partial[slot] = true, nil
+            -- a list not final that reads nothing now is no list either
+            if list then list, lists[slot], changed = nil, nil, true end
             if ok then return changed end
             lists[slot] = nil
             return changed, tostring(result)
         end
         list, changed = result, true
-        lists[slot], noneFound[slot] = result, nil
+        lists[slot], noneFound[slot], partial[slot] = result, nil, notFinal or nil
     end
     for _, appearance in ipairs(list) do
         local isCollected = TC.Appearances.IsCollected(appearance)
@@ -691,6 +712,7 @@ local readFailed = false
 function State.Refresh()
     if refreshing then return false end
     refreshing = true
+    unsure = {}
     local ok, changed, listError = pcall(read)
     refreshing = false
     local failure = not ok and tostring(changed) or listError
@@ -770,6 +792,7 @@ function State.Reset()
     if TC.Buy then TC.Buy.Close() end
     stopReads()
     TC.Appearances.StopWeaponTypes()
+    TC.Appearances.StopLists()
     visit = visit + 1
     view = start
     clearResults()
@@ -790,6 +813,8 @@ function State.Leave()
     -- a weapon type pass puts the class filter back at once and runs again
     -- on the next need
     TC.Appearances.StopWeaponTypes()
+    -- a list read waiting a frame puts Collections' filter category back (TC-43)
+    TC.Appearances.StopLists()
     learning, waitingSlot = false, nil
     if not next(checking) and not scan then return end
     batch(function()
@@ -954,6 +979,7 @@ TC.Appearances.SetNameListener(function()
     local function tell()
         nameWait = false
         if mine ~= visit then return end
+        unsure = {}
         settle()
         clampPage()
         notify()

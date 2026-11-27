@@ -10009,6 +10009,460 @@ test("slice B the funnel: For sale only, a Source entry and Scan when shown are 
     noErrors(c, "funnel checkboxes")
 end)
 
+---------------------------------------------------------------- TC-43
+
+-- Collections' search-and-filter category, as /tcprobe slot measured it on
+-- 2026-11-26: Head's list had 1 entry of 245 while Collections' filter
+-- category was Head with uncollected hidden; Feet listed all 371. The
+-- fixture: 40 Head appearances (1001-1040), the first `collected` of them
+-- collected, 1031-1040 also hidden by Collections' other filters, and the
+-- two hidden visuals; 30 Feet appearances (2001-2030), 2 collected.
+local function narrowedFixture(collected)
+    local list = Fake.appearances(40, collected or 4)
+    for _, a in ipairs(list) do
+        if a.id > 1030 and a.id <= 1040 then a.filteredOut = true end
+    end
+    for _, a in ipairs(Fake.appearances(30, 2, CAT.Feet, 2000)) do list[#list + 1] = a end
+    return list
+end
+-- The state on that fixture, Show All, nothing read yet; Collections' filter
+-- category on Head unless opts says.
+local function narrowedState(opts)
+    opts = opts or {}
+    opts.appearances = opts.appearances or narrowedFixture(opts.collected)
+    if opts.filterCategory == nil then opts.filterCategory = CAT.Head end
+    if opts.saved == nil then opts.saved = { scanWhenShown = false } end
+    return bootState(opts)
+end
+-- The values written to Collections' search-and-filter category, in order.
+local function categoryWrites(c)
+    local out = {}
+    for _, w in ipairs(c.writes) do
+        if w.kind == "category" then out[#out + 1] = tostring(w.value) end
+    end
+    return table.concat(out, ",")
+end
+-- Collections' writes as "kind value" in order.
+local function writeOrder(c)
+    local out = {}
+    for _, w in ipairs(c.writes) do out[#out + 1] = w.kind:sub(1, 2) .. w.value end
+    return table.concat(out, " ")
+end
+local AWAY = tostring(CAT.Paired)
+
+test("TC-43 the owner's case: filter category Head, uncollected hidden: Head lists every appearance, at once or a frame later", function()
+    for _, lag in ipairs({ "now", "frame" }) do
+        local c = narrowedState({ filterLag = lag == "frame" and "frame" or nil })
+        local S = TC.BrowserState
+        S.Refresh()
+        if lag == "frame" then
+            local v = S.View()
+            equal(#v.tiles, 0, lag .. ": no tiles while the read waits")
+            equal(v.empty, nil, lag .. ": no empty state while the read waits")
+            equal(categoryWrites(c), AWAY, lag .. ": pointed away, not back yet")
+            c.frame()
+        end
+        local v = S.View()
+        equal(v.count, "40 appearances", lag .. ": every Head appearance")
+        equal(#v.tiles, 24, lag .. ": tiles")
+        equal(v.empty, nil, lag .. ": no empty state")
+        equal(categoryWrites(c), AWAY .. ",1", lag .. ": pointed away, then back on Head")
+        equal(c.collections.filterCategory, CAT.Head, lag .. ": Collections' filter category as found")
+        equal(S.lastError, nil, lag .. ": no error")
+        c.advance(1)
+        S.Refresh()
+        equal(categoryWrites(c), AWAY .. ",1", lag .. ": nothing more written")
+        noErrors(c, lag)
+    end
+end)
+
+test("TC-43 the owner's case with nothing listed as found: Head is not 'No appearances found'", function()
+    local c = narrowedState({ collected = 0 })
+    TC.BrowserState.Refresh()
+    local v = TC.BrowserState.View()
+    equal(v.count, "40 appearances", "every Head appearance")
+    equal(v.empty, nil, "no empty state")
+    equal(c.collections.filterCategory, CAT.Head, "filter category as found")
+end)
+
+test("TC-43 Feet, not the filter category, is read once and nothing is written", function()
+    local c = narrowedState()
+    TC.BrowserState.SelectSlot("feet")
+    equal(TC.BrowserState.View().count, "30 appearances", "every Feet appearance")
+    equal(#c.writes, 0, "writes to Collections")
+    equal(c.listCalls, 1, "list reads")
+end)
+
+test("TC-43 nothing is written when no read is narrowed", function()
+    for _, opts in ipairs({ { filterCategory = false }, { uncollectedShown = true, appearances = Fake.appearances(40, 4) } }) do
+        local c = narrowedState(opts)
+        TC.BrowserState.Refresh()
+        c.advance(1)
+        equal(TC.BrowserState.View().count, "40 appearances", "every Head appearance")
+        equal(#c.writes, 0, "writes to Collections")
+    end
+end)
+
+test("TC-43 a raise in the list read after pointing away puts the filter category back", function()
+    -- the narrowed read is call 1, the read pointed away call 2, the next frame's call 3
+    for _, case in ipairs({ { at = 2 }, { at = 3, filterLag = "frame" } }) do
+        local what = "raise on read " .. case.at
+        local c = narrowedState({ listRaisesOn = { [case.at] = true }, filterLag = case.filterLag })
+        local ok, err = pcall(TC.BrowserState.Refresh)
+        check(ok, what .. ": no error from Refresh: " .. tostring(err))
+        c.frame()
+        equal(categoryWrites(c), AWAY .. ",1", what .. ": pointed away and back")
+        equal(c.collections.filterCategory, CAT.Head, what .. ": filter category as found")
+        check(TC.BrowserState.lastError and TC.BrowserState.lastError:find("GetCategoryAppearances failed", 1, true),
+            what .. ": the error recorded, got " .. tostring(TC.BrowserState.lastError))
+        c.advance(1)
+        equal(categoryWrites(c), AWAY .. ",1", what .. ": nothing more written")
+    end
+end)
+
+test("TC-43 the filter category is back on Head when the tab is left, the window closes or the slot changes during the frame's wait", function()
+    for _, way in ipairs({ "tab left", "window closed", "slot changed" }) do
+        local c, tabs = visitTwice({ appearances = narrowedFixture(), filterCategory = CAT.Head, filterLag = "frame",
+            saved = { scanWhenShown = false } })
+        tabs[1].scripts.OnClick(tabs[1])
+        equal(categoryWrites(c), AWAY, way .. ": pointed away while it waits")
+        if way == "tab left" then
+            selectBuy()
+        elseif way == "window closed" then
+            c.closeAuction()
+        else
+            TC.BrowserState.SelectSlot("feet")
+        end
+        if way ~= "slot changed" then
+            equal(categoryWrites(c), AWAY .. ",1", way .. ": back at once")
+        end
+        c.advance(1)
+        equal(categoryWrites(c), AWAY .. ",1", way .. ": back, and nothing more written")
+        equal(c.collections.filterCategory, CAT.Head, way .. ": filter category as found")
+        if way == "slot changed" then
+            equal(TC.BrowserState.View().count, "30 appearances", way .. ": Feet")
+            TC.BrowserState.SelectSlot("head")
+            equal(TC.BrowserState.View().count, "40 appearances", way .. ": Head, from the frame's read")
+            equal(categoryWrites(c), AWAY .. ",1", way .. ": nothing more written for Head")
+        end
+        noErrors(c, way)
+        sentNothing(c, way)
+    end
+end)
+
+test("TC-43 nothing is written to Collections before the browser's tab is selected", function()
+    local c = login({ appearances = narrowedFixture(), filterCategory = CAT.Head, saved = { scanWhenShown = false } })
+    c.openAuction()
+    c.closeAuction()
+    c.openAuction()
+    c.advance(1)
+    equal(#c.writes, 0, "writes before the tab is selected")
+    local tab = tabsOf(c)[1]
+    tab.scripts.OnClick(tab)
+    equal(categoryWrites(c), AWAY .. ",1", "writes once the tab is shown")
+    check(countShown(c) and countShown(c).text == "40 appearances", "the count drawn")
+    noErrors(c, "before the tab")
+    sentNothing(c, "before the tab")
+end)
+
+test("TC-43 a write that fires TRANSMOG_COLLECTION_UPDATED reads once and loops nothing", function()
+    for _, lag in ipairs({ false, "frame" }) do
+        local c, tabs = visitTwice({ appearances = narrowedFixture(), filterCategory = CAT.Head, filterCategoryFires = true,
+            filterLag = lag or nil, saved = { scanWhenShown = false } })
+        tabs[1].scripts.OnClick(tabs[1])
+        c.advance(1)
+        equal(categoryWrites(c), AWAY .. ",1", tostring(lag) .. ": writes")
+        equal(TC.BrowserState.View().count, "40 appearances", tostring(lag) .. ": every Head appearance")
+        noErrors(c, tostring(lag))
+    end
+end)
+
+test("TC-43 a weapon slot with one narrowed category lists it whole and puts the filter category back", function()
+    local list = manySlots()
+    for _, a in ipairs(list) do
+        if a.category == CAT.Dagger and a.id > 3005 then a.filteredOut = true end
+    end
+    local c = slotState({ appearances = list, filterCategory = CAT.Dagger })
+    state().SelectSlot("mainhand")
+    c.advance(1)
+    -- the Warlock's main hand: daggers and one-handed swords (CAN_LEARN)
+    equal(state().View().count, "18 appearances", "every dagger and sword")
+    equal(categoryWrites(c), AWAY .. "," .. CAT.Dagger, "pointed away and back on Daggers")
+    equal(c.collections.filterCategory, CAT.Dagger, "filter category as found")
+    noErrors(c, "weapon slot")
+end)
+
+test("TC-43 the weapon type pass and the unfiltered read never interleave their writes", function()
+    -- the pass runs when Head is read: Head waits for the pass, then is read
+    local c = narrowedState({ appearances = manySlots(), filterCategory = CAT.Head })
+    local S = TC.BrowserState
+    S.SelectSlot("mainhand")
+    S.SelectSlot("head")
+    local v = S.View()
+    equal(v.empty, nil, "pass running: no empty state for Head")
+    equal(categoryWrites(c), "", "pass running: nothing written to the filter category")
+    c.advance(1)
+    equal(S.View().count, "370 appearances", "Head whole once the pass ended")
+    local order = writeOrder(c)
+    check(order:find("ca" .. AWAY .. " ca1$"), "the category writes come last, got " .. order)
+    check(not order:find("ca.-cl"), "no class write after a category write, got " .. order)
+    equal(c.collections.classFilter, 9, "class filter as found")
+    -- the unfiltered read waits a frame when the pass would start: the pass waits for it
+    c = narrowedState({ appearances = manySlots(), filterCategory = CAT.Head, filterLag = "frame" })
+    S = TC.BrowserState
+    S.Refresh()
+    S.SelectSlot("mainhand")
+    c.advance(1)
+    order = writeOrder(c)
+    check(order:find("^ca" .. AWAY .. " ca1 cl"), "the pass writes after the filter category is back, got " .. order)
+    equal(c.collections.filterCategory, CAT.Head, "filter category as found")
+    equal(c.collections.classFilter, 9, "class filter as found")
+    equal(S.View().count, "18 appearances", "main hand listed")
+    S.SelectSlot("head")
+    equal(S.View().count, "370 appearances", "Head from the frame's read")
+    noErrors(c, "pass and read")
+end)
+
+test("TC-43 a client without the set call or the total behaves as today", function()
+    for _, missing in ipairs({ "noFilterCategorySet", "noCategoryTotal" }) do
+        local c = narrowedState({ [missing] = true, collected = 0 })
+        local ok, err = pcall(TC.BrowserState.Refresh)
+        check(ok, missing .. ": no error: " .. tostring(err))
+        c.advance(1)
+        noneFound(TC.BrowserState.View(), missing)
+        equal(#c.writes, 0, missing .. ": writes")
+        equal(TC.BrowserState.lastError, nil, missing .. ": no error recorded")
+        noErrors(c, missing)
+    end
+end)
+
+test("TC-43 a read still short a frame later is taken, recorded in lastError, and not tried again", function()
+    for _, collected in ipairs({ 4, 0 }) do
+        local what = collected .. " listed"
+        local c = narrowedState({ filterLag = "never", collected = collected })
+        local S = TC.BrowserState
+        S.Refresh()
+        c.frame()
+        if collected > 0 then
+            equal(S.View().count, "4 appearances", what .. ": the short list")
+        else
+            noneFound(S.View(), what)
+        end
+        check(S.lastError and S.lastError:find((collected + 2) .. " of 42", 1, true), what .. ": recorded, got " .. tostring(S.lastError))
+        for _ = 1, 3 do S.Refresh() c.frame() end
+        c.advance(1)
+        equal(categoryWrites(c), AWAY .. ",1", what .. ": one try")
+        equal(c.collections.filterCategory, CAT.Head, what .. ": filter category as found")
+    end
+end)
+
+test("TC-43 Collections shown: nothing is written and the list is as the client gives it", function()
+    local c = narrowedState()
+    CollectionsJournal = { IsShown = function() return true end }
+    local ok, err = pcall(TC.BrowserState.Refresh)
+    CollectionsJournal = nil
+    check(ok, "no error: " .. tostring(err))
+    equal(#c.writes, 0, "writes")
+    equal(TC.BrowserState.View().count, "4 appearances", "the narrowed list")
+    check(TC.BrowserState.lastError and TC.BrowserState.lastError:find("Collections", 1, true),
+        "recorded, got " .. tostring(TC.BrowserState.lastError))
+end)
+
+-- An appearance of the category counted in its totals and never listed (the
+-- QA's E1): a category short for a reason other than Collections' filters.
+local function withUnlisted(list, category, first)
+    local a = Fake.appearances(1, 0, category, first)[1]
+    a.unlisted = true
+    list[#list + 1] = a
+    return list
+end
+
+test("TC-43 F1 an armor slot short for another reason causes no write; the filter category stays as found", function()
+    local c = narrowedState({ appearances = withUnlisted(narrowedFixture(), CAT.Feet, 2100) })
+    local S = TC.BrowserState
+    S.Refresh()
+    equal(categoryWrites(c), AWAY .. ",1", "Head: pointed away and back")
+    S.SelectSlot("feet")
+    c.advance(1)
+    equal(S.View().count, "30 appearances", "Feet as listed")
+    equal(categoryWrites(c), AWAY .. ",1", "nothing written for Feet")
+    equal(c.collections.filterCategory, CAT.Head, "filter category as found")
+    equal(S.lastError, nil, "no note")
+    S.SelectSlot("head")
+    S.SelectSlot("feet")
+    c.advance(1)
+    equal(categoryWrites(c), AWAY .. ",1", "nothing more written")
+    equal(c.collections.filterCategory, CAT.Head, "filter category as found at the end")
+end)
+
+test("TC-43 F1 a weapon slot: a short category beside the narrowed one causes no write; the filter ends as found", function()
+    local list = withUnlisted(manySlots(), CAT.OneHSword, 4100)
+    for _, a in ipairs(list) do
+        if a.category == CAT.Dagger and a.id > 3005 then a.filteredOut = true end
+    end
+    local c = slotState({ appearances = list, filterCategory = CAT.Dagger })
+    state().SelectSlot("mainhand")
+    c.advance(1)
+    equal(state().View().count, "18 appearances", "every dagger and listed sword")
+    equal(categoryWrites(c), AWAY .. "," .. CAT.Dagger, "pointed away and back on Daggers only")
+    equal(c.collections.filterCategory, CAT.Dagger, "filter category as found")
+    noErrors(c, "weapon slot, short swords")
+end)
+
+test("TC-43 F1 a client without GetFilteredCategoryTotal writes nothing and lists as today", function()
+    local c = narrowedState({ noFilteredTotal = true })
+    local ok, err = pcall(TC.BrowserState.Refresh)
+    check(ok, "no error: " .. tostring(err))
+    c.advance(1)
+    equal(TC.BrowserState.View().count, "4 appearances", "the list as found")
+    equal(#c.writes, 0, "writes")
+end)
+
+test("TC-43 F3 a refused restore is recorded and tried once more on the next frame, no loop", function()
+    for _, lag in ipairs({ false, "frame" }) do
+        local what = "lag " .. tostring(lag)
+        -- set call 1 points away, call 2 puts back, call 3 is the retry
+        local c = narrowedState({ categoryRaisesOn = { [2] = true }, filterLag = lag or nil })
+        local S = TC.BrowserState
+        local ok, err = pcall(S.Refresh)
+        check(ok, what .. ": no error: " .. tostring(err))
+        c.advance(1)
+        equal(c.collections.filterCategory, CAT.Head, what .. ": filter category as found after the retry")
+        equal(categoryWrites(c), AWAY .. ",1", what .. ": away, then back on the retry")
+        check(S.lastError and S.lastError:find("not put back", 1, true), what .. ": recorded, got " .. tostring(S.lastError))
+        c = narrowedState({ categoryRaisesOn = { [2] = true, [3] = true }, filterLag = lag or nil })
+        S = TC.BrowserState
+        ok, err = pcall(S.Refresh)
+        check(ok, what .. ", both refused: no error: " .. tostring(err))
+        c.advance(1)
+        check(S.lastError and S.lastError:find("not put back", 1, true),
+            what .. ", both refused: recorded, got " .. tostring(S.lastError))
+        equal(c.categorySetCalls, 3, what .. ", both refused: one retry")
+        S.Refresh()
+        c.advance(1)
+        equal(c.categorySetCalls, 3, what .. ", both refused: nothing tried after")
+    end
+end)
+
+test("TC-43 F4 Collections moving the filter category during the frame's wait is left as it is", function()
+    local c = narrowedState({ filterLag = "frame" })
+    local S = TC.BrowserState
+    S.Refresh()
+    equal(categoryWrites(c), AWAY, "pointed away while it waits")
+    -- Collections opened for the first time: its SetActiveSlot writes a category
+    C_TransmogCollection.SetSearchAndFilterCategory(CAT.Feet)
+    c.advance(1)
+    equal(categoryWrites(c), AWAY .. "," .. CAT.Feet, "our restore did not overwrite Collections' write")
+    equal(c.collections.filterCategory, CAT.Feet, "filter category where Collections put it")
+    equal(S.View().count, "40 appearances", "Head whole")
+end)
+
+test("TC-43 F5 a pointed-away read that raises is tried once per category per visit", function()
+    for _, lag in ipairs({ false, "frame" }) do
+        local what = "lag " .. tostring(lag)
+        local c = narrowedState({ listRaisesAway = true, filterLag = lag or nil })
+        for _ = 1, 10 do
+            pcall(TC.BrowserState.Refresh)
+            c.frame()
+        end
+        equal(categoryWrites(c), AWAY .. ",1", what .. ": one try")
+        equal(c.collections.filterCategory, CAT.Head, what .. ": filter category as found")
+        equal(TC.BrowserState.View().count, "4 appearances", what .. ": the list as found")
+    end
+end)
+
+test("TC-43 F6 a raising total takes the list as it is and writes nothing", function()
+    local c = narrowedState({ totalRaises = true })
+    local ok, err = pcall(TC.BrowserState.Refresh)
+    check(ok, "no error: " .. tostring(err))
+    c.advance(1)
+    equal(TC.BrowserState.View().count, "4 appearances", "the list as found")
+    equal(#c.writes, 0, "writes")
+end)
+
+test("TC-43 F7 a list narrowed while Collections is shown is read again, and widened once Collections is closed", function()
+    local shown = { IsShown = function() return true end }
+    local ok, err = pcall(function()
+        for _, way in ipairs({ "refresh", "selection" }) do
+            local c = narrowedState()
+            local S = TC.BrowserState
+            CollectionsJournal = shown
+            S.Refresh()
+            equal(S.View().count, "4 appearances", way .. ": the narrowed list shown")
+            local calls = c.listCalls
+            if way == "refresh" then
+                S.Refresh()
+                check(c.listCalls > calls, way .. ": read again while Collections is shown")
+                CollectionsJournal = nil
+                S.Refresh()
+            else
+                S.SelectSlot("feet")
+                CollectionsJournal = nil
+                S.SelectSlot("head")
+            end
+            c.advance(1)
+            equal(S.View().count, "40 appearances", way .. ": widened once Collections is closed")
+            equal(categoryWrites(c), AWAY .. ",1", way .. ": pointed away and back once")
+            equal(c.collections.filterCategory, CAT.Head, way .. ": filter category as found")
+        end
+    end)
+    CollectionsJournal = nil
+    check(ok, tostring(err))
+end)
+
+test("TC-43 item 6: a slot whose only entries are hidden visuals says no appearances were found, on screen", function()
+    local c, tabs = visitTwice({ appearances = { { id = 7, uiOrder = 1, sources = { 71 }, hide = true } },
+        saved = { scanWhenShown = false } })
+    tabs[1].scripts.OnClick(tabs[1])
+    noneFound(TC.BrowserState.View(), "hidden only")
+    check(textShown(c, NO_APPEARANCES), "the text drawn")
+    sentNothing(c, "hidden only")
+end)
+
+-- item 8: an appearance whose sources have no source type, permanently
+-- (item 271215 in game: sourceType nil, no drops, its data loaded)
+local function withoutTypes(ids)
+    local real = C_TransmogCollection.GetAppearanceSources
+    C_TransmogCollection.GetAppearanceSources = function(id, ...)
+        local r = real(id, ...)
+        for _, s in ipairs(r or {}) do
+            if ids == nil or ids[id] then s.sourceType = nil end
+        end
+        return r
+    end
+end
+
+test("TC-43 item 8: no source type: the tile tooltip has no source line, the Source filter counts it as Other", function()
+    bootState({ appearances = { { id = 2, uiOrder = 1, sources = { 21 }, sourceTypes = { 4 } } }, saved = { scanWhenShown = false } })
+    local S = TC.BrowserState
+    S.Refresh()
+    local appearance = S.View().tiles[1].appearance
+    local known = stateTip(appearance)
+    check(known:find("\nWorld Drop", 1, true), "the known type's line, got " .. known)
+    withoutTypes()
+    local unknown = stateTip(appearance)
+    equal(unknown, (known:gsub("\nWorld Drop", "")), "the same tooltip without the source line")
+    onlySources({ other = true })
+    equal(tileIDs(S.View()), "2", "Other only: shown")
+    for _, e in ipairs(S.View().sources) do S.SetSource(e.value, e.value ~= "other") end
+    equal(tileIDs(S.View()), "", "every named type but not Other: not shown")
+end)
+
+test("TC-43 item 8: 30 appearances without a source type cost no source read per keystroke, one per Refresh", function()
+    local c = bootState({ appearances = Fake.appearances(30, 0), saved = { scanWhenShown = false } })
+    withoutTypes()
+    local S = TC.BrowserState
+    S.Refresh()
+    S.SetListener(function() S.View() end)
+    onlySources({ [2] = true })
+    local base = c.sourcesCalls or 0
+    for _, text in ipairs({ "i", "it", "ite", "item" }) do S.SetSearch(text) end
+    equal((c.sourcesCalls or 0) - base, 0, "source reads over four keystrokes")
+    S.Refresh()
+    S.View()
+    equal((c.sourcesCalls or 0) - base, 30, "a Refresh reads each once again")
+end)
+
 test("TC-15 no forbidden collection call was made in the whole run", function()
     equal(Fake.forbiddenTotal or 0, 0, "forbidden calls across every test")
 end)

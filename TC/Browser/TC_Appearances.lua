@@ -2,7 +2,9 @@
 -- Collections shows them, each class's weapon types, whether each is
 -- collected, the item a tile shows it with, and the items that carry it. It
 -- hides the Collections category of each slot and
--- leaves Collections' own settings as it found them.
+-- leaves Collections' own settings as it found them. Only the weapon type
+-- pass (the class filter) and categoryInfos (the search-and-filter
+-- category) write them.
 TC = TC or {}
 TC.Appearances = {}
 
@@ -26,12 +28,11 @@ local function location(slotID)
     }
 end
 
--- The client's list for the category, without hidden visuals, sorted as
--- Collections sorts it (Blizzard_Wardrobe.lua:962-975), added to list; an
--- appearance already in it is not added again, but its categories (category
--- to its place in that category's own order) learn this one.
-local function readCategory(list, seen, slot, slotID, category)
-    local infos = C_TransmogCollection.GetCategoryAppearances(category, location(slotID))
+-- The client's list for the category (infos), without hidden visuals,
+-- sorted as Collections sorts it (Blizzard_Wardrobe.lua:962-975), added to
+-- list; an appearance already in it is not added again, but its categories
+-- (category to its place in that category's own order) learn this one.
+local function readCategory(list, seen, slot, infos, category)
     local visible = {}
     for _, info in ipairs(type(infos) == "table" and infos or {}) do
         if info.visualID and not info.isHideVisual then
@@ -172,6 +173,18 @@ end
 
 -- The pass that runs, or nil.
 local pass
+-- TC-43: the narrowed category's read that waits a frame with Collections'
+-- search-and-filter category pointed away ({ category }), or nil. waiting:
+-- the onReady of the List calls that wait for it or for the pass, as a set.
+local unfiltered
+local waiting = {}
+
+-- The List calls that waited may read again; note goes to each.
+local function wake(note)
+    local fns = waiting
+    waiting = {}
+    for fn in pairs(fns) do fn(note) end
+end
 
 -- Reads what the filter gives for classID into run, after checking the
 -- filter is still on it.
@@ -243,14 +256,17 @@ local function finish(run, learnt)
     restore(run)
     if learnt and run.answered then addOwnClass(learnt) end
     run.done(learnt and run.answered and learnt or false)
+    wake()
 end
 
 -- One frame of the pass, as the probe read: the class set on the frame
 -- before is read, then the next class is set, so nothing is read in the
 -- frame of a write. Collections opened in the middle ends the pass on the
--- fixed split.
+-- fixed split. While an unfiltered read waits a frame (TC-43), the step
+-- waits for the frame after, so the two never write in between each other.
 local function step(run, i)
     if pass ~= run then return end
+    if unfiltered then return C_Timer.After(0, function() step(run, i) end) end
     local ok = pcall(function()
         if CollectionsJournal and CollectionsJournal.IsShown and CollectionsJournal:IsShown() then
             error("Collections is open", 0)
@@ -316,22 +332,184 @@ local function categoriesOf(slot, entry, weaponType, types)
     return categories
 end
 
+-- TC-43 (measured with /tcprobe slot on 2026-11-26): the client narrows
+-- the list of one category by Collections' filters, the search-and-filter
+-- category Collections last set (Blizzard_Wardrobe.lua:895-899; the Camelot
+-- game type hides uncollected looks, Camelot/Blizzard_Wardrobe.lua:3-6); the
+-- client has no getter for it. The one place that touches it: away true
+-- points it at Paired (TransmogSharedDocumentation.lua:42), a category no
+-- slot reads; false puts it on category; nil writes nothing. Answers
+-- whether the client has the call and, for a write, ran it without a raise.
+local function pointFilterCategory(category, away)
+    local set = C_TransmogCollection.SetSearchAndFilterCategory
+    if not set or away == nil then return set ~= nil end
+    return (pcall(set, away and enum("TransmogCollectionType", "Paired", 29) or category))
+end
+
+-- The category's total when Collections' filters narrow its list now, else
+-- false: its filtered total (TransmogItemsDocumentation.lua:432-445, what
+-- Collections' progress bar shows, Blizzard_Wardrobe.lua:1189-1190) is below
+-- its total (:317-330). Measured on 2026-11-26: below only for the filter
+-- category (head 1 of 245, feet 371 of 371). False when either call is
+-- missing, raises or answers a non-number.
+local function narrowed(category)
+    local TCol = C_TransmogCollection
+    if not (TCol.GetFilteredCategoryTotal and TCol.GetCategoryTotal) then return false end
+    local ok, total = pcall(TCol.GetCategoryTotal, category)
+    local okFiltered, filtered = pcall(TCol.GetFilteredCategoryTotal, category)
+    if ok and okFiltered and type(total) == "number" and type(filtered) == "number" and filtered < total then
+        return total
+    end
+    return false
+end
+
+-- Whether a slot category other than category reads as narrowed: someone
+-- else (Collections) moved the filter category since our write.
+local function movedSince(category)
+    for other = enum("TransmogCollectionType", "Head", 1), enum("TransmogCollectionType", "Warglaives", 28) do
+        if other ~= category and narrowed(other) then return true end
+    end
+    return false
+end
+
+-- Told the text of a restore refused twice (SetListErrorListener).
+local onRefused
+
+-- Puts the filter category back on category on a later frame than its
+-- write: left as it is when it was moved since (movedSince).
+local function putBackLater(category)
+    if movedSince(category) then return true end
+    return pointFilterCategory(category, false)
+end
+
+-- Puts the filter category back on category (later: on a later frame than
+-- the write); answers the text when the write was refused. A refused write
+-- is tried once more on the next frame, unless an unfiltered read runs by
+-- then; when that is refused too, onRefused gets the text. No loop.
+local function putBack(category, later)
+    if (later and putBackLater or pointFilterCategory)(category, false) then return nil end
+    local text = ("the filter category was not put back to %d"):format(category)
+    if C_Timer and C_Timer.After then
+        C_Timer.After(0, function()
+            if not unfiltered and not putBackLater(category) and onRefused then
+                onRefused(text .. ", nor on the next frame")
+            end
+        end)
+    end
+    return text
+end
+
+-- answered: the next frame's lists, by category, not read yet; tried: the
+-- categories that had a pointed-away read in this visit that was still short
+-- or raised.
+local answered, tried = {}, {}
+-- What List answers for a category whose read waits.
+local WAITS = {}
+
+-- The list taken, and a note when it is still short of the total.
+local function taken(category, infos, total)
+    local count = type(infos) == "table" and #infos or 0
+    if count >= total then return infos end
+    return infos, ("category %d: %d of %d listed with the filter category pointed away"):format(category, count, total)
+end
+
+-- The client's list for the category, whole whatever Collections' filters
+-- (TC-43). A list with fewer entries than GetCategoryTotal (hidden visuals
+-- counted in both, TransmogItemsDocumentation.lua:247-264, 317-330) whose
+-- category reads as narrowed (narrowed) is read again with the filter
+-- category pointed away, in this frame, and when still short once more on
+-- the next frame, taken then whatever it holds; the category is put back on
+-- every way out (putBack). Answers the list and a note for lastError, or
+-- WAITS: onReady(note) is called when it can be read again. The client's
+-- list as found: without onReady (no caller that can wait), without the
+-- calls, for a category not narrowed or tried this visit, and, with a note
+-- and true (not final: read again on the next need), while Collections is
+-- shown. Nothing is written while the weapon type pass runs: the read waits
+-- for it.
+local function categoryInfos(category, slotID, onReady)
+    local TCol = C_TransmogCollection
+    if answered[category] then
+        local infos = answered[category]
+        answered[category] = nil
+        return infos
+    end
+    local infos = TCol.GetCategoryAppearances(category, location(slotID))
+    local count = type(infos) == "table" and #infos or 0
+    local total = onReady and not tried[category] and pointFilterCategory(category) and narrowed(category)
+    if not total or count >= total then return infos end
+    if CollectionsJournal and CollectionsJournal.IsShown and CollectionsJournal:IsShown() then
+        return infos, ("category %d: %d of %d listed; Collections is open"):format(category, count, total), true
+    end
+    if pass or unfiltered then
+        waiting[onReady] = true
+        return WAITS
+    end
+    if not pointFilterCategory(category, true) then return infos end
+    local ok, again = pcall(TCol.GetCategoryAppearances, category, location(slotID))
+    if not ok or (type(again) == "table" and #again >= total) or not (C_Timer and C_Timer.After) then
+        local refused = putBack(category)
+        if not ok then
+            tried[category] = true
+            error(tostring(again) .. (refused and "; " .. refused or ""), 0)
+        end
+        local list, note = taken(category, again, total)
+        return list, refused or note
+    end
+    local run = { category = category }
+    unfiltered, waiting[onReady] = run, true
+    C_Timer.After(0, function()
+        if unfiltered ~= run then return end
+        local read, later = pcall(TCol.GetCategoryAppearances, category, location(slotID))
+        local note
+        if read then
+            answered[category], note = taken(category, later, total)
+        else
+            note = tostring(later)
+        end
+        tried[category], unfiltered = true, nil
+        wake(putBack(category, true) or note)
+    end)
+    return WAITS
+end
+
+-- Ends the visit's unfiltered reads (the tab was left or the visit ended):
+-- a read waiting a frame puts the filter category back at once and is
+-- dropped; nothing waits, and every category may be tried again.
+function Appearances.StopLists()
+    local run = unfiltered
+    unfiltered, waiting, answered, tried = nil, {}, {}, {}
+    local refused = run and putBack(run.category, true)
+    if refused and onRefused then onRefused(refused) end
+end
+
+-- fn(text) is told when the filter category could not be put back.
+function Appearances.SetListErrorListener(fn)
+    onRefused = fn
+end
+
 -- The appearances of a slot, in Collections' order, each { id, slot,
 -- category, categories }. A weapon slot is the union of its weapon types'
 -- lists, each in Collections' order, in the order of the weapon types, each
 -- appearance once; weaponType (a category) narrows it to one. types: the
 -- slot's WeaponTypes when the caller has them. A category's list is the
 -- same under every class filter (measured in game on 2026-11-25), so the
--- filter is not touched.
-function Appearances.List(slot, weaponType, types)
+-- filter is not touched; it is whole whatever Collections' filters
+-- (categoryInfos). onReady: see categoryInfos. Answers the list, a note
+-- for lastError and true when the list is not final (a category narrowed
+-- while Collections is shown: read it again on the next need), or nil
+-- while a category's read waits.
+function Appearances.List(slot, weaponType, types, onReady)
     local entry = TC.Slots[slot]
     local TCol = C_TransmogCollection
     if not (entry and TCol and TCol.GetCategoryAppearances) then return {} end
-    local list, seen = {}, {}
+    local list, seen, note, partial = {}, {}, nil, nil
     for _, category in ipairs(categoriesOf(slot, entry, weaponType, types)) do
-        readCategory(list, seen, slot, entry.slotID, category)
+        local infos, said, notFinal = categoryInfos(category, entry.slotID, onReady)
+        if infos == WAITS then return nil end
+        note, partial = note or said, partial or notFinal
+        readCategory(list, seen, slot, infos, category)
     end
-    return list
+    return list, note, partial
 end
 
 -- Collected when the account has the appearance from any of its sources.
