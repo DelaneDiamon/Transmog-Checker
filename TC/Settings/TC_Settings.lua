@@ -52,6 +52,14 @@ local SCAN = { key = "scanWhenShown", labelKey = "SETTING_SCAN", tipKey = "SETTI
 -- The language setting, the general row under the preview: Auto, then each
 -- language with a locale file by its own name: English, then the others in
 -- the order of their codes.
+-- Each language's name follows its flag, Media/Flags/<code>.tga (a 64 x 32
+-- canvas, the flag centred in it at its own aspect), drawn 24 x 12 inline:
+-- the height of GameFontNormal (12), the font of the menu's entries and of
+-- the dropdown's selected text (Blizzard_Menu/MenuTemplates.lua:403,
+-- MenuTemplates.xml:33). Both texts are set with SetText from the option's
+-- label (Blizzard_Settings.lua:250, 498-500; MenuTemplates.lua:529, 741,
+-- 773-775, 846-847), which draws a |T escape.
+local FLAG = "|TInterface\\AddOns\\TransmogChecker\\Media\\Flags\\%s:12:24|t"
 local function languageChoices()
     local codes = {}
     for code in pairs(TC.Locales) do
@@ -60,10 +68,18 @@ local function languageChoices()
     table.sort(codes)
     if TC.Locales.enUS then table.insert(codes, 1, "enUS") end
     local choices = { { "auto", labelKey = "LANGUAGE_AUTO" } }
-    for _, code in ipairs(codes) do choices[#choices + 1] = { code, label = TC.Locales[code].name } end
+    for _, code in ipairs(codes) do choices[#choices + 1] = { code, label = FLAG:format(code) .. " " .. TC.Locales[code].name } end
     return choices
 end
-local LANGUAGE = { key = "language", labelKey = "SETTING_LANGUAGE", tipKey = "SETTING_LANGUAGE_TIP", choices = languageChoices }
+-- The row's label says Language in English in every language ("Sprache /
+-- Language"), so a player who cannot read the chosen one finds it.
+local function languageLabel()
+    local english = TC.Locales.enUS and TC.Locales.enUS.strings.SETTING_LANGUAGE
+    local own = L.SETTING_LANGUAGE
+    if not english or own == english then return own end
+    return own .. " / " .. english
+end
+local LANGUAGE = { key = "language", label = languageLabel, tipKey = "SETTING_LANGUAGE_TIP", choices = languageChoices }
 
 local category
 -- the registered settings by stored key
@@ -362,7 +378,8 @@ end
 local function control(cat, row, get, set, default)
     local VarType = Settings.VarType or {}
     local kind = row.choices and (VarType.String or "string") or (VarType.Boolean or "boolean")
-    local setting = Settings.RegisterProxySetting(cat, variable(row.key), kind, L[row.labelKey], default, get, set)
+    local name = row.label and row.label() or L[row.labelKey]
+    local setting = Settings.RegisterProxySetting(cat, variable(row.key), kind, name, default, get, set)
     settings[row.key] = setting
     if not row.choices then return Settings.CreateCheckbox(cat, setting, L[row.tipKey]) end
     -- a choice's label: its own (a language's name) or its locale key's, in its colour

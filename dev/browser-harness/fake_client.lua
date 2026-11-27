@@ -354,8 +354,22 @@ function Fake.new(opts)
     local function shownColumns(text)
         return columns((text or ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("|T.-|t", ".."))
     end
+    -- i18n flags: a texture's markup draws as wide as it states
+    -- (|Tpath:height:width|t), its height without a width, two characters'
+    -- for a height of 0 (the text's, as before).
+    local function textureWidths(text, per)
+        local width = 0
+        for spec in (text or ""):gmatch("|T(.-)|t") do
+            local height, stated = spec:match("^[^:]*:(%d+):?(%d*)")
+            stated = tonumber(stated) or tonumber(height) or 0
+            width = width + (stated > 0 and stated or 2 * per)
+        end
+        return width
+    end
     function methods:GetStringWidth()
-        return shownColumns(self.text) * perCharacter(self)
+        local per = perCharacter(self)
+        return columns((self.text or ""):gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", ""):gsub("|T.-|t", "")) * per
+            + textureWidths(self.text, per)
     end
     -- A button's text width (SimpleButtonAPIDocumentation.lua:244): its text
     -- by the same measure, 5 for each in GameFontHighlightSmall (10 point,

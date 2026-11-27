@@ -12600,7 +12600,8 @@ test("i18n language setting: the page's dropdown lists Auto and each language by
     equal(language.kind .. ":" .. language.name, "dropdown:Language", "the row after the preview")
     equal(language.tooltip, TC.L.SETTING_LANGUAGE_TIP, "its tooltip from the locale table")
     local options = {}
-    for i, o in ipairs(language.options) do options[i] = o.value .. "=" .. o.label end
+    -- each language's flag left out (i18n flags: its own test)
+    for i, o in ipairs(language.options) do options[i] = o.value .. "=" .. o.label:gsub("^|T.-|t ", "") end
     -- i18n slice C: English first, then the others by code, the shipped ten among them
     equal(table.concat(options, "|"), "auto=Auto (game language)|enUS=English|deDE=Deutsch|esES=Español (EU)"
         .. "|esMX=Español (AL)|frFR=Français|itIT=Italiano|koKR=한국어|ptBR=Português (Brasil)|ruRU=Русский"
@@ -12992,6 +12993,75 @@ test("i18n C widths: in every language each settings row's label fits its row (F
         noErrors(c, code)
     end
     equal(table.concat(out, "; "), "", "labels cut")
+end)
+
+-- i18n flags: a flag per language in the Language dropdown (Media/Flags/<code>.tga,
+-- 64 x 32, uncompressed 32-bit with alpha, as Media/wheel.tga), drawn 24 x 12.
+local FLAG_ESCAPE = "|TInterface\\AddOns\\TransmogChecker\\Media\\Flags\\%s:12:24|t "
+
+test("i18n flags files: every registered language has its Media/Flags TGA, 32-bit, power-of-two 64 x 32", function()
+    local c = fresh(nil, true)
+    local codes = {}
+    for code in pairs(TC.Locales) do codes[#codes + 1] = code end
+    table.sort(codes)
+    equal(table.concat(codes, ","), "deDE,enUS,esES,esMX,frFR,itIT,koKR,ptBR,ruRU,zhCN,zhTW", "the shipped languages")
+    local out = {}
+    for _, code in ipairs(codes) do
+        local file = io.open(repo .. "/Media/Flags/" .. code .. ".tga", "rb")
+        local data = file and file:read("*a")
+        if file then file:close() end
+        if not data then
+            out[#out + 1] = code .. ": no file"
+        else
+            local b = function(i) return data:byte(i) end
+            local width, height = b(13) + 256 * b(14), b(15) + 256 * b(16)
+            local function pow2(n) return n > 0 and math.floor(math.log(n) / math.log(2) + 0.5) == math.log(n) / math.log(2) end
+            local got = ("type %d, %d bpp, descriptor %d, %dx%d, %d bytes"):format(b(3), b(17), b(18), width, height, #data)
+            if got ~= "type 2, 32 bpp, descriptor 8, 64x32, " .. (18 + 64 * 32 * 4) .. " bytes" or not (pow2(width) and pow2(height)) then
+                out[#out + 1] = code .. ": " .. got
+            end
+        end
+    end
+    equal(table.concat(out, "; "), "", "flag files")
+    noErrors(c, "flags")
+end)
+
+test("i18n flags dropdown: every language but Auto starts with its own flag, then its own name; choosing one stores it and prompts", function()
+    local c = fresh(nil, true)
+    local language = c.settingsPage(c.settings.addon[1].ID)[2]
+    local out = {}
+    for _, o in ipairs(language.options) do
+        local want = o.value == "auto" and TC.L.LANGUAGE_AUTO or FLAG_ESCAPE:format(o.value) .. TC.Locales[o.value].name
+        if o.label ~= want then out[#out + 1] = o.value .. "=" .. o.label end
+    end
+    equal(#language.options, 12, "Auto and the eleven")
+    equal(table.concat(out, "; "), "", "entries")
+    language.init.data.setting:SetValue("deDE")
+    equal(TransmogCheckerDB.language .. "/" .. #c.popups, "deDE/1", "stored, and the reload prompt")
+    noErrors(c, "flags dropdown")
+end)
+
+test("i18n flags label: the Language row reads Language in English, the local word and / Language in the others, within the row", function()
+    local out = {}
+    for _, code in ipairs({ "enUS", unpack(CODES) }) do
+        local c = fresh({ locale = code }, true)
+        local name = c.settingsPage(c.settings.addon[1].ID)[2].name
+        local want = code == "enUS" and "Language" or TC.Locales[code].strings.SETTING_LANGUAGE .. " / Language"
+        if name ~= want then out[#out + 1] = code .. ": " .. name end
+        if Fake.columns(name) > LABEL_LIMIT then out[#out + 1] = code .. ": too wide" end
+        noErrors(c, code)
+    end
+    equal(table.concat(out, "; "), "", "labels")
+end)
+
+test("i18n flags fake: a font string measures an inline texture as its stated width", function()
+    local c = fresh(nil, true)
+    local fs = CreateFrame("Frame"):CreateFontString()
+    fs:SetText(FLAG_ESCAPE:format("deDE") .. "Deutsch")
+    equal(fs:GetStringWidth(), 24 + 8 * 6, "24 for the flag, 6 for each of the space and Deutsch")
+    fs:SetText("|TInterface\\Icons\\x:0|t ab")
+    equal(fs:GetStringWidth(), 12 + 3 * 6, "a texture of the text's height: 12, as before")
+    noErrors(c, "fake")
 end)
 
 -- The found row's Buy button, its row, and the row's price and count.
