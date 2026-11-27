@@ -6601,7 +6601,8 @@ test("B whole: the funnel's mark shows while a choice differs; the mark and Rese
     names, choose = classEntries(c)
     choose(other)
     check(visible(mark), "the mark after another class")
-    check(funnel.highlightLocked, "the funnel's highlight is held while another class is chosen")
+    -- slice F, F2: the mark alone says a choice differs; the highlight is never held
+    check(not funnel.highlightLocked, "the funnel's highlight is not held while another class is chosen")
     check(c.click(mark), "the mark clicked")
     check(not visible(mark), "the mark gone after the reset")
     check(not funnel.highlightLocked, "the funnel's highlight released after the reset")
@@ -6609,7 +6610,7 @@ test("B whole: the funnel's mark shows while a choice differs; the mark and Rese
     local _, pick = openMenu(c, funnelOf(c))
     pick("Not collected")
     check(visible(mark), "the mark after Show Not collected")
-    check(funnel.highlightLocked, "the highlight held after Show Not collected")
+    check(not funnel.highlightLocked, "the highlight not held after Show Not collected")
     local texts
     texts, pick = openMenu(c, funnelOf(c))
     equal(texts[#texts], "Reset filters", "the menu's last entry")
@@ -9784,15 +9785,15 @@ test("D1 slash: /tc alts and /tc skipgreys flip their setting and print it; /tc 
         for i = from + 1, #c.printed do out[#out + 1] = plain(c.printed[i]) end
         return table.concat(out, "\n")
     end
-    equal(said("alts"), "TC: Other items with the same appearance: always", "alts")
+    equal(said("alts"), "TC: Other items with this look: always", "alts")
     equal(TransmogCheckerDB.otherItems, "always", "alts flipped")
-    equal(said("alts"), "TC: Other items with the same appearance: only when not collected", "alts back")
+    equal(said("alts"), "TC: Other items with this look: only when not collected", "alts back")
     TC.SetSetting("otherItems", "off")
     said("alts")
     equal(TransmogCheckerDB.otherItems, "always", "from off")
-    equal(said("skipgreys"), "TC: Show collection status on grey and white items: on", "skipgreys")
+    equal(said("skipgreys"), "TC: Include grey & white items: on", "skipgreys")
     equal(TransmogCheckerDB.skipPoorAndCommon, false, "skipgreys flipped")
-    equal(said("skipgreys"), "TC: Show collection status on grey and white items: off", "skipgreys back")
+    equal(said("skipgreys"), "TC: Include grey & white items: off", "skipgreys back")
     local before = tooltipSettings()
     equal(said("blizz"), "TC: Blizzard's \"not collected\" line is now always hidden while TransmogChecker's lines show.", "blizz")
     equal(tooltipSettings(), before, "blizz changes nothing")
@@ -11061,9 +11062,9 @@ local function optionsText(r)
     return table.concat(out, "|")
 end
 -- slice E, E3: the labels reworded
-local LABELS = { "Show collection status on item tooltips", "Tooltip style", "\"Not collected\" text color",
-    "Other items with the same appearance", "Lowest auction price seen this session",
-    "Show collection status on grey and white items", "Scan prices when the tab opens" }
+local LABELS = { "Show collection status", "Tooltip style", "\"Not collected\" text color",
+    "Other items with this look", "Lowest auction price",
+    "Include grey & white items", "Scan prices when tab opens" }
 -- The stored values the seven controls stand for, in the page's order.
 local function stored()
     local db = TransmogCheckerDB
@@ -11113,18 +11114,18 @@ test("D2 page: one AddOns category with the preview, two sections and the seven 
     equal(category(c).name, "TransmogChecker", "named for the addon")
     local kinds = {}
     for i, r in ipairs(page(c)) do kinds[i] = r.kind .. ":" .. tostring(r.name) end
-    equal(table.concat(kinds, "|"), "panel:nil|header:Item tooltip|checkbox:Show collection status on item tooltips|"
-        .. "dropdown:Tooltip style|dropdown:\"Not collected\" text color|dropdown:Other items with the same appearance|"
-        .. "checkbox:Lowest auction price seen this session|checkbox:Show collection status on grey and white items|"
-        .. "header:Appearances tab|checkbox:Scan prices when the tab opens", "the rows in the page's order")
+    equal(table.concat(kinds, "|"), "panel:nil|header:Item tooltip|checkbox:Show collection status|"
+        .. "dropdown:Tooltip style|dropdown:\"Not collected\" text color|dropdown:Other items with this look|"
+        .. "checkbox:Lowest auction price|checkbox:Include grey & white items|"
+        .. "header:Appearances tab|checkbox:Scan prices when tab opens", "the rows in the page's order")
     local tips = {
-        "Show on every item tooltip whether you have collected its appearance.",
+        "Adds lines to item tooltips that say whether the item's appearance is collected.",
         "Full: the status, how to collect it, the lowest price and other items. Compact: the status on the item's name line.",
         "The color of \"Not collected\" on item tooltips.",
-        "Other items with the same appearance, and where they come from. Compact shows only how many.",
-        "The lowest price the Appearances tab found this session. Full style only.",
-        "Also show the status on grey and white items.",
-        "Scan the slot when the Appearances tab opens. This reads the auction house.",
+        "Lists the other items that give the same appearance. Full shows where each comes from; Compact shows only how many.",
+        "Shows the lowest auction price the Appearances tab has seen for this appearance since you logged in or reloaded. Full style only.",
+        "Also shows collection status on grey (Poor) and white (Common) items.",
+        "Scans the auction house for the selected slot each time the Appearances tab is shown.",
     }
     local defaults = { true, "full", "orange", "notCollected", true, false, true }
     for i, label in ipairs(LABELS) do
@@ -11136,7 +11137,7 @@ test("D2 page: one AddOns category with the preview, two sections and the seven 
     equal(optionsText(row(c, "Tooltip style")), "full=Full|compact=Compact", "Style's choices")
     equal(optionsText(row(c, "\"Not collected\" text color")), "orange=|cFFFF7F00Orange|r|lightBlue=|cFF87ABFFLight blue|r|white=White",
         "the colour presets, each in its colour")
-    equal(optionsText(row(c, "Other items with the same appearance")), "notCollected=Only when not collected|always=Always|off=Never", "Other items' choices")
+    equal(optionsText(row(c, "Other items with this look")), "notCollected=Only when not collected|always=Always|off=Never", "Other items' choices")
     equal(stored(), FIRST_RUN, "the stored values")
     noErrors(c, "page")
     sentNothing(c, "page")
@@ -11154,30 +11155,30 @@ test("D2 page: a change on the page reaches the stored value and the next toolti
     equal(TransmogCheckerDB.tooltipStyle, "compact", "stored")
     local compact = lines(505)
     equal(compact[1] .. " (" .. #compact .. ")", "Not collected +2 items (1)", "the next tooltip is compact")
-    check(not row(c, "Lowest auction price seen this session").enabled, "Lowest price greyed in Compact")
+    check(not row(c, "Lowest auction price").enabled, "Lowest price greyed in Compact")
     check(row(c, "Tooltip style").enabled, "the others stay enabled")
     local styleVariable = settingOf(c, "Tooltip style"):GetVariable()
-    local on = row(c, "Lowest auction price seen this session").init.evaluateOn or {}
+    local on = row(c, "Lowest auction price").init.evaluateOn or {}
     check(on[1] == styleVariable or on[2] == styleVariable, "Lowest price re-evaluated when the style changes")
     settingOf(c, "Tooltip style"):SetValue("full")
     settingOf(c, "\"Not collected\" text color"):SetValue("white")
     c.hoverItem(itemLink(505))
     local status = GameTooltip.lines[2]
     equal(status.r .. "," .. status.g .. "," .. status.b, "1,1,1", "the next status in white")
-    settingOf(c, "Other items with the same appearance"):SetValue("off")
+    settingOf(c, "Other items with this look"):SetValue("off")
     equal(TransmogCheckerDB.otherItems, "off", "Other items stored")
-    settingOf(c, "Lowest auction price seen this session"):SetValue(false)
+    settingOf(c, "Lowest auction price"):SetValue(false)
     equal(TransmogCheckerDB.lowestPrice, false, "Lowest price stored")
     equal(#lines(701), 0, "a grey item: no line")
-    settingOf(c, "Show collection status on grey and white items"):SetValue(true)
+    settingOf(c, "Include grey & white items"):SetValue(true)
     equal(TransmogCheckerDB.skipPoorAndCommon, false, "Grey and white items on: skipped no longer")
     check(#lines(701) > 0, "the grey item gets its lines")
-    settingOf(c, "Show collection status on item tooltips"):SetValue(false)
+    settingOf(c, "Show collection status"):SetValue(false)
     equal(TransmogCheckerDB.tooltipShow, false, "Show stored")
     equal(#lines(505), 0, "Show off: no line")
     for i = 2, 6 do check(not row(c, LABELS[i]).enabled, LABELS[i] .. " greyed with Show off") end
-    check(row(c, "Show collection status on item tooltips").enabled and row(c, "Scan prices when the tab opens").enabled, "Show and Scan stay enabled")
-    settingOf(c, "Scan prices when the tab opens"):SetValue(false)
+    check(row(c, "Show collection status").enabled and row(c, "Scan prices when tab opens").enabled, "Show and Scan stay enabled")
+    settingOf(c, "Scan prices when tab opens"):SetValue(false)
     equal(TransmogCheckerDB.browser.scanWhenShown, false, "Scan when shown stored in the browser's table")
     noErrors(c, "page changes")
     sentNothing(c, "page changes")
@@ -11187,20 +11188,20 @@ test("D2 one source of truth: /tc alts, /tc skipgreys and the funnel's Scan when
     local c, tabs = visitTwice({ appearances = manySlots(), settings = true, saved = { scanWhenShown = false } })
     tabs[1].scripts.OnClick(tabs[1])
     local function signals(name) return c.settings.notified[settingOf(c, name):GetVariable()] or 0 end
-    local before = signals("Other items with the same appearance")
+    local before = signals("Other items with this look")
     said(c, "alts")
-    equal(row(c, "Other items with the same appearance").value, "always", "/tc alts: the page's value")
-    check(signals("Other items with the same appearance") > before, "/tc alts: the shown control told")
-    before = signals("Show collection status on grey and white items")
+    equal(row(c, "Other items with this look").value, "always", "/tc alts: the page's value")
+    check(signals("Other items with this look") > before, "/tc alts: the shown control told")
+    before = signals("Include grey & white items")
     said(c, "skipgreys")
-    equal(row(c, "Show collection status on grey and white items").value, true, "/tc skipgreys: the page's value")
-    check(signals("Show collection status on grey and white items") > before, "/tc skipgreys: the shown control told")
-    equal(row(c, "Scan prices when the tab opens").value, false, "Scan when shown off as saved")
-    before = signals("Scan prices when the tab opens")
+    equal(row(c, "Include grey & white items").value, true, "/tc skipgreys: the page's value")
+    check(signals("Include grey & white items") > before, "/tc skipgreys: the shown control told")
+    equal(row(c, "Scan prices when tab opens").value, false, "Scan when shown off as saved")
+    before = signals("Scan prices when tab opens")
     check(funnelPick(c, "Scan prices when the tab opens"), "the funnel's checkbox")
-    equal(row(c, "Scan prices when the tab opens").value, true, "the funnel's tick: the page's value")
-    check(signals("Scan prices when the tab opens") > before, "the funnel's tick: the shown control told")
-    settingOf(c, "Scan prices when the tab opens"):SetValue(false)
+    equal(row(c, "Scan prices when tab opens").value, true, "the funnel's tick: the page's value")
+    check(signals("Scan prices when tab opens") > before, "the funnel's tick: the shown control told")
+    settingOf(c, "Scan prices when tab opens"):SetValue(false)
     openMenu(c, funnelOf(c))
     local ticked
     for _, e in ipairs(c.menuEntries()) do if e ~= "-" and e.text == "Scan prices when the tab opens" then ticked = e.selected end end
@@ -11254,7 +11255,7 @@ test("D2 the funnel menu's last entry Settings… opens the page at Scan when sh
         if not opts.noMenuTemplates then equal(texts[#texts - 1], "-", "after a divider") end
         check(choose("Settings…"), "chosen")
         equal(#c.settings.opened, 1, "the page opens")
-        equal(c.settings.opened[1].element, "Scan prices when the tab opens", "scrolled to Appearances tab's setting")
+        equal(c.settings.opened[1].element, "Scan prices when tab opens", "scrolled to Appearances tab's setting")
         check(AuctionHouseFrame:IsShown(), "the auction window stays open")
         sentNothing(c, "settings from the funnel")
         noErrors(c, "settings from the funnel")
@@ -11312,7 +11313,7 @@ test("D2 preview: nothing before the page shows; two samples from the tooltip's 
     equal(shown[1], "Ivycloth Boots of the Eagle | Not collected +5 items\nBinds when equipped\nFeet | Cloth\n"
         .. "[bag]In your bags: equip it or sell it to a vendor to collect.", "Compact, not collected")
     equal(shown[2], "Runecloth Boots | [check]Collected\nBinds when equipped\nFeet | Cloth", "Compact, collected")
-    settingOf(c, "Show collection status on item tooltips"):SetValue(false)
+    settingOf(c, "Show collection status"):SetValue(false)
     shown = previewTexts(c)
     equal(shown[1] .. "\n" .. shown[2], "Ivycloth Boots of the Eagle\nBinds when equipped\nFeet | Cloth\n"
         .. "Runecloth Boots\nBinds when equipped\nFeet | Cloth", "Show off: the items' own lines")
@@ -11536,7 +11537,9 @@ test("E2 funnel: a square 30 plate of its own, the template's art hidden, the gl
     local plates = findAll(c, function(w)
         return w.kind == "Texture" and w.parent == funnel and w.layer == "BACKGROUND" and w.color ~= nil
     end)
-    check(#plates >= 1, "a plate of its own")
+    -- ledger (slice F, F2): the plate is now the square button art on the
+    -- funnel's own textures; the plain one is the fallback
+    check(#plates >= 1 or funnel.calls.SetNormalTexture ~= nil, "a plate of its own")
     for _, p in ipairs(plates) do
         local square = p.calls.SetAllPoints ~= nil or (#p.points == 2 and p.points[1].x == -p.points[2].x
             and p.points[1].y == -p.points[2].y)
@@ -11548,6 +11551,109 @@ test("E2 funnel: a square 30 plate of its own, the template's art hidden, the gl
     local mark = markOf(c)
     equal(mark.width .. " " .. mark.points[1].relativePoint .. " " .. point(mark), "22 TOPRIGHT 2,-9", "the mark where it was")
     noErrors(c, "square funnel")
+end)
+
+-- Slice F, F1: a row's label is GameFontNormal (Friz Quadrata 12) from the
+-- row's x 37 to 85 left of its centre (Blizzard_SettingControls.lua:356-360),
+-- about 195 wide in the default panel: 27 characters, the owner's screenshot
+-- cutting at 29 to 31. Each label fits; each hover text opens with one
+-- sentence that says what the setting does.
+local LABEL_LIMIT = 27
+local FIRST_SENTENCES = {
+    ["Show collection status"] = "Adds lines to item tooltips that say whether the item's appearance is collected.",
+    ["Other items with this look"] = "Lists the other items that give the same appearance.",
+    ["Lowest auction price"] = "Shows the lowest auction price the Appearances tab has seen for this appearance since you logged in or reloaded.",
+    ["Include grey & white items"] = "Also shows collection status on grey (Poor) and white (Common) items.",
+    ["Scan prices when tab opens"] = "Scans the auction house for the selected slot each time the Appearances tab is shown.",
+}
+test("F1 labels: every label fits in 27 characters; each reworded setting's hover text opens with what it does", function()
+    local c = d2()
+    local seen = 0
+    for _, r in ipairs(page(c)) do
+        if r.name then
+            check(#r.name <= LABEL_LIMIT, ("%q: %d characters, at most %d"):format(r.name, #r.name, LABEL_LIMIT))
+            local first = FIRST_SENTENCES[r.name]
+            if first then
+                seen = seen + 1
+                equal(r.tooltip:sub(1, #first), first, r.name .. ": the hover text's first sentence")
+                local after = r.tooltip:sub(#first + 1, #first + 1)
+                check(after == "" or after == " ", r.name .. ": the sentence ends there")
+            end
+        end
+    end
+    equal(seen, 5, "the five reworded settings on the page")
+    noErrors(c, "labels")
+end)
+
+-- Slice F, F2: the plate is the game's square icon button art, the art of
+-- the auction house's refresh button (RefreshButtonTemplate inherits
+-- SquareIconButtonTemplate, Blizzard_AuctionHouseSharedTemplates.xml:100,
+-- SharedUIPanelTemplates.xml:1332, IconButtonTemplate.xml:53-56), on
+-- textures of the funnel's own; the glyph moves as that template's icon
+-- does while pressed (IconButtonTemplate.lua:55-68: one left, one down).
+local SQUARE_UP, SQUARE_DOWN = "Interface\\Buttons\\UI-SquareButton-Up", "Interface\\Buttons\\UI-SquareButton-Down"
+local SQUARE_LIT = "Interface\\Buttons\\UI-Common-MouseHilight"
+local function squareParts(funnel, c)
+    local normal = funnel.calls.SetNormalTexture and funnel.calls.SetNormalTexture[1]
+    local pushed = funnel.calls.SetPushedTexture and funnel.calls.SetPushedTexture[1]
+    local lit = find(c, function(w) return w.kind == "Texture" and w.parent == funnel and w.layer == "HIGHLIGHT" and visible(w) end)
+    local plain = findAll(c, function(w)
+        return w.kind == "Texture" and w.parent == funnel and w.layer == "BACKGROUND" and w.color ~= nil
+    end)
+    return normal, pushed, lit, plain
+end
+test("F2 funnel: the game's square button art as its normal, pushed and hover plate; the glyph pressed down a pixel; the template's art hidden", function()
+    local c, tabs = visitTwice({ appearances = manySlots() })
+    tabs[1].scripts.OnClick(tabs[1])
+    local funnel = funnelOf(c)
+    equal(funnel.width .. "x" .. funnel.height, "30x30", "square, its size")
+    equal(funnel.Background.calls.SetAlpha and funnel.Background.calls.SetAlpha[1], 0, "the template's wide plate art hidden")
+    local normal, pushed, lit, plain = squareParts(funnel, c)
+    check(type(normal) == "table" and normal.parent == funnel, "normal: a texture of the funnel's own")
+    check(type(pushed) == "table" and pushed.parent == funnel and pushed ~= normal, "pushed: another of its own")
+    equal(normal and texturePath(normal), SQUARE_UP, "normal: the square button's raised art")
+    equal(pushed and texturePath(pushed), SQUARE_DOWN, "pushed: its pressed art")
+    equal(lit and texturePath(lit), SQUARE_LIT, "hover: the game's button highlight")
+    equal(lit and lit.calls.SetBlendMode and lit.calls.SetBlendMode[1], "ADD", "the highlight added")
+    equal(#plain, 0, "no plain plate")
+    equal(funnel.icon.layer, "OVERLAY", "the glyph over the plate, as the template's icon (IconButtonTemplate.xml:24-29)")
+    equal(funnel.icon.points[1].point .. " " .. point(funnel.icon), "CENTER 0,0", "the glyph centred")
+    funnel.scripts.OnMouseDown(funnel)
+    equal(point(funnel.icon), "-1,-1", "pressed: the glyph a pixel left and down")
+    funnel.scripts.OnMouseUp(funnel)
+    equal(point(funnel.icon), "0,0", "released: centred again")
+    funnel:CloseMenu()
+    equal(markOf(c).points[1].relativePoint .. " " .. point(markOf(c)), "TOPRIGHT 2,-9", "the mark where it was")
+    noErrors(c, "square art")
+end)
+
+test("F2 funnel: while a filter differs the red mark alone says so; the highlight is never held, so hover still shows", function()
+    local c, tabs = visitTwice({ appearances = manySlots(), saved = { scanWhenShown = false } })
+    tabs[1].scripts.OnClick(tabs[1])
+    local funnel = funnelOf(c)
+    check(funnelPick(c, "Not collected"), "a filter changed")
+    check(visible(markOf(c)), "the red mark")
+    check(not funnel.highlightLocked, "no held highlight")
+    noErrors(c, "no held highlight")
+end)
+
+test("F2 funnel: when any of the square button's files fails to load, the plain plate of before", function()
+    for _, file in ipairs({ SQUARE_UP, SQUARE_DOWN, SQUARE_LIT }) do
+        local c, tabs = visitTwice({ appearances = manySlots(), missingFiles = { [file] = true } })
+        tabs[1].scripts.OnClick(tabs[1])
+        local funnel = funnelOf(c)
+        local normal, pushed, lit, plain = squareParts(funnel, c)
+        check(normal == nil and pushed == nil, file .. " missing: no state art set")
+        check(#plain >= 1, file .. " missing: the plain plate")
+        check(lit and lit.color ~= nil and visible(lit), file .. " missing: the plain plate's hover")
+        local stray = find(c, function(w)
+            local path = w.kind == "Texture" and w.parent == funnel and texturePath(w)
+            return (path == SQUARE_UP or path == SQUARE_DOWN or path == SQUARE_LIT) and visible(w)
+        end)
+        check(stray == nil, file .. " missing: none of the square art shows")
+        equal(funnel.icon.width .. " " .. point(funnel.icon), "20 0,0", file .. " missing: the glyph as before")
+        noErrors(c, file .. " missing")
+    end
 end)
 
 end

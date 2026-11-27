@@ -4,11 +4,10 @@ TC = TC or {}
 
 -- The item tooltip's settings (addon-settings v1, section "Item tooltip"),
 -- each with its default and its values; a stored value that is not one of
--- them loads as the default. Labels: Show collection status on item
--- tooltips, Tooltip style, "Not collected" text color, Other items with the
--- same appearance, Lowest auction price seen this session, Show collection
--- status on grey and white items (the inverse of skipPoorAndCommon, kept
--- from before); debug stays /tc debug.
+-- them loads as the default. Labels: Show collection status, Tooltip
+-- style, "Not collected" text color, Other items with this look, Lowest
+-- auction price, Include grey & white items (the inverse of
+-- skipPoorAndCommon, kept from before); debug stays /tc debug.
 local BOOLEAN = { [true] = true, [false] = true }
 local SETTINGS = {
     tooltipShow = { default = true, values = BOOLEAN },
@@ -116,12 +115,12 @@ SlashCmdList["TC"] = function(msg)
         print("|cFF9D9D9DTC:|r Debug mode " .. (TC.Config.debug and "enabled" or "disabled"))
     elseif cmd == "alts" or cmd == "hidealts" then
         TC.SetSetting("otherItems", TC.Setting("otherItems") == "always" and "notCollected" or "always")
-        say("Other items with the same appearance: " .. (TC.Setting("otherItems") == "always" and "always" or "only when not collected"))
+        say("Other items with this look: " .. (TC.Setting("otherItems") == "always" and "always" or "only when not collected"))
     elseif cmd == "filter" or cmd == "blizz" then
         say("Blizzard's \"not collected\" line is now always hidden while TransmogChecker's lines show.")
     elseif cmd == "skipgreys" or cmd == "greys" or cmd == "grays" then
         TC.SetSetting("skipPoorAndCommon", not TC.Setting("skipPoorAndCommon"))
-        say("Show collection status on grey and white items: " .. (TC.Setting("skipPoorAndCommon") and "off" or "on"))
+        say("Include grey & white items: " .. (TC.Setting("skipPoorAndCommon") and "off" or "on"))
     else
         help()
     end

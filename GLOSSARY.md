@@ -49,7 +49,7 @@ The appearance browser's filter by how an appearance's items are obtained, one e
 _Avoid_: Origin filter, drop filter
 
 **Scan prices when the tab opens**:
-The appearance browser's setting that scans the slot when the tab is shown or the slot is selected, unless the slot has a scan from this visit. Off, only a click reads the auction house.
+The appearance browser's setting that scans the slot when the tab is shown or the slot is selected, unless the slot has a scan from this visit. Off, only a click reads the auction house. The funnel's menu names it so; the settings page labels it "Scan prices when tab opens", to fit its label column.
 _Avoid_: Scan when shown, auto-scan, auto-refresh
 
 **Check**:

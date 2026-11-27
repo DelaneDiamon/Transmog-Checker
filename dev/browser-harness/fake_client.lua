@@ -260,6 +260,10 @@ function Fake.new(opts)
         self.points[#self.points + 1] = { point = point, relativeTo = relativeTo, relativePoint = relativePoint, x = x or 0, y = y or 0 }
     end
     function methods:ClearAllPoints() self.points = {} end
+    -- every point moved by (x, y) (SimpleScriptRegionResizingAPIDocumentation.lua:10-20)
+    function methods:AdjustPointsOffset(x, y)
+        for _, p in ipairs(self.points) do p.x, p.y = p.x + x, p.y + y end
+    end
     function methods:SetSize(w, h) self.width, self.height = w, h end
     function methods:SetWidth(w) self.width = w end
     function methods:SetHeight(h) self.height = h end
@@ -761,6 +765,25 @@ function Fake.new(opts)
         if selectionText then w.width, w.height = 120, 25 end
         w.Text = w:CreateFontString()
         w.scripts.OnMouseDown = function(self) self:SetMenuOpen(not self:IsMenuOpen()) end
+        -- the filter template's ButtonStateBehaviorMixin: its displaced
+        -- regions move by (x, y) on a press and back on the release, the
+        -- text by (2, -1) unless SetDisplacedRegions says otherwise
+        -- (ButtonStateBehavior.lua:14-18, 59-92; MenuTemplates.lua:1019-1020)
+        if template == "WowStyle1FilterDropdownTemplate" then
+            w.displacedRegions, w.displaceX, w.displaceY = { w.Text }, 2, -1
+            function w:SetDisplacedRegions(x, y, ...)
+                self.displacedRegions, self.displaceX, self.displaceY = { ... }, x, y
+            end
+            local function displace(self, sign)
+                if not self:IsEnabled() then return end
+                for _, region in ipairs(self.displacedRegions) do
+                    region:AdjustPointsOffset(sign * self.displaceX, sign * self.displaceY)
+                end
+            end
+            local press = w.scripts.OnMouseDown
+            w.scripts.OnMouseDown = function(self) press(self) displace(self, 1) end
+            w.scripts.OnMouseUp = function(self) displace(self, -1) end
+        end
         if opts.noMenuAPI then return w end
         -- DropdownTextMixin:SetText (MenuTemplates.lua:731-734); the filter
         -- template starts on FILTER and has its Background

@@ -2,7 +2,7 @@
 -- in the game's Options > AddOns, made with the client's settings API
 -- (Blizzard_Settings_Shared/Blizzard_Settings.lua). A preview of the item
 -- tooltip at the top, then "Item tooltip" with six settings and "Appearances
--- tab" with Scan prices when the tab opens (labels: slice E, E3). Each
+-- tab" with Scan prices when tab opens (labels: slice F, F1). Each
 -- setting is a proxy setting (Settings.RegisterProxySetting(category,
 -- variable, variableType, name, defaultValue, getValue, setValue),
 -- Blizzard_Settings.lua:178-180) over the addon's own stored value: TC.Setting / TC.SetSetting, and for Scan when
@@ -23,25 +23,33 @@ local Page = TC.Settings
 local NAME = "TransmogChecker"
 local SECTION_TOOLTIP, SECTION_BROWSER = "Item tooltip", "Appearances tab"
 -- The rows of "Item tooltip" (addon-settings v1, "Every setting"): label,
--- tooltip and, for a dropdown, its choices. "Show collection status on grey
--- and white items" is the inverse of the stored skipPoorAndCommon: ticked,
--- the lines show on them.
+-- tooltip and, for a dropdown, its choices. "Include grey & white items" is
+-- the inverse of the stored skipPoorAndCommon: ticked, the lines show on
+-- them. A label fits the row's label column without "…": GameFontNormal
+-- (Friz Quadrata 12, Fonts.xml:275-277) from the row's x 37 to 85 left of
+-- its centre (Blizzard_SettingControls.lua:356-360), about 195 wide in the
+-- default panel, 27 characters (slice F, F1). The hover text's title is the
+-- label; its first sentence says what the setting does.
 local ROWS = {
-    { key = "tooltipShow", label = "Show collection status on item tooltips",
-        tip = "Show on every item tooltip whether you have collected its appearance." },
+    { key = "tooltipShow", label = "Show collection status",
+        tip = "Adds lines to item tooltips that say whether the item's appearance is collected." },
     { key = "tooltipStyle", label = "Tooltip style",
         tip = "Full: the status, how to collect it, the lowest price and other items. Compact: the status on the item's name line.",
         choices = { { "full", "Full" }, { "compact", "Compact" } } },
     { key = "notCollectedColor", label = "\"Not collected\" text color", tip = "The color of \"Not collected\" on item tooltips.",
         choices = { { "orange", "|cFFFF7F00Orange|r" }, { "lightBlue", "|cFF87ABFFLight blue|r" }, { "white", "White" } } },
-    { key = "otherItems", label = "Other items with the same appearance",
-        tip = "Other items with the same appearance, and where they come from. Compact shows only how many.",
+    { key = "otherItems", label = "Other items with this look",
+        tip = "Lists the other items that give the same appearance. Full shows where each comes from; Compact shows only how many.",
         choices = { { "notCollected", "Only when not collected" }, { "always", "Always" }, { "off", "Never" } } },
-    { key = "lowestPrice", label = "Lowest auction price seen this session", tip = "The lowest price the Appearances tab found this session. Full style only." },
-    { key = "skipPoorAndCommon", label = "Show collection status on grey and white items", tip = "Also show the status on grey and white items.", inverted = true },
+    { key = "lowestPrice", label = "Lowest auction price",
+        tip = "Shows the lowest auction price the Appearances tab has seen for this appearance since you logged in or reloaded. Full style only." },
+    { key = "skipPoorAndCommon", label = "Include grey & white items",
+        tip = "Also shows collection status on grey (Poor) and white (Common) items.", inverted = true },
 }
-local SCAN = { key = "scanWhenShown", label = "Scan prices when the tab opens",
-    tip = "Scan the slot when the Appearances tab opens. This reads the auction house." }
+-- The funnel menu's entry keeps its longer wording, "Scan prices when the
+-- tab opens"; the funnel's Settings… opens the page at this label.
+local SCAN = { key = "scanWhenShown", label = "Scan prices when tab opens",
+    tip = "Scans the auction house for the selected slot each time the Appearances tab is shown." }
 
 local category
 -- the registered settings by stored key

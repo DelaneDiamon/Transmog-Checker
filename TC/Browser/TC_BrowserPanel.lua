@@ -145,12 +145,20 @@ local FUNNEL_X, FUNNEL_Y, FUNNEL_SIZE, MARK_SIZE, MARK_X, MARK_Y = 743, 4, 30, 2
 -- size (slice E, E2): the filter template's plate (its Background,
 -- MenuTemplates.xml:91, drawn 4 past each edge) is the art of a wide
 -- "Filter" button, which squeezed into a square read wider than tall with a
--- thin bright sliver at its right, so it is hidden. The plate is the price
--- strip's dark fill inside a 1 line of the tiles' border, lit on hover and
--- while a choice differs (LockHighlight); when its file fails to load, the
--- owner's earlier choice, the settings button of Blizzard_DamageMeter/DamageMeterSettingsDropdownButton.xml:5-8,
+-- thin bright sliver at its right, so it is hidden. The plate (slice F, F2)
+-- is the game's square icon button, the auction house's refresh button's
+-- art (RefreshButtonTemplate inherits SquareIconButtonTemplate,
+-- Blizzard_AuctionHouseSharedTemplates.xml:100, SharedUIPanelTemplates.xml:
+-- 1332, IconButtonTemplate.xml:40-57): raised, pressed and the hover light,
+-- on the funnel's own textures; pressed, the glyph moves a pixel left and
+-- down as that template's icon does (IconButtonTemplate.lua:55-68). When a
+-- file fails to load, the plate of slice E: the price strip's dark fill
+-- inside a 1 line of the tiles' border, lit on hover. When the glyph's
+-- file fails to load, the owner's earlier choice, the settings button of Blizzard_DamageMeter/DamageMeterSettingsDropdownButton.xml:5-8,
 -- with its hover and pressed forms; without that the world map's filter art.
 local FUNNEL_GLYPH = 20
+local SQUARE_UP, SQUARE_DOWN = "Interface\\Buttons\\UI-SquareButton-Up", "Interface\\Buttons\\UI-SquareButton-Down"
+local SQUARE_LIT, SQUARE_PRESS_X, SQUARE_PRESS_Y = "Interface\\Buttons\\UI-Common-MouseHilight", -1, -1
 local FUNNEL_ATLAS = "common-dropdown-a-button-settings-shadowless"
 local FUNNEL_HOVER = "common-dropdown-a-button-settings-hover-shadowless"
 local FUNNEL_PRESSED = "common-dropdown-a-button-settings-pressed-shadowless"
@@ -160,7 +168,9 @@ local FUNNEL_FALLBACK, RESET_ATLAS = "Map-Filter-Button", "auctionhouse-ui-filte
 local FUNNEL_TEXT, FUNNEL_TIP = "Filter", "Filter and sort"
 local CLASS_TEXT, RESET_TEXT = "Class: %s", "Reset filters"
 local FOR_SALE_TEXT, SOURCE_TEXT, SORT_TEXT, SCAN_SHOWN_TEXT = "For sale only", "Source", "Sort", "Scan prices when the tab opens"
-local SETTINGS_TEXT = "Settings…"
+-- the settings page's own, shorter label for Scan when shown (slice F, F1),
+-- where the funnel's Settings… opens the page
+local SETTINGS_TEXT, SCAN_SETTING = "Settings…", "Scan prices when tab opens"
 -- A checkbox's mark in the panel's own list menu, without Blizzard's menu.
 local TICKED, UNTICKED = "[x] ", "[ ] "
 -- The band under the header: the count at x 28, y 42, and the weapon type
@@ -1089,7 +1099,7 @@ end
 -- opens the settings page at Scan when shown (slice D2), where the client
 -- has the page.
 local function settingsPage() return TC.Settings ~= nil and TC.Settings.Available() end
-local function openSettings() TC.Settings.Open(SCAN_SHOWN_TEXT) end
+local function openSettings() TC.Settings.Open(SCAN_SETTING) end
 local function newFunnel(panel)
     local current
     local function selected(entry) return entry ~= nil and entry.selected end
@@ -1148,7 +1158,7 @@ local function newFunnel(panel)
     -- loads (SetTexture answers whether it did,
     -- SimpleTextureBaseAPIDocumentation.lua:604-619); else the owner's
     -- earlier art, else the world map's filter art, else the text
-    local glyph = funnel:CreateTexture(nil, "ARTWORK")
+    local glyph = funnel:CreateTexture(nil, "OVERLAY")
     glyph:SetSize(FUNNEL_GLYPH, FUNNEL_GLYPH)
     glyph:SetPoint("CENTER")
     local art
@@ -1157,16 +1167,33 @@ local function newFunnel(panel)
         -- Blizzard's dropdown (the own button keeps its panel button art)
         if not menu and funnel.Background then
             funnel.Background:SetAlpha(0)
-            local edge = funnel:CreateTexture(nil, "BACKGROUND")
-            edge:SetAllPoints()
-            edge:SetColorTexture(unpack(BORDER))
-            local fill = funnel:CreateTexture(nil, "BACKGROUND", nil, 1)
-            fill:SetPoint("TOPLEFT", 1, -1)
-            fill:SetPoint("BOTTOMRIGHT", -1, 1)
-            fill:SetColorTexture(unpack(STRIP_TOP))
+            local up, down = funnel:CreateTexture(nil, "BACKGROUND"), funnel:CreateTexture(nil, "BACKGROUND")
             local lit = funnel:CreateTexture(nil, "HIGHLIGHT")
-            lit:SetAllPoints(fill)
-            lit:SetColorTexture(1, 0.82, 0, 0.15)
+            if up:SetTexture(SQUARE_UP) ~= false and down:SetTexture(SQUARE_DOWN) ~= false
+                and lit:SetTexture(SQUARE_LIT) ~= false then
+                -- the button shows each by its own state; the template's
+                -- press moves its displaced regions (ButtonStateBehavior.lua:
+                -- 14-18, 59-92), here the glyph as the square button's icon
+                for _, texture in ipairs({ up, down, lit }) do texture:SetAllPoints() end
+                lit:SetBlendMode("ADD")
+                funnel:SetNormalTexture(up)
+                funnel:SetPushedTexture(down)
+                if funnel.SetDisplacedRegions then funnel:SetDisplacedRegions(SQUARE_PRESS_X, SQUARE_PRESS_Y, funnel.Text, glyph) end
+            else
+                up:Hide()
+                down:Hide()
+                lit:Hide()
+                local edge = funnel:CreateTexture(nil, "BACKGROUND")
+                edge:SetAllPoints()
+                edge:SetColorTexture(unpack(BORDER))
+                local fill = funnel:CreateTexture(nil, "BACKGROUND", nil, 1)
+                fill:SetPoint("TOPLEFT", 1, -1)
+                fill:SetPoint("BOTTOMRIGHT", -1, 1)
+                fill:SetColorTexture(unpack(STRIP_TOP))
+                local plainLit = funnel:CreateTexture(nil, "HIGHLIGHT")
+                plainLit:SetAllPoints(fill)
+                plainLit:SetColorTexture(1, 0.82, 0, 0.15)
+            end
         end
     else
         glyph:Hide()
@@ -1234,11 +1261,9 @@ local function newFunnel(panel)
     tooltip(mark, RESET_TEXT)
     function funnel.draw(view)
         current = view
+        -- the mark alone says a choice differs from the start: no held
+        -- highlight, so a hover still shows (slice F, F2)
         mark:SetShown(view.filtersChanged)
-        -- the button itself looks active while a choice differs from the start
-        if funnel.LockHighlight then
-            if view.filtersChanged then funnel:LockHighlight() else funnel:UnlockHighlight() end
-        end
         -- the own list is filled while it is shown: at its opening and on a change
         if not (menu and menu:IsShown()) then return end
         local function mark(on) return on and TICKED or UNTICKED end
