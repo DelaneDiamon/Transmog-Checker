@@ -3684,9 +3684,15 @@ test("class: All classes, then the client's nine classes in its order, the chara
     d = TC.BrowserState.View().classes
     equal(d.text, "All classes", "text for All classes")
     equal(d.classFile, nil, "no class colour for All classes")
+    -- ledger (slice D2): All classes is remembered; a single class still
+    -- starts the next visit on the own class
     TC.BrowserState.Reset()
     TC.BrowserState.Refresh()
-    equal(TC.BrowserState.View().classes.text, "Warlock", "a new visit starts on the own class")
+    equal(TC.BrowserState.View().classes.text, "All classes", "a new visit keeps All classes (slice D2)")
+    TC.BrowserState.SelectClass(8)
+    TC.BrowserState.Reset()
+    TC.BrowserState.Refresh()
+    equal(TC.BrowserState.View().classes.text, "Warlock", "after a single class, a new visit starts on the own class")
 end)
 
 test("class: on an armor slot each class sees the armor types it wears; no armor type and Generic show for every class", function()
@@ -6400,7 +6406,8 @@ test("B state: the funnel's Show and class choices, the changed mark and Reset f
     equal(table.concat(names, "|"), "All*|Collected|Not collected", "the Show entries, the chosen marked")
     equal(v.filterFixed, nil, "Show is never fixed")
     TC.BrowserState.SelectClass("all")
-    equal(TC.BrowserState.View().filtersChanged, true, "All classes differs from the start")
+    -- fix D F4: All classes is neutral now (this asserted the mark)
+    equal(TC.BrowserState.View().filtersChanged, false, "All classes is neutral: no mark")
     TC.BrowserState.SelectClass(9)
     equal(TC.BrowserState.View().filtersChanged, false, "the own class chosen again is the start")
     TC.BrowserState.SetFilter("Not collected")
@@ -6584,9 +6591,15 @@ test("B whole: the funnel's mark shows while a choice differs; the mark and Rese
     check(cy - mark.height / 2 >= 2, "the mark's top at least 2 below the panel's top")
     local names, choose = classEntries(c)
     choose(names[1])
-    check(visible(mark), "the mark after All classes")
-    check(funnel.highlightLocked, "the funnel's highlight is held while another class is chosen")
+    -- fix D F4: All classes is neutral (this asserted the mark after it)
+    check(not visible(mark), "no mark after All classes")
     check(textShown(c, "7 appearances"), "count under All classes")
+    local other
+    for _, name in ipairs(names) do if name ~= "All classes" and name ~= "Warlock" then other = other or name end end
+    names, choose = classEntries(c)
+    choose(other)
+    check(visible(mark), "the mark after another class")
+    check(funnel.highlightLocked, "the funnel's highlight is held while another class is chosen")
     check(c.click(mark), "the mark clicked")
     check(not visible(mark), "the mark gone after the reset")
     check(not funnel.highlightLocked, "the funnel's highlight released after the reset")
@@ -7091,8 +7104,10 @@ test("B whole: the tab, both toggles on a scanned slot, the funnel, paging and f
 end)
 
 test("B whole: without the icon and menu templates and the atlases every control is still there and works", function()
+    -- ledger (slice D2): the funnel's Media file fails too, so no art is left
     local c, tabs = visitTwice({ appearances = manySlots(), noMenuTemplates = true, noAtlases = true,
-        noTemplates = { UIPanelCloseButton = true, SpinnerTemplate = true } })
+        noTemplates = { UIPanelCloseButton = true, SpinnerTemplate = true },
+        missingFiles = { ["Interface\\AddOns\\TransmogChecker\\Media\\funnel"] = true } })
     tabs[1].scripts.OnClick(tabs[1])
     -- ledger (slice B): the toggles' fallbacks went with the toggles; the
     -- sweep toggle's scan is the scan control's
@@ -7430,8 +7445,11 @@ test("chosen art: the mark at the funnel's top right", function()
     noErrors(c, "chosen art")
 end)
 
+-- ledger (slice D2): the funnel's Media file comes first now; these art
+-- tests run with that file failing, so they cover the fallbacks
+local NO_FUNNEL_FILE = { ["Interface\\AddOns\\TransmogChecker\\Media\\funnel"] = true }
 test("chosen art: the funnel's settings art with its hover and pressed forms; then Map-Filter-Button; then the text", function()
-    local c, tabs = visitTwice({ appearances = manySlots() })
+    local c, tabs = visitTwice({ appearances = manySlots(), missingFiles = NO_FUNNEL_FILE })
     tabs[1].scripts.OnClick(tabs[1])
     local funnel = funnelOf(c)
     equal(funnel.icon.calls.SetAtlas[1], "common-dropdown-a-button-settings-shadowless", "the owner's art")
@@ -7440,11 +7458,12 @@ test("chosen art: the funnel's settings art with its hover and pressed forms; th
     equal(funnel.icon.calls.SetAtlas[1], "common-dropdown-a-button-settings-hover-shadowless", "hover")
     funnel.scripts.OnLeave(funnel)
     equal(funnel.icon.calls.SetAtlas[1], "common-dropdown-a-button-settings-shadowless", "back")
-    local d, t = visitTwice({ appearances = manySlots(), noAtlases = { ["common-dropdown-a-button-settings-shadowless"] = true } })
+    local d, t = visitTwice({ appearances = manySlots(), noAtlases = { ["common-dropdown-a-button-settings-shadowless"] = true },
+        missingFiles = NO_FUNNEL_FILE })
     t[1].scripts.OnClick(t[1])
     equal(funnelOf(d).icon.calls.SetAtlas[1], "Map-Filter-Button", "the first fallback")
     local e, u = visitTwice({ appearances = manySlots(), noAtlases = { ["common-dropdown-a-button-settings-shadowless"] = true,
-        ["Map-Filter-Button"] = true } })
+        ["Map-Filter-Button"] = true }, missingFiles = NO_FUNNEL_FILE })
     u[1].scripts.OnClick(u[1])
     equal(funnelOf(e).text, "Filter", "the text last")
     for _, x in ipairs({ c, d, e }) do noErrors(x, "funnel art") end
@@ -7604,7 +7623,7 @@ end)
 
 test("F6 funnel: the open form while its menu is open, the normal form after; pressed forms follow the mouse", function()
     local ART = "common-dropdown-a-button-settings-"
-    local c, tabs = visitTwice({ appearances = manySlots() })
+    local c, tabs = visitTwice({ appearances = manySlots(), missingFiles = NO_FUNNEL_FILE })
     tabs[1].scripts.OnClick(tabs[1])
     local funnel = funnelOf(c)
     local function atlas() return funnel.icon.calls.SetAtlas[1] end
@@ -7633,7 +7652,7 @@ test("F6 funnel: the open form while its menu is open, the normal form after; pr
     noErrors(c, "funnel forms")
     -- without the extra atlases: today's behaviour
     local d, t = visitTwice({ appearances = manySlots(), noAtlases = { [ART .. "open-shadowless"] = true,
-        [ART .. "pressedhover-shadowless"] = true, [ART .. "pressed-shadowless"] = true } })
+        [ART .. "pressedhover-shadowless"] = true, [ART .. "pressed-shadowless"] = true }, missingFiles = NO_FUNNEL_FILE })
     t[1].scripts.OnClick(t[1])
     local f = funnelOf(d)
     f.scripts.OnEnter(f)
@@ -9074,12 +9093,22 @@ local function fmtLine(line)
     if line.right and line.rightShown ~= false then s = s .. " | " .. hexOf(line.rr, line.rg, line.rb) .. ":" .. marked(line.right) end
     return s
 end
--- The item shown in GameTooltip (from the bags with bag), its lines formatted
--- and joined by newlines.
-local function shown(c, itemID, bag)
-    c.hoverItem(itemLink(itemID), nil, bag and { getterName = "GetBagItem" } or nil)
+-- The item shown in the tooltip (GameTooltip by default), its lines
+-- formatted and joined by newlines. bag: true for the backpack, a bag
+-- index, or "unknown" for a bag item whose info has no bag index; its
+-- primary info as the client's SetBagItem(bag, slot) makes it
+-- (TooltipDataHandler.lua:495-503: getterName, getterArgs = SafePack(...)).
+local function shown(c, itemID, bag, tooltip)
+    tooltip = tooltip or GameTooltip
+    local info
+    if bag == "unknown" then
+        info = { getterName = "GetBagItem" }
+    elseif bag then
+        info = { getterName = "GetBagItem", getterArgs = { bag == true and 0 or bag, 1, n = 2 } }
+    end
+    c.hoverItem(itemLink(itemID), tooltip, info)
     local out = {}
-    for i, line in ipairs(GameTooltip.lines) do out[i] = fmtLine(line) end
+    for i, line in ipairs(tooltip.lines) do out[i] = fmtLine(line) end
     return table.concat(out, "\n")
 end
 -- The status line of an item with no game lines (the second, after the blank line).
@@ -9132,11 +9161,16 @@ test("TC-15 the bind sentence: only on a bind-on-equip item not collected, once 
     tipNoErrors(c, "bind sentence")
 end)
 
-test("TC-15 no line for an item with no appearance, a non-gear item, or another tooltip", function()
+-- fix D F2: ItemRefTooltip (a clicked chat link) is annotated now; this
+-- test asserted it got nothing. Comparison, shopping and embedded tooltips
+-- still get nothing.
+test("TC-15 no line for an item with no appearance, a non-gear item, or a comparison, shopping or embedded tooltip", function()
     local c = tipFixture()
     equal(#tipLines(c, 950), 0, "950 has no appearance")
     equal(#tipLines(c, 800), 0, "800 is not gear")
-    equal(#tipLines(c, 501, c.newTooltip("ItemRefTooltip")), 0, "ItemRefTooltip")
+    for _, name in ipairs({ "ShoppingTooltip1", "ShoppingTooltip2", "ItemRefShoppingTooltip1", "EmbeddedItemTooltipTooltip" }) do
+        equal(#tipLines(c, 501, c.newTooltip(name)), 0, name)
+    end
     equal(statusOf(c, 501), COLLECTED, "GameTooltip still")
     tipNoErrors(c, "no line")
 end)
@@ -9488,6 +9522,44 @@ test("D1 Compact's fallback: the name line's right side taken, writing it failin
     c.noRightRegions = true
     equal(shown(c, 1401), lines({ "FFFFFF:Cape of the Brotherhood", ORANGE .. ":Not collected" }), "4, no right region")
     tipNoErrors(c, "fallback")
+end)
+
+-- fix D F2: the design's fourth case is a chat link, the window it opens ItemRefTooltip.
+test("D1 a chat link: ItemRefTooltip gets GameTooltip's lines in Full; in Compact the fallback line, its name line untouched", function()
+    local c = pageFixture()
+    priced(c, 13, 1301, 7450)
+    local ref = c.newTooltip("ItemRefTooltip")
+    for _, itemID in ipairs({ 1101, 1201, 1301, 1401, 1501 }) do
+        local expected = shown(c, itemID)
+        check(expected:find("\n", 1, true), itemID .. ": GameTooltip has our lines")
+        equal(shown(c, itemID, nil, ref), expected, itemID .. ", Full: the same lines")
+    end
+    TC.SetSetting("tooltipStyle", "compact")
+    equal(shown(c, 1401), "FFFFFF:Cape of the Brotherhood | " .. ORANGE .. ":Not collected", "GameTooltip: on the name line")
+    equal(shown(c, 1401, nil, ref), lines({ "FFFFFF:Cape of the Brotherhood", ORANGE .. ":Not collected" }), "4, Compact: the fallback")
+    equal(shown(c, 1101, nil, ref), lines({ "FFFFFF:Runecloth Boots", COLLECTED }), "1, Compact: the fallback")
+    check(not ref.lines[1].rightShown and ref.lines[1].right == nil, "the name line's right side not written")
+    noErrors(c, "chat link")
+    equal(#c.ah.sends, 1, "only the check that found the price was read")
+end)
+
+-- fix D F3: SetBagItem shows bank slots too (Camelot/BankFrame.lua:329-338);
+-- only a carried bag (the backpack 0 through NUM_TOTAL_EQUIPPED_BAG_SLOTS,
+-- Constants.lua:165-170) is "In your bags".
+test("D1 In your bags: only for a carried bag; a bank bag or an unknown bag index falls through to the next rule", function()
+    local c = pageFixture()
+    local elsewhere = shown(c, 1301)
+    check(not elsewhere:find(IN_BAGS, 1, true), "a chat or merchant item: not in the bags")
+    for _, bag in ipairs({ 0, 1, 4, 5 }) do
+        equal(shown(c, 1301, bag), lines(CASE3_FULL), "carried bag " .. bag)
+    end
+    for _, bag in ipairs({ -3, -2, -1, 6, 14, 15, "unknown" }) do
+        equal(shown(c, 1301, bag), elsewhere, "bag " .. tostring(bag) .. ": the next rule")
+    end
+    TC.BrowserState.SetBags({ [13] = true })
+    equal(shown(c, 1301, 6), lines(CASE3_FULL), "a bank item whose appearance the browser's bag read found: in the bags")
+    TC.BrowserState.SetBags({})
+    tipNoErrors(c, "bag index")
 end)
 
 test("D1 the other items' cap: 1, 3 and 4 listed in full, 9 as 3 and and 6 more items; the item never lists itself", function()
@@ -10106,7 +10178,9 @@ test("slice B saved: the defaults on a first run, the tooltip's settings beside 
     local keys = {}
     for k in pairs(b) do keys[#keys + 1] = k end
     table.sort(keys)
-    equal(table.concat(keys, ","), "forSaleOnly,scanWhenShown,show,slot,sort", "the five values only (slice C: the slot)")
+    -- ledger (slice D2): the class is the sixth saved value
+    equal(table.concat(keys, ","), "class,forSaleOnly,scanWhenShown,show,slot,sort", "the six values only (slice C: the slot, D2: the class)")
+    equal(b.class, "own", "the class: your own")
     local v = TC.BrowserState.View()
     equal(v.filter .. "/" .. tostring(v.forSaleOnly) .. "/" .. tostring(v.scanWhenShown), "All/false/true", "the view")
     equal(table.concat({ TC.Config.tooltipStyle, tostring(TC.Config.otherItems), tostring(TC.Config.filterBlizzNotCollectedLine),
@@ -10132,7 +10206,9 @@ test("slice B saved: each value is written on change and loaded in the next sess
         "false/Collected/true/priceHigh", "written on change")
     local n = 0
     for _ in pairs(saved) do n = n + 1 end
-    equal(n, 5, "class, Source and search are not saved (the fifth is the slot, slice C)")
+    -- ledger (slice D2): the class is saved too, a single class as your own
+    equal(n, 6, "Source and search are not saved (the fifth is the slot, slice C, the sixth the class, D2)")
+    equal(saved.class, "own", "Mage is kept as your own class")
     -- the next session: the saved table as the client loads it
     local d = boot({ saved = false })
     TransmogCheckerDB = { browser = saved }
@@ -10947,6 +11023,419 @@ test("slice C Source: an appearance with a source of each type passes with only 
     equal(tileIDs(S.View()), "", "Other only: none")
     sentNothing(c, "source types")
 end)
+
+---------------------------------------------------------------- Slice D2: the settings page, its entry points, the funnel art
+
+-- in a function of its own: the main chunk is at its limit of 200 locals
+local function sliceD2()
+
+-- The tooltip fixture on a client with the settings API (opts.settings
+-- false: without it); a first run unless opts.saved says otherwise.
+local function d2(opts)
+    local o = { saved = false, settings = true }
+    for k, v in pairs(opts or {}) do o[k] = v end
+    if o.settings == false then o.settings = nil end
+    return tipFixture(o)
+end
+local function said(c, msg)
+    local from = #c.printed
+    SlashCmdList.TC(msg)
+    local out = {}
+    for i = from + 1, #c.printed do out[#out + 1] = plain(c.printed[i]) end
+    return table.concat(out, "\n")
+end
+-- The addon's category, and its page's rows as the list draws them.
+local function category(c) return c.settings.addon[1] end
+local function page(c) return (c.settingsPage(category(c).ID)) end
+local function row(c, name)
+    for _, r in ipairs(page(c)) do if r.name == name then return r end end
+end
+local function settingOf(c, name) return row(c, name).init.data.setting end
+local function optionsText(r)
+    local out = {}
+    for i, o in ipairs(r.options) do out[i] = o.value .. "=" .. o.label end
+    return table.concat(out, "|")
+end
+local LABELS = { "Show on item tooltips", "Style", "Not collected color", "Other items", "Lowest price",
+    "Grey and white items", "Scan when shown" }
+-- The stored values the seven controls stand for, in the page's order.
+local function stored()
+    local db = TransmogCheckerDB
+    return table.concat({ tostring(db.tooltipShow), db.tooltipStyle, db.notCollectedColor, db.otherItems,
+        tostring(db.lowestPrice), tostring(db.skipPoorAndCommon), tostring(db.browser.scanWhenShown) }, "/")
+end
+local FIRST_RUN = "true/full/orange/notCollected/true/true/true"
+local HELP_WITH_PAGE = "TC: /tc opens the settings.\nTC: /tc debug turns debug output on or off."
+local OLD_HELP = "TC: /tc lists these commands.\nTC: /tc help lists these commands.\nTC: /tc debug turns debug output on or off."
+local FUNNEL_FILE = "Interface\\AddOns\\TransmogChecker\\Media\\funnel"
+local GEAR = "common-dropdown-a-button-settings-shadowless"
+-- The page's preview, as text: for each sample tooltip its shown lines,
+-- "left | right", joined by newlines; nil before the page is shown.
+local function previewTexts(c)
+    local frame
+    for _, f in ipairs(c.settings.frames) do frame = f.frame end
+    if not frame then return nil end
+    local out = {}
+    local content = frame.children[1]
+    for _, sample in ipairs(content.children) do
+        if sample.kind == "Frame" and visible(sample) then
+            local lines = {}
+            for _, r in ipairs(sample.children) do
+                if r.kind == "Frame" and visible(r) then
+                    local left, right = r.children[1], r.children[2]
+                    local text = plain(left.text or "")
+                    if right.shown and right.text and right.text ~= "" then text = text .. " | " .. plain(right.text) end
+                    lines[#lines + 1] = (text:gsub("|T[^|]*ReadyCheck%-Ready[^|]*|t ?", "[check]")
+                        :gsub("|T[^|]*UI%-GearManager%-ItemIntoBag[^|]*|t ?", "[bag]"))
+                end
+            end
+            out[#out + 1] = table.concat(lines, "\n")
+        end
+    end
+    return out
+end
+-- The preview's line whose left text starts with text: its left font string.
+local function previewLine(c, text)
+    for _, w in ipairs(c.widgets) do
+        if w.kind == "FontString" and visible(w) and w.text and plain(w.text):find(text, 1, true) == 1 then return w end
+    end
+end
+
+test("D2 page: one AddOns category with the preview, two sections and the seven settings with the page's labels, tooltips, defaults and choices", function()
+    local c = d2()
+    equal(#c.settings.addon, 1, "one addon category")
+    equal(category(c).name, "TransmogChecker", "named for the addon")
+    local kinds = {}
+    for i, r in ipairs(page(c)) do kinds[i] = r.kind .. ":" .. tostring(r.name) end
+    equal(table.concat(kinds, "|"), "panel:nil|header:Item tooltip|checkbox:Show on item tooltips|dropdown:Style|"
+        .. "dropdown:Not collected color|dropdown:Other items|checkbox:Lowest price|checkbox:Grey and white items|"
+        .. "header:Appearances tab|checkbox:Scan when shown", "the rows in the page's order")
+    local tips = {
+        "Show on every item tooltip whether you have collected its appearance.",
+        "Full: the status, how to collect it, the lowest price and other items. Compact: the status on the item's name line.",
+        "The color of \"Not collected\" on item tooltips.",
+        "Other items with the same appearance, and where they come from. Compact shows only how many.",
+        "The lowest price the Appearances tab found this session. Full style only.",
+        "Also show the status on grey and white items.",
+        "Scan the slot when the Appearances tab opens. This reads the auction house.",
+    }
+    local defaults = { true, "full", "orange", "notCollected", true, false, true }
+    for i, label in ipairs(LABELS) do
+        local r = row(c, label)
+        equal(r.tooltip, tips[i], label .. ": tooltip")
+        equal(r.init.data.setting:GetDefaultValue(), defaults[i], label .. ": default")
+        equal(r.value, defaults[i], label .. ": first-run value")
+    end
+    equal(optionsText(row(c, "Style")), "full=Full|compact=Compact", "Style's choices")
+    equal(optionsText(row(c, "Not collected color")), "orange=|cFFFF7F00Orange|r|lightBlue=|cFF87ABFFLight blue|r|white=White",
+        "the colour presets, each in its colour")
+    equal(optionsText(row(c, "Other items")), "notCollected=When not collected|always=Always|off=Off", "Other items' choices")
+    equal(stored(), FIRST_RUN, "the stored values")
+    noErrors(c, "page")
+    sentNothing(c, "page")
+end)
+
+test("D2 page: a change on the page reaches the stored value and the next tooltip; rows grey out with Show off and Lowest price in Compact", function()
+    local c = d2()
+    local function lines(itemID)
+        local out = {}
+        for i, text in ipairs(c.hoverItem(itemLink(itemID))) do out[i] = plain(text) end
+        return out
+    end
+    equal(lines(505)[2], "Not collected", "full: the status after the blank line")
+    settingOf(c, "Style"):SetValue("compact")
+    equal(TransmogCheckerDB.tooltipStyle, "compact", "stored")
+    local compact = lines(505)
+    equal(compact[1] .. " (" .. #compact .. ")", "Not collected +2 items (1)", "the next tooltip is compact")
+    check(not row(c, "Lowest price").enabled, "Lowest price greyed in Compact")
+    check(row(c, "Style").enabled, "the others stay enabled")
+    local styleVariable = settingOf(c, "Style"):GetVariable()
+    local on = row(c, "Lowest price").init.evaluateOn or {}
+    check(on[1] == styleVariable or on[2] == styleVariable, "Lowest price re-evaluated when the style changes")
+    settingOf(c, "Style"):SetValue("full")
+    settingOf(c, "Not collected color"):SetValue("white")
+    c.hoverItem(itemLink(505))
+    local status = GameTooltip.lines[2]
+    equal(status.r .. "," .. status.g .. "," .. status.b, "1,1,1", "the next status in white")
+    settingOf(c, "Other items"):SetValue("off")
+    equal(TransmogCheckerDB.otherItems, "off", "Other items stored")
+    settingOf(c, "Lowest price"):SetValue(false)
+    equal(TransmogCheckerDB.lowestPrice, false, "Lowest price stored")
+    equal(#lines(701), 0, "a grey item: no line")
+    settingOf(c, "Grey and white items"):SetValue(true)
+    equal(TransmogCheckerDB.skipPoorAndCommon, false, "Grey and white items on: skipped no longer")
+    check(#lines(701) > 0, "the grey item gets its lines")
+    settingOf(c, "Show on item tooltips"):SetValue(false)
+    equal(TransmogCheckerDB.tooltipShow, false, "Show stored")
+    equal(#lines(505), 0, "Show off: no line")
+    for i = 2, 6 do check(not row(c, LABELS[i]).enabled, LABELS[i] .. " greyed with Show off") end
+    check(row(c, "Show on item tooltips").enabled and row(c, "Scan when shown").enabled, "Show and Scan stay enabled")
+    settingOf(c, "Scan when shown"):SetValue(false)
+    equal(TransmogCheckerDB.browser.scanWhenShown, false, "Scan when shown stored in the browser's table")
+    noErrors(c, "page changes")
+    sentNothing(c, "page changes")
+end)
+
+test("D2 one source of truth: /tc alts, /tc skipgreys and the funnel's Scan when shown reach the page and redraw its control; the page reaches the funnel", function()
+    local c, tabs = visitTwice({ appearances = manySlots(), settings = true, saved = { scanWhenShown = false } })
+    tabs[1].scripts.OnClick(tabs[1])
+    local function signals(name) return c.settings.notified[settingOf(c, name):GetVariable()] or 0 end
+    local before = signals("Other items")
+    said(c, "alts")
+    equal(row(c, "Other items").value, "always", "/tc alts: the page's value")
+    check(signals("Other items") > before, "/tc alts: the shown control told")
+    before = signals("Grey and white items")
+    said(c, "skipgreys")
+    equal(row(c, "Grey and white items").value, true, "/tc skipgreys: the page's value")
+    check(signals("Grey and white items") > before, "/tc skipgreys: the shown control told")
+    equal(row(c, "Scan when shown").value, false, "Scan when shown off as saved")
+    before = signals("Scan when shown")
+    check(funnelPick(c, "Scan when shown"), "the funnel's checkbox")
+    equal(row(c, "Scan when shown").value, true, "the funnel's tick: the page's value")
+    check(signals("Scan when shown") > before, "the funnel's tick: the shown control told")
+    settingOf(c, "Scan when shown"):SetValue(false)
+    openMenu(c, funnelOf(c))
+    local ticked
+    for _, e in ipairs(c.menuEntries()) do if e ~= "-" and e.text == "Scan when shown" then ticked = e.selected end end
+    funnelOf(c):CloseMenu()
+    equal(ticked, false, "the page's change: the funnel's checkbox")
+    -- a change made through the page itself is told once, by the setting
+    before = signals("Style")
+    settingOf(c, "Style"):SetValue("compact")
+    equal(signals("Style") - before, 1, "one signal for a change on the page")
+    noErrors(c, "one source of truth")
+    sentNothing(c, "one source of truth")
+end)
+
+test("D2 Defaults restores each of the seven", function()
+    local c = d2({ saved = { scanWhenShown = true } })
+    local values = { false, "compact", "lightBlue", "off", false, true, false }
+    for i, label in ipairs(LABELS) do settingOf(c, label):SetValue(values[i]) end
+    equal(stored(), "false/compact/lightBlue/off/false/false/false", "all changed")
+    c.settingsDefaults(category(c).ID)
+    equal(stored(), FIRST_RUN, "Defaults: every one back")
+    noErrors(c, "defaults")
+end)
+
+test("D2 /tc opens the page, /tc help prints two lines; in combat one line, and the page opens after combat", function()
+    local c = d2()
+    equal(said(c, ""), "", "/tc prints nothing")
+    equal(#c.settings.opened, 1, "/tc opens the page")
+    equal(c.settings.opened[1].id, category(c).ID, "at the addon's category")
+    equal(said(c, "help"), HELP_WITH_PAGE, "/tc help")
+    equal(said(c, "whatever"), HELP_WITH_PAGE, "an unknown word prints the help")
+    c.enterCombat()
+    equal(said(c, ""), "TC: Settings open after combat.", "in combat: one line")
+    equal(#c.settings.opened .. " " .. c.settings.blocked, "1 0", "nothing opened, nothing refused")
+    said(c, "")
+    c.leaveCombat()
+    equal(#c.settings.opened, 2, "opened once after combat")
+    c.enterCombat()
+    c.leaveCombat()
+    equal(#c.settings.opened, 2, "and not again")
+    noErrors(c, "slash")
+end)
+
+test("D2 the funnel menu's last entry Settings… opens the page at Scan when shown; the auction window stays open", function()
+    for _, opts in ipairs({ {}, { noMenuTemplates = true } }) do
+        local o = { appearances = manySlots(), settings = true }
+        for k, v in pairs(opts) do o[k] = v end
+        local c, tabs = visitTwice(o)
+        tabs[1].scripts.OnClick(tabs[1])
+        local texts, choose = openMenu(c, funnelOf(c))
+        equal(texts[#texts], "Settings…", "the last entry")
+        if not opts.noMenuTemplates then equal(texts[#texts - 1], "-", "after a divider") end
+        check(choose("Settings…"), "chosen")
+        equal(#c.settings.opened, 1, "the page opens")
+        equal(c.settings.opened[1].element, "Scan when shown", "scrolled to Appearances tab's setting")
+        check(AuctionHouseFrame:IsShown(), "the auction window stays open")
+        sentNothing(c, "settings from the funnel")
+        noErrors(c, "settings from the funnel")
+    end
+end)
+
+test("D2 the minimap's addon list: the .toc's entry opens the page, with the game's transmog icon", function()
+    local c = d2()
+    local entry = c.compartmentClick(repo)
+    check(entry ~= nil, "an entry")
+    equal(entry.func .. " " .. entry.icon, "TransmogChecker_OpenSettings lootroll-icon-transmog", "its function and icon")
+    check(entry.called, "called")
+    equal(#c.settings.opened, 1, "the page opens")
+    noErrors(c, "compartment")
+end)
+
+test("D2 a client without the settings API: nothing raises, /tc prints the help, no Settings… entry, the addon-list entry prints the help", function()
+    local c, tabs = visitTwice({ appearances = manySlots(), saved = { scanWhenShown = false } })
+    tabs[1].scripts.OnClick(tabs[1])
+    equal(said(c, ""), OLD_HELP, "/tc prints the help")
+    equal(said(c, "help"), OLD_HELP, "/tc help too")
+    local texts = openMenu(c, funnelOf(c))
+    funnelOf(c):CloseMenu()
+    equal(texts[#texts], "Scan when shown", "no Settings… entry")
+    local from = #c.printed
+    check(c.compartmentClick(repo).called, "the addon-list entry")
+    equal(plain(c.printed[from + 1] or ""), "TC: /tc lists these commands.", "prints the help")
+    noErrors(c, "no settings API")
+end)
+
+test("D2 preview: nothing before the page shows; two samples from the tooltip's own lines, redrawn on each change", function()
+    local c = d2()
+    check(not find(c, function(w) return w.text == "Ivycloth Boots of the Eagle" end), "nothing built at load")
+    said(c, "")
+    check(not find(c, function(w) return w.text == "Ivycloth Boots of the Eagle" end), "nothing built on opening")
+    local rows = page(c)
+    equal(rows[1].extent, 228, "the preview row's height")
+    local shown = previewTexts(c)
+    equal(shown[1], "Ivycloth Boots of the Eagle\nBinds when equipped\nFeet | Cloth\n \n[bag]Not collected | World Drop\n"
+        .. "In your bags: equip it or sell it to a vendor to collect.\nLowest price 3 min ago | 41s 50c\n \n"
+        .. "Other items using this appearance:\nIvycloth Boots of Intellect | World Drop\nIvycloth Boots of the Owl | World Drop\n"
+        .. "Ivycloth Boots of Spirit | World Drop\nand 2 more items", "Full, not collected")
+    equal(shown[2], "Runecloth Boots\nBinds when equipped\nFeet | Cloth\n \n[check]Collected", "Full, collected")
+    local nc = previewLine(c, "|T")
+    equal(table.concat(nc.textColor, ","), "1," .. 127 / 255 .. ",0", "Not collected in orange")
+    TC.SetSetting("notCollectedColor", "lightBlue")
+    nc = previewLine(c, "|T")
+    equal(table.concat(nc.textColor, ","), 0x87 / 255 .. "," .. 0xAB / 255 .. ",1", "redrawn in light blue")
+    TC.SetSetting("otherItems", "always")
+    check(previewTexts(c)[2]:find("Other items using this appearance:", 1, true), "Always: the collected sample lists them")
+    TC.SetSetting("lowestPrice", false)
+    check(not previewTexts(c)[1]:find("Lowest price", 1, true), "no price line")
+    settingOf(c, "Style"):SetValue("compact")
+    shown = previewTexts(c)
+    equal(shown[1], "Ivycloth Boots of the Eagle | Not collected +5 items\nBinds when equipped\nFeet | Cloth\n"
+        .. "[bag]In your bags: equip it or sell it to a vendor to collect.", "Compact, not collected")
+    equal(shown[2], "Runecloth Boots | [check]Collected\nBinds when equipped\nFeet | Cloth", "Compact, collected")
+    settingOf(c, "Show on item tooltips"):SetValue(false)
+    shown = previewTexts(c)
+    equal(shown[1] .. "\n" .. shown[2], "Ivycloth Boots of the Eagle\nBinds when equipped\nFeet | Cloth\n"
+        .. "Runecloth Boots\nBinds when equipped\nFeet | Cloth", "Show off: the items' own lines")
+    check(GameTooltip.calls.SetOwner == nil and #GameTooltip.lines == 0, "GameTooltip not used")
+    check(find(c, function(w) return w.text == "Preview: a sample item, not your collection" end), "the caption")
+    local content = c.settings.frames[#c.settings.frames].frame.children[1]
+    c.hideSettingsPage()
+    check(content and not content.shown, "let go with the page")
+    page(c)
+    equal(#previewTexts(c), 2, "shown again on the next frame")
+    sentNothing(c, "preview")
+    equal(#c.auctionTouches, 0, "no auction house read")
+    noErrors(c, "preview")
+end)
+
+-- fix D F1: Blizzard's own pattern (Nameplates.lua:556, Subtitles.lua:76).
+-- The fake reads only the template's name, mixin and height from the XML.
+test("D2 preview row: a template of the addon's XML with its mixin; no field of Blizzard's initializer written", function()
+    local c = d2()
+    local rows = page(c)
+    local init = rows[1].init
+    equal(init.frameTemplate, "TransmogCheckerPreviewTemplate", "the template")
+    local template = c.templates.TransmogCheckerPreviewTemplate
+    equal(template and template.height, 228, "its height, from the XML")
+    equal(template and template.mixin, "TransmogCheckerPreviewMixin", "its mixin, from the XML")
+    equal(rows[1].extent, 228, "the row's height is the template's")
+    for _, key in ipairs({ "GetExtent", "InitFrame", "Resetter" }) do
+        check(rawget(init, key) == init.own[key], key .. ": Blizzard's own, not written")
+    end
+    local mixin = rawget(_G, "TransmogCheckerPreviewMixin")
+    check(type(mixin) == "table" and type(mixin.Init) == "function" and type(mixin.Release) == "function", "the mixin's Init and Release")
+    check(table.concat(c.loaded, "|"):find("TC/Settings/TC_Settings.lua|TC/Settings/TC_Settings.xml", 1, true),
+        "the mixin's file loads before the XML")
+    noErrors(c, "template")
+end)
+
+-- fix D F4: All classes and the character's own class are both neutral.
+test("D2 class filter: All classes and your own class light no mark and Reset keeps them; another class marks and Reset gives your own", function()
+    local c = slotState({ saved = { class = "all" } })
+    local S = state()
+    local function at() local v = S.View() return v.classes.text .. "/" .. tostring(v.filtersChanged) end
+    equal(at(), "All classes/false", "All classes remembered: no mark")
+    S.SetFilter("Not collected")
+    equal(at(), "All classes/true", "another filter: the mark")
+    S.ResetFilters()
+    equal(at() .. "/" .. S.View().filter, "All classes/false/All", "Reset: the filter back, All classes kept")
+    equal(TransmogCheckerDB.browser.class, "all", "and still saved as all")
+    S.SelectClass(9)
+    equal(at(), "Warlock/false", "your own class: no mark")
+    S.SetFilter("Collected")
+    S.ResetFilters()
+    equal(at(), "Warlock/false", "Reset keeps your own class")
+    equal(TransmogCheckerDB.browser.class, "own", "saved as own")
+    S.SelectClass(8)
+    check(at():find("/true$"), "a single other class: the mark, got " .. at())
+    equal(TransmogCheckerDB.browser.class, "own", "a single other class is saved as your own")
+    S.ResetFilters()
+    equal(at(), "Warlock/false", "Reset: your own class, no mark")
+    S.SelectClass("all")
+    local saved = TransmogCheckerDB.browser.class
+    local d = boot({ saved = false, appearances = manySlots() })
+    TransmogCheckerDB = { browser = { class = saved } }
+    d.fire("ADDON_LOADED", "TransmogChecker")
+    equal(saved .. " " .. TC.BrowserState.View().classes.text, "all All classes", "the saved value's meaning: the next session")
+    sentNothing(c, "class filter")
+    noErrors(c, "class filter")
+    noErrors(d, "class filter, next session")
+end)
+
+test("D2 class choice: All classes is saved and kept the next visit and the next session; a single class and malformed values load as your own", function()
+    local c, tabs = visitTwice({ appearances = manySlots(), saved = { scanWhenShown = false } })
+    tabs[1].scripts.OnClick(tabs[1])
+    local S = TC.BrowserState
+    equal(TransmogCheckerDB.browser.class, "own", "the first run: your own class")
+    S.SelectClass("all")
+    equal(TransmogCheckerDB.browser.class, "all", "All classes saved")
+    c.closeAuction()
+    c.openAuction()
+    tabs[1].scripts.OnClick(tabs[1])
+    equal(S.View().classes.text, "All classes", "the next visit")
+    local saved = {}
+    for k, v in pairs(TransmogCheckerDB.browser) do saved[k] = v end
+    local d = boot({ saved = false, appearances = manySlots() })
+    TransmogCheckerDB = { browser = saved }
+    d.fire("ADDON_LOADED", "TransmogChecker")
+    equal(TC.BrowserState.View().classes.text, "All classes", "the next session")
+    TC.BrowserState.SelectClass(8)
+    equal(TransmogCheckerDB.browser.class, "own", "a single class is not kept")
+    TC.BrowserState.Reset()
+    equal(TC.BrowserState.View().classes.text, "Warlock", "the next visit: your own class")
+    TC.BrowserState.SelectClass("all")
+    TC.BrowserState.ResetFilters()
+    -- fix D F4: Reset leaves All classes as it is (this asserted "own")
+    equal(TransmogCheckerDB.browser.class, "all", "Reset filters: All classes kept and saved")
+    TC.BrowserState.SelectClass(8)
+    TC.BrowserState.ResetFilters()
+    equal(TransmogCheckerDB.browser.class, "own", "Reset filters from another class: your own class saved")
+    for _, value in ipairs({ 8, "ALL", true, "mage" }) do
+        local e = boot({ saved = false })
+        TransmogCheckerDB = { browser = { class = value } }
+        e.fire("ADDON_LOADED", "TransmogChecker")
+        equal(TransmogCheckerDB.browser.class, "own", tostring(value) .. ": saved as your own")
+        equal(TC.BrowserState.View().classes.text, "Warlock", tostring(value) .. ": the view")
+        noErrors(e, tostring(value))
+    end
+    sentNothing(c, "class")
+    noErrors(c, "class")
+    noErrors(d, "class, next session")
+end)
+
+test("D2 funnel art: the funnel from Media on the filter button's own plate, the mark where it was; the gear atlas when the file fails", function()
+    local c, tabs = visitTwice({ appearances = manySlots() })
+    tabs[1].scripts.OnClick(tabs[1])
+    local funnel = funnelOf(c)
+    equal(texturePath(funnel.icon), FUNNEL_FILE, "the funnel file")
+    equal(funnel.icon.width .. "x" .. funnel.icon.height .. " " .. funnel.icon.points[1].point, "16x16 CENTER", "16 square, centred")
+    check(funnel.icon.calls.SetAtlas == nil, "no atlas on it")
+    check(funnel.Background.calls.SetAlpha == nil, "the template's plate stays")
+    equal(funnel.text, "", "no text")
+    local mark = markOf(c)
+    equal(mark.points[1].point .. " " .. mark.points[1].relativePoint .. " " .. point(mark), "CENTER TOPRIGHT 2,-9", "the mark where it was")
+    local d, t = visitTwice({ appearances = manySlots(), missingFiles = { [FUNNEL_FILE] = true } })
+    t[1].scripts.OnClick(t[1])
+    equal(funnelOf(d).icon.calls.SetAtlas[1], GEAR, "the gear when the file fails")
+    noErrors(c, "funnel art")
+    noErrors(d, "funnel fallback")
+end)
+
+end
+sliceD2()
 
 test("TC-15 no forbidden collection call was made in the whole run", function()
     equal(Fake.forbiddenTotal or 0, 0, "forbidden calls across every test")

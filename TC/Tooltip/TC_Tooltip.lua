@@ -230,6 +230,20 @@ local function moneyMarkup(parts)
     return table.concat(words, " ")
 end
 
+-- A line description's texts as the tooltip shows them: the left with its
+-- mark, the right (the price in coins, or the right text) or nil; and the
+-- colours as r, g, b for each side (the settings page's preview draws them).
+function Tooltip.Texts(line)
+    local right = line.money and moneyMarkup(line.money) or line.right
+    return leftText(line), right, line.color and { rgb(line.color) }, (line.rightColor or line.color) and { rgb(line.rightColor or line.color) }
+end
+
+-- The tooltip's settings from the stored values, as Tooltip.Lines takes them.
+function Tooltip.Settings()
+    return { style = TC.Setting("tooltipStyle"), color = TC.COLORS.NOT_COLLECTED[TC.Setting("notCollectedColor")],
+        others = TC.Setting("otherItems"), price = TC.Setting("lowestPrice") }
+end
+
 local function addLine(tooltip, line)
     if not line.color then return tooltip:AddLine(line.text) end
     local r, g, b = rgb(line.color)
@@ -281,11 +295,26 @@ local function alreadyAdded(tooltip, link)
     return right ~= nil and right:IsShown() and right:GetText() == mark.right
 end
 
--- "bags" for an item shown from the bags, else what the browser says is
--- pending for its appearance.
+-- Whether a bag index is a carried bag: the backpack through the last
+-- equipped bag (Enum.BagIndex, BagIndexConstantsDocumentation.lua:25-33;
+-- NUM_TOTAL_EQUIPPED_BAG_SLOTS, Constants.lua:165-170). Bank tabs and the
+-- keyring are outside it.
+local function carriedBag(bag)
+    if type(bag) ~= "number" then return false end
+    local first = Enum and Enum.BagIndex and Enum.BagIndex.Backpack or 0
+    return bag >= first and bag <= (NUM_TOTAL_EQUIPPED_BAG_SLOTS or NUM_BAG_SLOTS or 4)
+end
+
+-- "bags" for an item shown from a carried bag (SetBagItem(bag, slot) keeps
+-- its arguments as getterArgs, TooltipDataHandler.lua:495-503; bank slots
+-- use the same call, Camelot/BankFrame.lua:329-338), else what the browser
+-- says is pending for its appearance.
 local function pendingOf(tooltip, item)
     local info = tooltip.GetPrimaryTooltipInfo and tooltip:GetPrimaryTooltipInfo()
-    if type(info) == "table" and BAG_GETTERS[info.getterName] then return "bags" end
+    if type(info) == "table" and BAG_GETTERS[info.getterName] and type(info.getterArgs) == "table"
+        and carriedBag(info.getterArgs[1]) then
+        return "bags"
+    end
     return TC.BrowserState.Pending(item.appearanceID)
 end
 
@@ -313,10 +342,9 @@ local function AnnotateTooltip(tooltip)
             Debug("computed", link, item and "a line" or "no line")
         end
         if not item then return end
-        local settings = { style = TC.Setting("tooltipStyle"), color = TC.COLORS.NOT_COLLECTED[TC.Setting("notCollectedColor")],
-            others = TC.Setting("otherItems"), price = TC.Setting("lowestPrice") }
-        local out = Tooltip.Lines(item, settings, { pending = pendingOf(tooltip, item), price = priceOf(item) })
-        local written = out.nameRight and writeNameRight(tooltip, out.nameRight)
+        local out = Tooltip.Lines(item, Tooltip.Settings(), { pending = pendingOf(tooltip, item), price = priceOf(item) })
+        -- the name line's right side is written on GameTooltip only
+        local written = out.nameRight and tooltip == GameTooltip and writeNameRight(tooltip, out.nameRight)
         -- the fallback: the name line's words as a line of their own
         if out.nameRight and not written then table.insert(out.lines, 1, out.nameRight) end
         for _, line in ipairs(out.lines) do addLine(tooltip, line) end
@@ -348,8 +376,10 @@ end)
 if GameTooltip:HasScript("OnTooltipSetItem") then
     GameTooltip:HookScript("OnTooltipSetItem", AnnotateTooltip)
 elseif TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall then
+    -- GameTooltip and ItemRefTooltip (a clicked chat link, ItemRef.xml:5);
+    -- comparison, shopping and embedded tooltips stay untouched
     TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, function(tooltip)
-        if tooltip == GameTooltip then
+        if tooltip == GameTooltip or (ItemRefTooltip ~= nil and tooltip == ItemRefTooltip) then
             AnnotateTooltip(tooltip)
         end
     end)

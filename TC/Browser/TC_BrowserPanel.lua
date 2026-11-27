@@ -140,9 +140,13 @@ local SLOT_ART, SLOT_SELECTED, SLOT_HIGHLIGHT = "transmog-nav-slot-%s", "transmo
 -- frame's border (testpass F5); it covers the funnel's right 9 and top 20.
 local SEARCH_X, SEARCH_Y = 628, 9
 local FUNNEL_X, FUNNEL_Y, FUNNEL_SIZE, MARK_SIZE, MARK_X, MARK_Y = 743, 4, 30, 22, 2, -9
--- The funnel's art is the owner's choice, the settings button of
--- Blizzard_DamageMeter/DamageMeterSettingsDropdownButton.xml:5-8, with its
--- hover and pressed forms; without it the world map's filter art.
+-- The funnel's art is the funnel of the design mock (addon-settings v1, the
+-- FUNNEL drawing, rendered by dev/media/funnel_tga.py), 16 square on the
+-- button's own plate (the filter template's Background, MenuTemplates.xml:
+-- 91); when its file fails to load, the owner's earlier choice, the settings
+-- button of Blizzard_DamageMeter/DamageMeterSettingsDropdownButton.xml:5-8,
+-- with its hover and pressed forms; without that the world map's filter art.
+local FUNNEL_GLYPH = 16
 local FUNNEL_ATLAS = "common-dropdown-a-button-settings-shadowless"
 local FUNNEL_HOVER = "common-dropdown-a-button-settings-hover-shadowless"
 local FUNNEL_PRESSED = "common-dropdown-a-button-settings-pressed-shadowless"
@@ -152,6 +156,7 @@ local FUNNEL_FALLBACK, RESET_ATLAS = "Map-Filter-Button", "auctionhouse-ui-filte
 local FUNNEL_TEXT, FUNNEL_TIP = "Filter", "Filter and sort"
 local CLASS_TEXT, RESET_TEXT = "Class: %s", "Reset filters"
 local FOR_SALE_TEXT, SOURCE_TEXT, SORT_TEXT, SCAN_SHOWN_TEXT = "For sale only", "Source", "Sort", "Scan when shown"
+local SETTINGS_TEXT = "Settings…"
 -- A checkbox's mark in the panel's own list menu, without Blizzard's menu.
 local TICKED, UNTICKED = "[x] ", "[ ] "
 -- The band under the header: the count at x 28, y 42, and the weapon type
@@ -1074,7 +1079,11 @@ end
 -- menu was built with. Without the template or its menu API, a button that
 -- opens a list of the same entries, each checkbox marked by its text;
 -- without the art, either reads "Filter". The reset mark at its top left
--- shows while Reset would change something.
+-- shows while Reset would change something. Last, after a line, "Settings…"
+-- opens the settings page at Scan when shown (slice D2), where the client
+-- has the page.
+local function settingsPage() return TC.Settings ~= nil and TC.Settings.Available() end
+local function openSettings() TC.Settings.Open(SCAN_SHOWN_TEXT) end
 local function newFunnel(panel)
     local current
     local function selected(entry) return entry ~= nil and entry.selected end
@@ -1115,6 +1124,10 @@ local function newFunnel(panel)
                 root:CreateDivider()
                 root:CreateButton(RESET_TEXT, State.ResetFilters)
             end
+            if settingsPage() then
+                root:CreateDivider()
+                root:CreateButton(SETTINGS_TEXT, openSettings)
+            end
         end)
     local menu
     if not funnel then
@@ -1122,9 +1135,21 @@ local function newFunnel(panel)
         menu = listMenu(panel, funnel, 170, "RIGHT")
     end
     funnel:SetPoint("TOPLEFT", panel, "TOPLEFT", FUNNEL_X, -FUNNEL_Y)
-    -- the owner's art, else the world map's filter art, else the text
-    local art = hasAtlas(FUNNEL_ATLAS) and FUNNEL_ATLAS or hasAtlas(FUNNEL_FALLBACK) and FUNNEL_FALLBACK or nil
-    funnel:SetText(art and "" or FUNNEL_TEXT)
+    -- the funnel glyph (slice D2) on the button's own plate, when the file
+    -- loads (SetTexture answers whether it did,
+    -- SimpleTextureBaseAPIDocumentation.lua:604-619); else the owner's
+    -- earlier art, else the world map's filter art, else the text
+    local glyph = funnel:CreateTexture(nil, "ARTWORK")
+    glyph:SetSize(FUNNEL_GLYPH, FUNNEL_GLYPH)
+    glyph:SetPoint("CENTER")
+    local art
+    if glyph:SetTexture(MEDIA .. "funnel") ~= false then
+        funnel.icon = glyph
+    else
+        glyph:Hide()
+        art = hasAtlas(FUNNEL_ATLAS) and FUNNEL_ATLAS or hasAtlas(FUNNEL_FALLBACK) and FUNNEL_FALLBACK or nil
+    end
+    funnel:SetText((art or funnel.icon) and "" or FUNNEL_TEXT)
     if art then
         -- the template's dropdown art (MenuTemplates.xml:91) gives way to the funnel's
         if not menu and funnel.Background then funnel.Background:SetAlpha(0) end
@@ -1212,6 +1237,7 @@ local function newFunnel(panel)
         end
         items[#items + 1] = { text = mark(view.scanWhenShown) .. SCAN_SHOWN_TEXT, line = true, action = toggleScan }
         if view.filtersChanged then items[#items + 1] = { text = RESET_TEXT, line = true, action = State.ResetFilters } end
+        if settingsPage() then items[#items + 1] = { text = SETTINGS_TEXT, line = true, action = openSettings } end
         menu.fill(items)
     end
     return funnel

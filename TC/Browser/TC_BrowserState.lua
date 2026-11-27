@@ -33,12 +33,16 @@ local SORTS = { { value = "default", name = "Collections order" }, { value = "pr
 -- The Source filter's entry for a source whose type it does not name.
 local OTHER_SOURCE, OTHER_TEXT = "other", "Other"
 
--- The five choices kept between sessions (slice B, the slot slice C), each
--- with its default: Scan when shown, Show, For sale only, the sort and the
--- slot (the first of the slot row, Head). saved is the table they are kept
--- in: TransmogCheckerDB.browser once State.Bind handed it over, a table of
--- this file's own before.
-local DEFAULTS = { scanWhenShown = true, show = "All", forSaleOnly = false, sort = "priceLow", slot = TC.Slots[1].key }
+-- The six choices kept between sessions (slice B, the slot slice C, the
+-- class slice D2), each with its default: Scan when shown, Show, For sale
+-- only, the sort, the slot (the first of the slot row, Head) and the class:
+-- "all" for All classes, else "own", the character's own (a single other
+-- class is not kept, addon-settings v1: it would follow the player onto
+-- another character). saved is the table they are kept in:
+-- TransmogCheckerDB.browser once State.Bind handed it over, a table of this
+-- file's own before.
+local DEFAULTS = { scanWhenShown = true, show = "All", forSaleOnly = false, sort = "priceLow", slot = TC.Slots[1].key,
+    class = "own" }
 local saved = {}
 
 local function isSort(value)
@@ -64,7 +68,7 @@ local function savedValues(t)
     local slot = type(t.slot) == "string" and TC.Slots[t.slot] and t.slot or DEFAULTS.slot
     return { scanWhenShown = flag(t.scanWhenShown, DEFAULTS.scanWhenShown), show = show,
         forSaleOnly = flag(t.forSaleOnly, DEFAULTS.forSaleOnly), sort = isSort(t.sort) and t.sort or DEFAULTS.sort,
-        slot = slot }
+        slot = slot, class = t.class == "all" and "all" or DEFAULTS.class }
 end
 -- Takes t as the saved table: its values as the state takes them are
 -- written back into it, so it holds no malformed value.
@@ -166,7 +170,7 @@ local function startView()
     -- type, or OTHER_SOURCE), none at the start
     local start = savedValues(saved)
     return { slot = start.slot, filter = start.show, forSaleOnly = start.forSaleOnly, sort = start.sort,
-        sourcesOff = {}, page = 1, search = "" }
+        class = start.class == "all" and ALL_CLASSES or nil, sourcesOff = {}, page = 1, search = "" }
 end
 view = startView()
 
@@ -797,7 +801,7 @@ function State.Reset()
     local changed = next(lists) ~= nil or view.slot ~= start.slot or view.filter ~= start.filter
         or view.forSaleOnly ~= start.forSaleOnly or view.sort ~= start.sort or next(view.sourcesOff) ~= nil
         or view.page ~= 1 or view.open ~= nil or next(latest) ~= nil or next(checking) ~= nil or next(scans) ~= nil
-        or scan ~= nil or next(failures) ~= nil or view.search ~= "" or view.class ~= nil
+        or scan ~= nil or next(failures) ~= nil or view.search ~= "" or view.class ~= start.class
     if TC.Buy then TC.Buy.Close() end
     stopReads()
     TC.Appearances.StopWeaponTypes()
@@ -948,11 +952,14 @@ end
 
 -- The funnel's class choice: a class id, or ALL_CLASSES. It narrows on the client
 -- (A3), keeps the slot, the other filters, the weapon type when the class
--- has it, the search and the sort, goes to page 1 and reads nothing.
+-- has it, the search and the sort, goes to page 1 and reads nothing. All
+-- classes is kept between visits and sessions, any other choice as the
+-- character's own.
 function State.SelectClass(value)
     local was = view.class == ALL_CLASSES and ALL_CLASSES or chosenClass()
     if value == nil or value == was then return end
     view.class, view.page = value, 1
+    saved.class = value == ALL_CLASSES and "all" or "own"
     fitWeaponType()
     settle()
     notify()
@@ -1069,43 +1076,58 @@ function State.SetSort(value)
 end
 
 -- Scan when shown, kept between sessions. Turning it on starts no scan:
--- the next show of the tab or slot change does.
+-- the next show of the tab or slot change does. The settings page is told
+-- (TC.SettingChanged), as it is of the item tooltip's settings.
 function State.SetScanWhenShown(on)
     on = on == true
     if on == saved.scanWhenShown then return end
     saved.scanWhenShown = on
     notify()
+    if TC.SettingChanged then TC.SettingChanged("scanWhenShown") end
+end
+
+-- Scan when shown as saved (the settings page reads it).
+function State.ScanWhenShown()
+    return saved.scanWhenShown
 end
 
 -- The saved table (TransmogCheckerDB.browser), handed over once the client
 -- has loaded it (TransmogChecker.lua, ADDON_LOADED): its values, malformed
 -- ones as the defaults, become the view's, and each change is written into
--- it. The five values are Scan when shown, Show, For sale only, the sort
--- and the slot.
+-- it. The six values are Scan when shown, Show, For sale only, the sort,
+-- the slot and the class.
 function State.Bind(t)
     if type(t) ~= "table" then return end
     useSaved(t)
     view.filter, view.forSaleOnly, view.sort, view.page = t.show, t.forSaleOnly, t.sort, 1
+    view.class = t.class == "all" and ALL_CLASSES or nil
     if view.slot ~= t.slot then view.slot, view.weaponType, list = t.slot, nil, lists[t.slot] end
     settle()
 end
 
+-- Whether the class is neutral: All classes or the character's own, the two
+-- a visit can start on. Neither lights the mark, and Reset keeps either.
+local function classNeutral()
+    return view.class == nil or view.class == ALL_CLASSES or view.class == (ownClass())
+end
+
 -- Whether Reset filters would change nothing: Show All, For sale only off,
--- every Source entry ticked, the character's own class, all weapon types,
--- no search text and the sort Price: low to high.
+-- every Source entry ticked, a neutral class, all weapon types, no search
+-- text and the sort Price: low to high.
 local function filtersAtStart()
     return view.filter == DEFAULTS.show and view.forSaleOnly == DEFAULTS.forSaleOnly and not next(view.sourcesOff)
-        and (view.class == nil or view.class == (ownClass())) and view.weaponType == nil and view.search == ""
+        and classNeutral() and view.weaponType == nil and view.search == ""
         and view.sort == DEFAULTS.sort
 end
 
 -- "Reset filters": every filter and the sort back to its default, page 1;
--- reads nothing.
+-- a single other class back to the character's own; reads nothing.
 function State.ResetFilters()
     if filtersAtStart() then return end
     view.filter, view.forSaleOnly, view.sort, view.sourcesOff = DEFAULTS.show, DEFAULTS.forSaleOnly, DEFAULTS.sort, {}
     saved.show, saved.forSaleOnly, saved.sort = view.filter, view.forSaleOnly, view.sort
-    view.class, view.weaponType, view.search = nil, nil, ""
+    if not classNeutral() then view.class, saved.class = nil, DEFAULTS.class end
+    view.weaponType, view.search = nil, ""
     narrowed()
 end
 

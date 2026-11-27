@@ -149,6 +149,8 @@ end
 --   noMaskAPI       CreateMaskTexture and AddMaskTexture are nil
 --   noLightMakers   CreateColor and CreateVector3D are nil
 --   fileIDs         GetFileIDFromPath exists and answers these ({ [path] = id })
+--   missingFiles    { [path] = true }: SetTexture answers false for those
+--   settings        the client has the settings API (see c.settings)
 --   realSortSources CollectionWardrobeUtil.SortSources is Blizzard's
 --   drops           { [sourceID] = drops } for GetAppearanceSourceDrops
 --   useErrors       { [sourceID] = text }: the sources' useError
@@ -297,6 +299,16 @@ function Fake.new(opts)
     function methods:SetShown(shown) if shown then self:Show() else self:Hide() end end
     function methods:IsShown() return self.shown end
     function methods:GetParent() return self.parent end
+    -- A frame moved to another parent (nil: none) leaves the old one's children.
+    function methods:SetParent(parent)
+        if self.parent then
+            for i, child in ipairs(self.parent.children) do
+                if child == self then table.remove(self.parent.children, i) break end
+            end
+        end
+        self.parent = parent
+        if parent then parent.children[#parent.children + 1] = self end
+    end
     -- A frame is one level above its parent until SetFrameLevel says otherwise.
     function methods:SetFrameLevel(level) self.level = level end
     function methods:GetFrameLevel() return self.level or (self.parent and self.parent:GetFrameLevel() + 1 or 0) end
@@ -331,6 +343,14 @@ function Fake.new(opts)
     function methods:Enable() self.enabled = true end
     function methods:Disable() self.enabled = false end
     function methods:IsEnabled() return self.enabled ~= false end
+    -- SetTexture answers whether it took the file
+    -- (SimpleTextureBaseAPIDocumentation.lua:604-619); missingFiles lists the
+    -- paths it fails for. The call is kept as any other is.
+    function methods:SetTexture(...)
+        self.calls.SetTexture = { ... }
+        self.callCount.SetTexture = (self.callCount.SetTexture or 0) + 1
+        return not (opts.missingFiles and opts.missingFiles[(...)])
+    end
     function methods:SetColorTexture(r, g, b, a) self.color = { r, g, b, a } end
     function methods:SetVertexColor(r, g, b, a) self.color = { r, g, b, a } end
     function methods:SetTextColor(r, g, b, a) self.textColor = { r, g, b, a } end
@@ -1667,14 +1687,257 @@ function Fake.new(opts)
         c.fire("AUCTION_HOUSE_CLOSED")
     end
 
-    -- Loads the addon's files in the .toc's order.
+    -- The client's settings API (Blizzard_Settings_Shared), only with
+    -- opts.settings: Settings.RegisterVerticalLayoutCategory(name) answers a
+    -- category and its layout (Blizzard_Settings.lua:154-156, Blizzard_
+    -- SettingsInbound.lua:176-180), RegisterAddOnCategory puts it on the
+    -- AddOns tab (:134-138), RegisterProxySetting(category, variable,
+    -- variableType, name, defaultValue, getValue, setValue) (:178-180) makes
+    -- a setting whose value is getValue's answer (Blizzard_Setting.lua:326-
+    -- 360): SetValue is ignored while locked, writes through setValue only
+    -- when the value differs, locked meanwhile, then tells the variable's
+    -- listeners (:100-137, 261-263); SetValueToDefault applies the default
+    -- (:139-148), NotifyUpdate tells the listeners the current value
+    -- (:185-188). CreateCheckbox (only a boolean setting, Blizzard_
+    -- Settings.lua:364-367), CreateDropdown (options required, :374-377) and
+    -- the section header (Blizzard_SettingControls.lua:131-134) are
+    -- initializers added to the layout; CreatePanelInitializer(template,
+    -- data) (:355-357) is one the caller adds, whose frame is made from a
+    -- template or, for a name that is no template, a native frame type
+    -- (FrameFactory.lua:12-27). An initializer's modify predicates
+    -- (Blizzard_SettingControls.lua:139-177) decide whether its row is
+    -- enabled. OpenToCategory(id, element) (Blizzard_Settings.lua:144-146) is
+    -- C_SettingsUtil.OpenSettingsPanel, restricted (SettingsUtilDocumentation
+    -- .lua:15-17): from addon code in combat ShowUIPanel refuses it
+    -- (UIParentPanelManager.lua:854-861, 886-888), counted in
+    -- c.settings.blocked. c.settings.notified counts each variable's
+    -- value-changed signals (what a shown control redraws on).
+    c.settings = { categories = {}, addon = {}, opened = {}, blocked = 0, notified = {}, byVariable = {}, frames = {} }
+    Settings, CreateSettingsListSectionHeaderInitializer, TransmogChecker_OpenSettings = nil, nil, nil
+    if opts.settings then
+        local listeners = {}
+        local function trigger(setting, value)
+            local variable = setting:GetVariable()
+            c.settings.notified[variable] = (c.settings.notified[variable] or 0) + 1
+            for _, fn in ipairs(listeners[variable] or {}) do fn(setting, value) end
+        end
+        local function listen(variable, fn)
+            listeners[variable] = listeners[variable] or {}
+            table.insert(listeners[variable], fn)
+        end
+        local function newInitializer(kind, template, data)
+            local init = { kind = kind, frameTemplate = template, data = data or {} }
+            function init:AddModifyPredicate(fn) self.modify = self.modify or {} table.insert(self.modify, fn) end
+            function init:SetParentInitializer(parent, predicate)
+                misuse(parent ~= nil and parent ~= self, "SetParentInitializer argument")
+                self.parent = parent
+                if predicate then self:AddModifyPredicate(predicate) end
+            end
+            function init:EvaluateModifyPredicates()
+                for _, fn in ipairs(self.modify or {}) do if not fn() then return false end end
+                return true
+            end
+            function init:AddEvaluateStateCVar(variable) self.evaluateOn = self.evaluateOn or {} table.insert(self.evaluateOn, variable) end
+            function init:GetExtent() return nil end
+            function init:InitFrame(frame) if frame.Init then frame:Init(self) end end
+            function init:Resetter(frame) if frame.Release then frame:Release(self) end end
+            function init:GetSetting() return self.data.setting end
+            -- the list reads these fields in its own code (Blizzard_SettingsList
+            -- .lua:57-71): one the addon wrote is misuse (c.settingsPage checks)
+            init.own = { GetExtent = init.GetExtent, InitFrame = init.InitFrame, Resetter = init.Resetter }
+            return init
+        end
+        Settings = { VarType = { Boolean = "boolean", String = "string", Number = "number" }, Default = { True = true, False = false } }
+        function Settings.RegisterVerticalLayoutCategory(name)
+            local category = { name = name, ID = 100 + #c.settings.categories, settings = {} }
+            function category:GetID() return self.ID end
+            local layout = { initializers = {} }
+            function layout:AddInitializer(init) table.insert(self.initializers, init) return init end
+            category.layout = layout
+            table.insert(c.settings.categories, category)
+            return category, layout
+        end
+        function Settings.RegisterAddOnCategory(category) table.insert(c.settings.addon, category) end
+        function Settings.RegisterProxySetting(category, variable, variableType, name, defaultValue, getValue, setValue)
+            misuse(type(variable) == "string" and type(name) == "string" and type(getValue) == "function"
+                and type(setValue) == "function", "RegisterProxySetting arguments")
+            misuse(type(defaultValue) == variableType, "RegisterProxySetting default for " .. tostring(variable))
+            misuse(c.settings.byVariable[variable] == nil, "a second setting " .. tostring(variable))
+            local s = { variable = variable, name = name, variableType = variableType, default = defaultValue }
+            function s:GetVariable() return self.variable end
+            function s:GetName() return self.name end
+            function s:GetVariableType() return self.variableType end
+            function s:GetDefaultValue() return self.default end
+            function s:IsLocked() return self.locked end
+            function s:GetValue() return getValue() end
+            function s:ApplyValue(value)
+                if getValue() ~= value then
+                    misuse(type(value) == self.variableType, "a " .. type(value) .. " value for " .. variable)
+                    self.locked = true
+                    setValue(value)
+                    self.locked = false
+                end
+                trigger(self, value)
+            end
+            function s:SetValue(value) if not self.locked then self:ApplyValue(value) end end
+            function s:SetValueToDefault() self:ApplyValue(self.default) return true end
+            function s:NotifyUpdate() trigger(self, getValue()) end
+            function s:SetValueChangedCallback(fn) listen(variable, fn) end
+            c.settings.byVariable[variable] = s
+            table.insert(category.settings, s)
+            return s
+        end
+        function Settings.GetSetting(variable) return c.settings.byVariable[variable] end
+        function Settings.CreateControlTextContainer()
+            local container = { data = {} }
+            function container:Add(value, label, tooltip)
+                table.insert(self.data, { value = value, label = label, text = label, tooltip = tooltip })
+            end
+            function container:GetData() return self.data end
+            return container
+        end
+        local function control(kind, template, category, setting, options, tooltip)
+            local init = newInitializer(kind, template, { setting = setting, name = setting:GetName(), options = options, tooltip = tooltip })
+            category.layout:AddInitializer(init)
+            return init
+        end
+        function Settings.CreateCheckbox(category, setting, tooltip)
+            misuse(setting:GetVariableType() == "boolean", "CreateCheckbox with a " .. setting:GetVariableType() .. " setting")
+            return control("checkbox", "SettingsCheckboxControlTemplate", category, setting, nil, tooltip)
+        end
+        function Settings.CreateDropdown(category, setting, options, tooltip)
+            misuse(options ~= nil, "CreateDropdown without options")
+            return control("dropdown", "SettingsDropdownControlTemplate", category, setting, options, tooltip)
+        end
+        function Settings.CreatePanelInitializer(template, data) return newInitializer("panel", template, data) end
+        function CreateSettingsListSectionHeaderInitializer(name, tooltip)
+            return newInitializer("header", "SettingsListSectionHeaderTemplate", { name = name, tooltip = tooltip })
+        end
+        function Settings.OpenToCategory(id, element)
+            if c.combat then
+                c.settings.blocked = c.settings.blocked + 1
+                return
+            end
+            c.settings.opened[#c.settings.opened + 1] = { id = id, element = element }
+            c.settings.current = id
+        end
+    end
+    -- The page of the category the panel shows (the last opened), as the
+    -- list draws it: each initializer a row { kind, name, tooltip, value,
+    -- options (each { value, label, tooltip }), enabled, extent, frame }. A
+    -- panel row gets a fresh frame of its template, or of the native type
+    -- its template names, and its InitFrame; each listed row's
+    -- value-changed signal re-evaluates its predicates (here: on reading).
+    -- A row's extent is the initializer's GetExtent, else the template's
+    -- height (Blizzard_SettingsList.lua:68-71). A frame of an XML template
+    -- (c.templates, read from the .toc's XML files by c.loadToc) gets the
+    -- template's mixin copied in, as the client does when it makes the frame.
+    -- c.settingsPage(id) shows that category instead.
+    local NATIVE = { Frame = true, Button = true }
+    c.templates = {}
+    function c.settingsPage(id)
+        id = id or c.settings.current
+        for _, category in ipairs(c.settings.categories) do
+            if category.ID == id then
+                local rows = {}
+                for _, init in ipairs(category.layout.initializers) do
+                    local setting = init.data.setting
+                    local options = init.data.options
+                    if type(options) == "function" then options = options() end
+                    local row = { kind = init.kind, name = setting and setting:GetName() or init.data.name,
+                        tooltip = init.data.tooltip, value = setting and setting:GetValue(), options = options,
+                        enabled = init:EvaluateModifyPredicates(), extent = init:GetExtent(), init = init }
+                    for key, fn in pairs(init.own) do
+                        misuse(rawget(init, key) == fn, "a field written on the initializer: " .. key)
+                    end
+                    if init.kind == "panel" then
+                        local template = c.templates[init.frameTemplate]
+                        misuse(template ~= nil or NATIVE[init.frameTemplate] == true,
+                            "a panel template the fake does not know: " .. tostring(init.frameTemplate))
+                        local frame = c.newWidget(template and "Frame" or init.frameTemplate, nil, UIParent, init.frameTemplate)
+                        if template then
+                            row.extent = row.extent or template.height
+                            local mixin = template.mixin and _G[template.mixin]
+                            misuse(template.mixin == nil or type(mixin) == "table", "no global mixin " .. tostring(template.mixin))
+                            for key, value in pairs(type(mixin) == "table" and mixin or {}) do frame[key] = value end
+                        end
+                        init:InitFrame(frame)
+                        row.frame = frame
+                        c.settings.frames[#c.settings.frames + 1] = { init = init, frame = frame }
+                    end
+                    rows[#rows + 1] = row
+                end
+                return rows, category
+            end
+        end
+    end
+    -- The list lets the page's frames go (the panel hides or another
+    -- category is shown): each panel initializer's Resetter.
+    function c.hideSettingsPage()
+        for _, f in ipairs(c.settings.frames) do f.init:Resetter(f.frame) end
+        c.settings.frames = {}
+    end
+    -- Blizzard's Defaults on the shown category
+    -- (SettingsPanelMixin:SetCurrentCategorySettingsToDefaults,
+    -- Blizzard_SettingsPanel.lua:500-525): each of its settings to its default.
+    function c.settingsDefaults(id)
+        id = id or c.settings.current
+        for _, category in ipairs(c.settings.categories) do
+            if category.ID == id then
+                for _, s in ipairs(category.settings) do s:SetValueToDefault() end
+            end
+        end
+    end
+    -- The minimap's addon list (Blizzard_Minimap/Mainline/AddonCompartment.lua:
+    -- 102-129, which Camelot's file extends): an addon whose .toc names
+    -- AddonCompartmentFunc gets an entry; a click calls that global with the
+    -- addon's name and the mouse button. Answers the entry { func, icon,
+    -- called } (icon: IconTexture, else IconAtlas), or nil without one.
+    function c.compartmentClick(dir, button)
+        local meta = {}
+        for line in io.lines(dir .. "/TransmogChecker.toc") do
+            local key, value = line:gsub("\r", ""):match("^##%s*([%w]+):%s*(.-)%s*$")
+            if key then meta[key] = value end
+        end
+        if not meta.AddonCompartmentFunc then return nil end
+        local entry = { func = meta.AddonCompartmentFunc, icon = meta.IconTexture or meta.IconAtlas, text = meta.Title }
+        local fn = _G[meta.AddonCompartmentFunc]
+        misuse(type(fn) == "function", "no global " .. meta.AddonCompartmentFunc)
+        if type(fn) == "function" then fn("TransmogChecker", button or "LeftButton") entry.called = true end
+        return entry
+    end
+
+    -- An XML file's virtual frame templates, into c.templates: for each
+    -- <Frame name=... virtual="true"> its mixin and its <Size y=...>. Only
+    -- that much of the XML is modelled: no other element, no inherits.
+    local function readTemplates(path)
+        local file = assert(io.open(path, "r"))
+        local text = file:read("*a")
+        file:close()
+        for attrs, body in text:gmatch("<Frame%s([^>]-)>(.-)</Frame>") do
+            local name = attrs:match('name="([^"]+)"')
+            if name and attrs:find('virtual="true"', 1, true) then
+                misuse(_G[attrs:match('mixin="([^"]+)"') or ""] ~= nil or not attrs:find("mixin=", 1, true),
+                    "a mixin that is no global when " .. path .. " loads")
+                c.templates[name] = { mixin = attrs:match('mixin="([^"]+)"'),
+                    height = tonumber(body:match('<Size[^>]-%sy="(%-?[%d%.]+)"')) }
+            end
+        end
+    end
+
+    -- Loads the addon's files in the .toc's order: a Lua file runs, an XML
+    -- file's templates are read (readTemplates).
     function c.loadToc(dir)
         local loaded = {}
         for line in io.lines(dir .. "/TransmogChecker.toc") do
             line = line:gsub("\r", ""):gsub("\\", "/")
             if line ~= "" and line:sub(1, 2) ~= "##" then
-                local chunk = assert(loadfile(dir .. "/" .. line))
-                chunk("TransmogChecker", {})
+                if line:match("%.xml$") then
+                    readTemplates(dir .. "/" .. line)
+                else
+                    local chunk = assert(loadfile(dir .. "/" .. line))
+                    chunk("TransmogChecker", {})
+                end
                 loaded[#loaded + 1] = line
             end
         end

@@ -25,7 +25,7 @@ An appearance is collectable when the account is able to add it to its collectio
 _Avoid_: Learnable, usable, wearable
 
 **Class filter**:
-The choice of one class whose wearable armor and usable weapons the appearance browser is narrowed to. It starts on the current character's class.
+The choice of one class whose wearable armor and usable weapons the appearance browser is narrowed to, or All classes. It starts on the current character's class; All classes, once chosen, is kept between visits and sessions.
 _Avoid_: Armor type filter, usable filter, wearable filter
 
 **Slot**:
@@ -63,6 +63,10 @@ _Avoid_: Browse, full scan, refresh
 **Tooltip style**:
 How the item tooltip shows an appearance's status: Full adds lines under the game's (the status, how to collect it, the session's lowest price and the other items), Compact writes the status on the right of the item's name line.
 _Avoid_: Mode, layout, view
+
+**Settings page**:
+The addon's page in the game's Options > AddOns: a preview of the item tooltip and the settings of the item tooltip and the appearance browser. `/tc`, the funnel's "Settings…" and the minimap's addon list open it.
+_Avoid_: Options panel, config, settings window
 
 **Session price**:
 The lowest price the appearance browser saw for an appearance in this session, from its latest scan or check, and when; it outlives the auction house visit and is gone after a reload. The item tooltip shows it as "Lowest price".

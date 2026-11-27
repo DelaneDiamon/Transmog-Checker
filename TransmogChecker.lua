@@ -30,11 +30,28 @@ function TC.Setting(key)
     return SETTINGS[key].default
 end
 
--- Stores a setting (the settings panel's call); answers whether the value
--- was taken. The next tooltip shown uses it.
+-- A setting's default (the settings page registers each with it).
+function TC.SettingDefault(key)
+    return SETTINGS[key].default
+end
+
+-- Who is told of a changed value (the settings page): fn(key). The browser
+-- state tells of Scan when shown the same way.
+local watchers = {}
+function TC.WatchSettings(fn)
+    watchers[#watchers + 1] = fn
+end
+function TC.SettingChanged(key)
+    for _, fn in ipairs(watchers) do fn(key) end
+end
+
+-- Stores a setting (the settings page's call and the slash shortcuts');
+-- answers whether the value was taken. The next tooltip shown uses it.
 function TC.SetSetting(key, value)
     if not (SETTINGS[key] and TC.Config and valid(key, value)) then return false end
+    local changed = TC.Config[key] ~= value
     TC.Config[key] = value
+    if changed then TC.SettingChanged(key) end
     return true
 end
 
@@ -57,26 +74,42 @@ loader:SetScript("OnEvent", function(self, _, loadedAddon)
 
     TC.Config = TransmogCheckerDB
 
-    -- the appearance browser's four remembered choices, in their own table
+    -- the appearance browser's six remembered choices, in their own table
     -- (TC_BrowserState checks each value)
     if type(TransmogCheckerDB.browser) ~= "table" then TransmogCheckerDB.browser = {} end
     if TC.BrowserState and TC.BrowserState.Bind then TC.BrowserState.Bind(TransmogCheckerDB.browser) end
+
+    -- the page in the game's Options > AddOns, on a client that has it
+    if TC.Settings then TC.Settings.Register() end
 end)
 
 local function say(text)
     print("|cFF9D9D9DTC:|r " .. text)
 end
 
+-- The help; with the settings page, the page's two lines (addon-settings v1, Entry points).
 local HELP = { "/tc lists these commands.", "/tc help lists these commands.", "/tc debug turns debug output on or off." }
+local HELP_WITH_PAGE = { "/tc opens the settings.", "/tc debug turns debug output on or off." }
+local function help()
+    for _, line in ipairs(TC.Settings and TC.Settings.Available() and HELP_WITH_PAGE or HELP) do say(line) end
+end
 
--- Slash command handling: alts and skipgreys are shortcuts to their
--- settings until the settings panel exists.
+-- The minimap's addon list calls this (## AddonCompartmentFunc in the .toc):
+-- the settings page, else the help.
+function TransmogChecker_OpenSettings()
+    if not (TC.Settings and TC.Settings.Open()) then help() end
+end
+
+-- Slash command handling: /tc alone opens the settings page (the help
+-- without it); alts and skipgreys stay shortcuts to their settings.
 SLASH_TC1 = "/tc"
 SlashCmdList["TC"] = function(msg)
     local cmd = (msg or ""):match("^%s*(%S+)")
     cmd = cmd and cmd:lower() or ""
 
-    if cmd == "debug" then
+    if cmd == "" then
+        TransmogChecker_OpenSettings()
+    elseif cmd == "debug" then
         TC.Config.debug = not TC.Config.debug
         print("|cFF9D9D9DTC:|r Debug mode " .. (TC.Config.debug and "enabled" or "disabled"))
     elseif cmd == "alts" or cmd == "hidealts" then
@@ -88,7 +121,7 @@ SlashCmdList["TC"] = function(msg)
         TC.SetSetting("skipPoorAndCommon", not TC.Setting("skipPoorAndCommon"))
         say("Skip grey/white items " .. (TC.Setting("skipPoorAndCommon") and "enabled" or "disabled"))
     else
-        for _, line in ipairs(HELP) do say(line) end
+        help()
     end
 end
 

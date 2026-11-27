@@ -4,6 +4,8 @@
 ## Author: DelaneDiamon
 ## SavedVariables: TransmogCheckerDB
 ## OptionalDeps: LibStub, LibAHTab
+## IconAtlas: lootroll-icon-transmog
+## AddonCompartmentFunc: TransmogChecker_OpenSettings
 
 Libs/LibStub/LibStub.lua
 Libs/LibAHTab/LibAHTab.lua
@@ -18,3 +20,5 @@ TC/Browser/TC_BrowserState.lua
 TC/Browser/TC_Buy.lua
 TC/Browser/TC_BrowserPanel.lua
 TC/Tooltip/TC_Tooltip.lua
+TC/Settings/TC_Settings.lua
+TC/Settings/TC_Settings.xml
