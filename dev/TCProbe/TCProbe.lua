@@ -4625,7 +4625,8 @@ end)()
 -- whether its first line's right text (GameTooltipTextRight1,
 -- SharedTooltipTemplates.xml:36) exists, whether it is shown and its text
 -- before, then writes a test text and reads it back on that frame and on
--- the next, and puts the text and the shown state back. The probe's
+-- the next, and then, only while the tooltip still shows that item with the
+-- test text, puts the text and the shown state back. The probe's
 -- post-call is registered when the command is typed, after
 -- TransmogChecker's, so with its Style on Compact "before" is the addon's
 -- own write, and with Full it is what the game (or another addon) left
@@ -4661,11 +4662,19 @@ local function probe(tooltip)
         tostring(right:GetText()), tostring(right:IsShown())))
     local function nextFrame()
         local _, now = tooltip:GetItem()
-        say(("next frame: %q, shown %s; tooltip shown %s, same item %s"):format(tostring(right:GetText()),
+        local text = right:GetText()
+        say(("next frame: %q, shown %s; tooltip shown %s, same item %s"):format(tostring(text),
             tostring(right:IsShown()), tostring(tooltip:IsShown()), tostring(now == link)))
-        right:SetText(was)
-        if not wasShown then right:Hide() end
-        say("put back; done.")
+        -- put back only the probe's own text: once the tooltip shows other
+        -- content (another item, a spell, hidden) or the text is no longer
+        -- the test text, the line belongs to someone else
+        if tooltip:IsShown() and now == link and text == TEST then
+            right:SetText(was)
+            if not wasShown then right:Hide() end
+            say("put back; done.")
+        else
+            say("moved on; left as it is; done.")
+        end
     end
     if C_Timer and C_Timer.After then C_Timer.After(0, nextFrame) else nextFrame() end
 end
