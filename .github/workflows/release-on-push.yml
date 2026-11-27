@@ -22,7 +22,7 @@ jobs:
         shell: bash
         run: |
           # Version floor: no release goes out below this version
-          MIN_VERSION="1.0.0"
+          MIN_VERSION="1.1.0"
           git fetch --tags --force
           # Keep only semantic tags like 0.0.18 or v0.0.18
           mapfile -t tags < <(git tag -l | sed 's/^v//' | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$')

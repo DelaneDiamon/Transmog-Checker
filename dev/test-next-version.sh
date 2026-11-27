@@ -38,9 +38,9 @@ check() {  # check <label> <expected> <tags...>
   fi
 }
 
-check "real tags today"   1.0.0  $real_tags
-check "plus 1.0.0"        1.0.1  $real_tags 1.0.0
-check "plus 1.0.9"        1.0.10 $real_tags 1.0.0 1.0.9
+check "real tags today"   1.1.0  $real_tags
+check "plus 1.0.0"        1.1.0  $real_tags 1.0.0
+check "plus 1.0.9"        1.1.0  $real_tags 1.0.0 1.0.9
 check "plus 1.2.3"        1.2.4  $real_tags 1.0.0 1.0.9 1.2.3
-check "no tags"           1.0.0
+check "no tags"           1.1.0
 exit $failed
