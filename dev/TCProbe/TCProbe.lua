@@ -4330,7 +4330,12 @@ local function moduleLines(entry)
     say(("TC.BrowserState.View: slot %s, mode %s, Show %s (%s), class %s, search %d letters, %d tiles (%d with a result strip, %d pending), count %q, page %q, status %q"):format(
         chosen, tostring(v.mode), tostring(v.filter), table.concat(filters, "/"), tostring(v.classes and v.classes.text),
         #(v.search or ""), #(v.tiles or {}), strips, pending, tostring(v.count), tostring(v.pageText), tostring(v.status)))
-    say(("empty state: %s"):format(v.empty and (tostring(v.empty.title) .. ": " .. tostring(v.empty.text)) or "none"))
+    -- TC-43: no tiles, no count and no empty state is a slot the browser holds
+    -- no list for: not read since the auction house opened (closing it
+    -- starts the next visit afresh), or a read that waits a frame
+    local unread = not v.empty and #(v.tiles or {}) == 0 and v.count == ""
+    say(("empty state: %s%s"):format(v.empty and (tostring(v.empty.title) .. ": " .. tostring(v.empty.text)) or "none",
+        unread and " (the browser holds no list for this slot: not read in this visit, or its read waits)" or ""))
 end
 
 -- The filter changes to measure under: each one not at its usual value.
@@ -4375,12 +4380,71 @@ logout:SetScript("OnEvent", putBack)
 -- Whether a run's filter readings are stepping through their frames: a
 -- second run would share unrestored and read the first run's writes as found.
 local running = false
-local function measure(entry, list, index, found)
-    local variant = list[index]
-    if not variant then
+
+-- The length of the client's list for a category now, or why there is none.
+local function listLength(category, slotID)
+    local result = call(C_TransmogCollection, "GetCategoryAppearances", category, location(slotID))
+    return type(result[1]) == "table" and tostring(#result[1]) or ("no list: " .. text(result))
+end
+
+-- TC-43: the slot's first category's list as found; with Collections'
+-- search-and-filter category pointed at Paired (29, the value the addon
+-- uses), in the same frame and on the next; the total; then put back on the
+-- category (the only value consistent with a narrowed read) and read in the
+-- same frame and on the next. Also any getter the client has for it. Only
+-- for a category whose filtered total is below its total (the filter
+-- category); for any other nothing is written.
+local function filterCategoryReading(entry)
+    local T = C_TransmogCollection
+    local category = categoriesOf(entry)[1]
+    local getters = {}
+    for _, name in ipairs(sortedFunctionNames(T) or {}) do
+        if name:find("SearchAndFilter") or name:find("FilterCategory") then getters[#getters + 1] = name end
+    end
+    say("filter category calls the client has: " .. (getters[1] and table.concat(getters, ", ") or "none"))
+    if type(T.GetSearchAndFilterCategory) == "function" then
+        say("GetSearchAndFilterCategory as found: " .. text(call(T, "GetSearchAndFilterCategory")))
+    end
+    -- only the category Collections' filters narrow is read (the addon's
+    -- sign, TC_Appearances.lua narrowed): writing for any other would move
+    -- Collections' filter category onto it
+    local total, filtered = call(T, "GetCategoryTotal", category), call(T, "GetFilteredCategoryTotal", category)
+    if not (type(total[1]) == "number" and type(filtered[1]) == "number" and filtered[1] < total[1]) then
         running = false
+        return say(("filter category: category %d is not narrowed (filtered total %s of %s); nothing written; filter readings done."):format(
+            category, text(filtered), text(total)))
+    end
+    local found = listLength(category, entry.slotID)
+    local away = enum("TransmogCollectionType", "Paired", 29)
+    local wrote = call(T, "SetSearchAndFilterCategory", away)
+    if wrote.missing or wrote.error then
+        running = false
+        say(("filter category: category %d: as found %s; pointing it away: %s"):format(category, found, text(wrote)))
         return say("filter readings done.")
     end
+    unrestored[#unrestored + 1] = { put = function(v) return call(T, "SetSearchAndFilterCategory", v) end, was = category }
+    local sameFrame = listLength(category, entry.slotID)
+    C_Timer.After(0, function()
+        local nextFrame = listLength(category, entry.slotID)
+        putBack()
+        local backNow = listLength(category, entry.slotID)
+        C_Timer.After(0, function()
+            local backLater = listLength(category, entry.slotID)
+            say(("filter category: category %d: as found %s; pointed at %d: same frame %s, next frame %s; total %s; put back on %d: same frame %s, next frame %s; as-found length returned: %s"):format(
+                category, found, away, sameFrame, nextFrame, text(call(T, "GetCategoryTotal", category)), category,
+                backNow, backLater, backLater == found and "yes" or "NO"))
+            if type(T.GetSearchAndFilterCategory) == "function" then
+                say("GetSearchAndFilterCategory after: " .. text(call(T, "GetSearchAndFilterCategory")))
+            end
+            running = false
+            say("filter readings done.")
+        end)
+    end)
+end
+
+local function measure(entry, list, index, found)
+    local variant = list[index]
+    if not variant then return filterCategoryReading(entry) end
     local problems = {}
     for _, write in ipairs(variant.writes) do
         local result = write.put(write.to)
@@ -4419,11 +4483,11 @@ local function probeSlot(word)
     filterLines(found)
     moduleLines(entry)
     local list = variants(found)
-    if not list[1] then return say("no filter differs from its usual value; nothing written.") end
     local busy = (AuctionHouseFrame and AuctionHouseFrame:IsShown()) or (CollectionsJournal and CollectionsJournal:IsShown())
     if busy or not (C_Timer and C_Timer.After) then
         return say("filter readings skipped: close the auction house and Collections, then run this again.")
     end
+    if not list[1] then say("no filter differs from its usual value; nothing written for them.") end
     running = true
     measure(entry, list, 1, found)
 end
