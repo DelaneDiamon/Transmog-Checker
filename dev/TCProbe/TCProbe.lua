@@ -4619,3 +4619,80 @@ SlashCmdList["TCPROBE"] = function(msg)
     return base(msg)
 end
 end)()
+
+-- "/tcprobe nameline" (slice D1: Compact writes the status on the right of
+-- the item's name line): on the next item tooltip GameTooltip shows, prints
+-- whether its first line's right text (GameTooltipTextRight1,
+-- SharedTooltipTemplates.xml:36) exists, whether it is shown and its text
+-- before, then writes a test text and reads it back on that frame and on
+-- the next, and puts the text and the shown state back. The probe's
+-- post-call is registered when the command is typed, after
+-- TransmogChecker's, so with its Style on Compact "before" is the addon's
+-- own write, and with Full it is what the game (or another addon) left
+-- there. Prints item ids only; nothing reaches the auction house.
+;(function()
+local TEST = "TCProbe test"
+local armed, hooked = false, false
+
+local function say(text)
+    print("TCProbe nameline: " .. text)
+    db.nameLine = db.nameLine or {}
+    if #db.nameLine < 100 then db.nameLine[#db.nameLine + 1] = text end
+end
+
+local function probe(tooltip)
+    armed = false
+    local name = tooltip:GetName()
+    local _, link = tooltip:GetItem()
+    local style = TC and TC.Setting and TC.Setting("tooltipStyle")
+    say(("item %s, %d lines, TransmogChecker style %s"):format(tostring(link and link:match("item:(%d+)")),
+        tooltip:NumLines(), tostring(style)))
+    local right = name and _G[name .. "TextRight1"]
+    if not (right and right.GetText and right.SetText and right.IsShown) then
+        return say(tostring(name) .. "TextRight1: missing")
+    end
+    local was, wasShown = right:GetText(), right:IsShown()
+    say(("before: shown %s, text %q"):format(tostring(wasShown), tostring(was)))
+    local ok, err = pcall(function()
+        right:SetText(TEST)
+        right:Show()
+    end)
+    say(("write: %s; read back on this frame: %q, shown %s"):format(ok and "no error" or ("raised " .. tostring(err)),
+        tostring(right:GetText()), tostring(right:IsShown())))
+    local function nextFrame()
+        local _, now = tooltip:GetItem()
+        say(("next frame: %q, shown %s; tooltip shown %s, same item %s"):format(tostring(right:GetText()),
+            tostring(right:IsShown()), tostring(tooltip:IsShown()), tostring(now == link)))
+        right:SetText(was)
+        if not wasShown then right:Hide() end
+        say("put back; done.")
+    end
+    if C_Timer and C_Timer.After then C_Timer.After(0, nextFrame) else nextFrame() end
+end
+
+local function arm()
+    if not hooked then
+        if not (TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall and Enum and Enum.TooltipDataType) then
+            return say("no TooltipDataProcessor.AddTooltipPostCall on this client")
+        end
+        TooltipDataProcessor.AddTooltipPostCall(Enum.TooltipDataType.Item, function(tooltip)
+            if not armed or tooltip ~= GameTooltip then return end
+            local ok, err = pcall(probe, tooltip)
+            if not ok then
+                armed = false
+                say("raised: " .. tostring(err))
+            end
+        end)
+        hooked = true
+    end
+    armed = true
+    say("hover an item; the next item tooltip is probed once.")
+end
+
+local base = SlashCmdList["TCPROBE"]
+SlashCmdList["TCPROBE"] = function(msg)
+    local word = (msg or ""):match("^%s*(%S*)")
+    if word:lower() == "nameline" then return arm() end
+    return base(msg)
+end
+end)()
