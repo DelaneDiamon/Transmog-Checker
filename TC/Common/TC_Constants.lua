@@ -14,14 +14,15 @@ TC.COLORS = {
 	NOT_COLLECTED = { orange = "FFFF7F00", lightBlue = "FF87ABFF", white = "FFFFFFFF" },
 }
 
--- Source type descriptions (extend as needed per client)
+-- Source type descriptions (extend as needed per client): each name's
+-- locale key, read where the client names no source type
 TC.SOURCE_TYPES = {
-	[1] = "Boss Drop",
-	[2] = "Quest",
-	[3] = "Vendor",
-	[4] = "World Drop",
-	[5] = "Achievement",
-	[6] = "Profession",
+	[1] = { nameKey = "SOURCE_BOSS_DROP" },
+	[2] = { nameKey = "SOURCE_QUEST" },
+	[3] = { nameKey = "SOURCE_VENDOR" },
+	[4] = { nameKey = "SOURCE_WORLD_DROP" },
+	[5] = { nameKey = "SOURCE_ACHIEVEMENT" },
+	[6] = { nameKey = "SOURCE_PROFESSION" },
 }
 
 -- Valid equipment locations for transmoggable gear
@@ -49,4 +50,4 @@ TC.VALID_EQUIP_LOCS = {
 }
 
 
-print("TC_Constants: Loaded constants.")
+print(TC.L.LOADED_CONSTANTS)

@@ -20,7 +20,10 @@ local LIST_CAP, ROW_INDENT = 4, 12
 -- Coin atlases of this build's money frame, as the browser draws prices
 -- (TC_BrowserPanel.lua:84-86).
 local COIN_ATLAS = { gold = "coin-gold", silver = "coin-silver", copper = "coin-copper" }
-local COIN_LETTERS = { gold = "g", silver = "s", copper = "c" }
+local L = TC.L
+local function coinLetter(coin)
+    return coin == "gold" and L.COIN_GOLD or coin == "silver" and L.COIN_SILVER or L.COIN_COPPER
+end
 -- The tooltip's primary info names these getters for an item in the bags
 -- (TooltipDataHandler.lua:543-544).
 local BAG_GETTERS = { GetBagItem = true, GetBagItemChild = true }
@@ -106,7 +109,7 @@ local function nameOf(source)
     end
     if not name then
         if source.itemID then request(source.itemID) end
-        return RETRIEVING_ITEM_INFO or "Retrieving item information", TC.COLORS.RETRIEVING
+        return RETRIEVING_ITEM_INFO or L.RETRIEVING_ITEM, TC.COLORS.RETRIEVING
     end
     local color = TC.COLORS.WHITE
     if type(quality) == "number" and C_Item and C_Item.GetItemQualityColor then
@@ -173,7 +176,7 @@ function Tooltip.Lines(item, settings, known)
             right = { text = W.collected, color = C.COLLECTED, mark = "check" }
         else
             local n = item.otherCount
-            local count = (n > 0 and settings.others ~= "off") and (" |c" .. C.GREY .. "+" .. n .. (n == 1 and " item" or " items") .. "|r") or ""
+            local count = (n > 0 and settings.others ~= "off") and (" |c" .. C.GREY .. TC.Plural("TOOLTIP_MORE_COUNT", n):format(n) .. "|r") or ""
             right = { text = W.notCollected .. count, color = settings.color }
         end
         local lines = {}
@@ -189,10 +192,10 @@ function Tooltip.Lines(item, settings, known)
         lines[2] = { text = W.notCollected, color = settings.color, mark = pendingText and "bag" or nil,
             right = item.source, rightColor = C.WHITE }
         if item.bindsOnEquip then
-            lines[3] = { text = pendingText or TC.Appearances.BIND_ON_EQUIP_TEXT, color = C.WHITE, wrap = true }
+            lines[3] = { text = pendingText or L.BIND_ON_EQUIP_COLLECT, color = C.WHITE, wrap = true }
         end
         if settings.price and known.price then
-            lines[#lines + 1] = { text = W.lowestPrice .. " |c" .. C.GREY .. known.price.age .. "|r", color = C.GOLD,
+            lines[#lines + 1] = { text = L.TOOLTIP_LOWEST_PRICE_AGE:format("|c" .. C.GREY .. known.price.age .. "|r"), color = C.GOLD,
                 money = TC.BrowserState.MoneyParts(known.price.copper), rightColor = C.WHITE }
         end
     end
@@ -205,7 +208,7 @@ function Tooltip.Lines(item, settings, known)
                 rightColor = row.collected and C.COLLECTED or C.WHITE, indent = ROW_INDENT }
         end
         if #item.others < item.otherCount then
-            lines[#lines + 1] = { text = W.moreItems:format(item.otherCount - #item.others), color = C.GREY, indent = ROW_INDENT }
+            lines[#lines + 1] = { text = W.moreItems(item.otherCount - #item.others), color = C.GREY, indent = ROW_INDENT }
         end
     end
     return { lines = lines }
@@ -228,7 +231,7 @@ end
 local function moneyMarkup(parts)
     local words = {}
     for i, part in ipairs(parts) do
-        local coin = CreateAtlasMarkup and CreateAtlasMarkup(COIN_ATLAS[part.coin], 14, 14, 2, 0) or COIN_LETTERS[part.coin]
+        local coin = CreateAtlasMarkup and CreateAtlasMarkup(COIN_ATLAS[part.coin], 14, 14, 2, 0) or coinLetter(part.coin)
         words[i] = part.amount .. coin
     end
     return table.concat(words, " ")
@@ -389,4 +392,4 @@ elseif TooltipDataProcessor and TooltipDataProcessor.AddTooltipPostCall then
     end)
 end
 
-print("TC_Tooltip: Module loaded.")
+print(L.LOADED_TOOLTIP)

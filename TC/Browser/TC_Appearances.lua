@@ -529,10 +529,6 @@ function Appearances.IsCollected(appearance)
     return false
 end
 
--- How a bind-on-equip item that is not collected is collected (measured in
--- game on Forever): the browser's tooltip and the item tooltip say it.
-Appearances.BIND_ON_EQUIP_TEXT = "Binds when equipped: equip it or sell it to a vendor to collect."
-
 -- The slot key of TC.Slots whose categories hold the category, or nil.
 local function slotOfCategory(category)
     for _, entry in ipairs(TC.Slots) do
@@ -683,20 +679,20 @@ end
 -- profession; the client cannot name the profession. Only the types one
 -- profession alone makes are named. Each entry: ItemClass key, subclass key
 -- (ItemArmorSubclass for Armor, ItemWeaponSubclass for Weapon), the
--- profession; slot: only for that equip location; notSlot: not for those
+-- profession (its name's locale key); slot: only for that equip location; notSlot: not for those
 -- equip locations (a set). Head pieces of cloth and leather are left out:
 -- engineers make goggles of both in the classic game, so a crafted head
 -- piece stays plain "Profession", as cloaks do.
 local PROFESSION_OF_TYPE = {
-    { "Armor", "Cloth", "Tailoring", notSlot = { INVTYPE_CLOAK = true, INVTYPE_HEAD = true } },
-    { "Armor", "Leather", "Leatherworking", notSlot = { INVTYPE_HEAD = true } },
-    { "Armor", "Plate", "Blacksmithing" },
-    { "Armor", "Generic", "Tailoring", slot = "INVTYPE_BODY" },
-    { "Weapon", "Wand", "Enchanting" },
-    { "Weapon", "Guns", "Engineering" },
+    { "Armor", "Cloth", professionKey = "PROFESSION_TAILORING", notSlot = { INVTYPE_CLOAK = true, INVTYPE_HEAD = true } },
+    { "Armor", "Leather", professionKey = "PROFESSION_LEATHERWORKING", notSlot = { INVTYPE_HEAD = true } },
+    { "Armor", "Plate", professionKey = "PROFESSION_BLACKSMITHING" },
+    { "Armor", "Generic", professionKey = "PROFESSION_TAILORING", slot = "INVTYPE_BODY" },
+    { "Weapon", "Wand", professionKey = "PROFESSION_ENCHANTING" },
+    { "Weapon", "Guns", professionKey = "PROFESSION_ENGINEERING" },
 }
 
--- The English name of the profession the item's type settles, or nil. It
+-- The name of the profession the item's type settles, or nil. It
 -- reads C_Item.GetItemInfoInstant (equip location 4th, class 6th, subclass
 -- 7th, ItemDocumentation.lua:659-679), which needs no item data.
 function Appearances.Profession(itemID)
@@ -708,7 +704,7 @@ function Appearances.Profession(itemID)
         local subclasses = entry[1] == "Armor" and E.ItemArmorSubclass or E.ItemWeaponSubclass
         if classID == E.ItemClass[entry[1]] and subclasses and subClassID == subclasses[entry[2]]
             and (entry.slot == nil or entry.slot == equipLoc) and not (entry.notSlot and entry.notSlot[equipLoc]) then
-            return entry[3]
+            return TC.L[entry.professionKey]
         end
     end
     return nil

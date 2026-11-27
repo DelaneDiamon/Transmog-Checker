@@ -71,3 +71,11 @@ _Avoid_: Options panel, config, settings window
 **Session price**:
 The lowest price the appearance browser saw for an appearance in this session, from its latest scan or check, and when; it outlives the auction house visit and is gone after a reload. The item tooltip shows it as "Lowest price".
 _Avoid_: Cached price, last price, AH price
+
+**Language setting**:
+The settings page's choice of the language the addon's own texts are in: Auto, the game's language, or one language that has a locale file. A change applies after the interface reloads; texts the client supplies stay in the game's language.
+_Avoid_: Locale option, translation setting
+
+**Locale file**:
+One file under `Locales/` that holds every user-facing text of the addon in one language, by key; English's is the fallback for every text another language leaves out.
+_Avoid_: Translation file, language pack

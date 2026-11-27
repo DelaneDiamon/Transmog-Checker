@@ -13,6 +13,7 @@ TC = TC or {}
 TC.Buy = {}
 
 local Buy = TC.Buy
+local L = TC.L
 
 -- Spec Assumption A5: the client confirms within 5 seconds.
 local LIMIT = 5
@@ -29,21 +30,14 @@ local BIND_ON_EQUIP = Enum and Enum.ItemBind and Enum.ItemBind.OnEquip or 2
 local ERRORS = Enum and Enum.AuctionHouseError
 local ITEM_NOT_FOUND = ERRORS and ERRORS.ItemNotFound or 4
 local ITEM_NOT_AVAILABLE = ERRORS and ERRORS.ItemNotAvailable or 25
-local TEXT_FINDING = "Finding the cheapest auction"
-local TEXT_AGAIN = "That auction was sold. Looking for another"
-local TEXT_CHEAPEST = "That auction was sold. The cheapest is now:"
-local TEXT_SAME = "That auction was sold. Another is for sale at the same price:"
-local TEXT_BUYING = "Buying"
-local TEXT_GONE = "This item is no longer for sale."
-local TEXT_FAILED = "The purchase did not go through."
-local TEXT_CHANGED = "The price changed since the check."
-local TEXT_BIND = "This item binds when equipped. Its appearance is collected when you equip it or sell it to a vendor."
 -- The game's own text, as the approved board asks (its wording on Forever
 -- is unverified); ours when the client has none.
-local TEXT_MONEY = type(ERR_NOT_ENOUGH_MONEY) == "string" and ERR_NOT_ENOUGH_MONEY or "You do not have enough money."
+local TEXT_MONEY = type(ERR_NOT_ENOUGH_MONEY) == "string" and ERR_NOT_ENOUGH_MONEY or nil
 -- Coin atlases of this build's money frame (Blizzard_MoneyFrame/Shared/MoneyFrame.lua:347-354).
 local COIN_ATLAS = { gold = "coin-gold", silver = "coin-silver", copper = "coin-copper" }
-local COIN_LETTERS = { gold = "g", silver = "s", copper = "c" }
+local function coinLetter(coin)
+    return coin == "gold" and L.COIN_GOLD or coin == "silver" and L.COIN_SILVER or L.COIN_COPPER
+end
 -- The layout of Blizzard's AuctionHouseBuyDialogTemplate
 -- (Blizzard_AuctionHouseUI/Shared/Blizzard_AuctionHouseBuyDialog.xml): 420
 -- wide (:52), the name 17 below the top (:56-60), buttons 120 x 22, 18 above
@@ -125,7 +119,7 @@ local function moneyMarkup(copper)
     local words = {}
     for i, part in ipairs(TC.BrowserState.MoneyParts(copper)) do
         local atlas = COIN_ATLAS[part.coin]
-        local coin = CreateAtlasMarkup and hasAtlas(atlas) and CreateAtlasMarkup(atlas, 12, 12) or COIN_LETTERS[part.coin]
+        local coin = CreateAtlasMarkup and hasAtlas(atlas) and CreateAtlasMarkup(atlas, 12, 12) or coinLetter(part.coin)
         words[i] = part.amount .. coin
     end
     return table.concat(words, " ")
@@ -179,21 +173,21 @@ local function draw()
     local lead, changed, hint, short
     local offer = f.state == "ready" or f.state == "buying"
     if f.state == "finding" then
-        lead = f.refused and TEXT_AGAIN or TEXT_FINDING
+        lead = f.refused and L.BUY_AGAIN or L.BUY_FINDING
     elseif offer then
         if f.refused then
             -- a new offer after a refused buyout: the line says why
-            lead = f.amount == f.tried and TEXT_SAME or TEXT_CHEAPEST
+            lead = f.amount == f.tried and L.BUY_SAME or L.BUY_CHEAPEST
         elseif f.amount ~= variant.minPrice then
-            changed = TEXT_CHANGED
+            changed = L.BUY_CHANGED
         end
-        if variant.bindType == BIND_ON_EQUIP then hint = TEXT_BIND end
+        if variant.bindType == BIND_ON_EQUIP then hint = L.BUY_BIND end
         local money = GetMoney()
         short = type(money) ~= "number" or money < f.amount
     elseif f.state == "gone" then
-        lead = TEXT_GONE
+        lead = L.BUY_GONE
     else
-        lead = TEXT_FAILED
+        lead = L.BUY_FAILED
     end
     setLine(d.leadText, lead)
     -- the price of the auction the click buys, in full (spec 3); red when
@@ -211,7 +205,7 @@ local function draw()
     end
     setLine(d.changedText, changed, 1, 0.82, 0)
     setLine(d.hintText, hint)
-    setLine(d.moneyText, short and TEXT_MONEY or nil, 1, 0.1, 0.1)
+    setLine(d.moneyText, short and (TEXT_MONEY or L.BUY_NOT_ENOUGH_MONEY) or nil, 1, 0.1, 0.1)
     -- the small spinner beside "Finding", where the client has one
     if d.findSpinner then
         d.findSpinner:SetShown(f.state == "finding")
@@ -226,7 +220,7 @@ local function draw()
     d.buyButton:SetEnabled(f.allowed)
     -- after the Buy click both buttons are off until the outcome, under the
     -- dark overlay and its spinner ("Buying" where there is no spinner)
-    d.closeButton:SetText(over and "Cancel" or "Close")
+    d.closeButton:SetText(over and L.CANCEL or L.CLOSE)
     d.closeButton:SetEnabled(f.state ~= "buying")
     d.overlay:SetShown(f.state == "buying")
     layout(d, not over)
@@ -528,9 +522,9 @@ local function newDialog(panel)
     frame.moneyText = newText(content, "GameFontHighlight")
     frame.stack = { frame.nameText, frame.leadText, frame.price, frame.changedText, frame.hintText, frame.moneyText }
     frame.findSpinner = newSpinner(content, 16)
-    frame.buyButton = newButton(box, "Buy", onBuyClick)
+    frame.buyButton = newButton(box, L.BUY, onBuyClick)
     frame.buyButton:SetPoint("BOTTOM", box, "BOTTOM", -64, 18)
-    frame.closeButton = newButton(box, "Cancel", cancel)
+    frame.closeButton = newButton(box, L.CANCEL, cancel)
     -- the dark overlay over everything while buying, with the large spinner
     local overlay = CreateFrame("Frame", nil, box)
     overlay:SetPoint("TOPLEFT", box, "TOPLEFT", 11, -11)
@@ -546,7 +540,7 @@ local function newDialog(panel)
     else
         local buyingText = overlay:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
         buyingText:SetPoint("CENTER", overlay, "CENTER", 0, 0)
-        buyingText:SetText(TEXT_BUYING)
+        buyingText:SetText(L.BUY_BUYING)
     end
     overlay:Hide()
     frame.overlay = overlay

@@ -5,8 +5,8 @@
 
 -- The library keeps one tab per id.
 local TAB_ID = "TransmogChecker"
-local TAB_TEXT = "Appearances"
-local WINDOW_TITLE = "Appearance Browser"
+-- Every text is read from the locale table when it is drawn (Locales/).
+local L = TC.L
 
 -- Sizes and positions of layout B (appearance-browser-layout-flows v2), in
 -- panel units from the panel's top left. Tiles and gaps are Collections' own.
@@ -91,7 +91,9 @@ local HEAD_LINE, HEAD_LINES_MAX = 12, 4
 local ARROW = "Interface\\Buttons\\UI-SpellbookIcon-%sPage-%s"
 -- Coin atlases of this build's money frame (Blizzard_MoneyFrame/Shared/MoneyFrame.lua:347-354).
 local COIN_ATLAS = { gold = "coin-gold", silver = "coin-silver", copper = "coin-copper" }
-local COIN_LETTERS = { gold = "g", silver = "s", copper = "c" }
+local function coinLetter(coin)
+    return coin == "gold" and L.COIN_GOLD or coin == "silver" and L.COIN_SILVER or L.COIN_COPPER
+end
 -- How often a shown item list redraws, so its age stays true.
 local AGE_REDRAW = 15
 -- The status line's progress bar (spec 2.8) in Collections' search bar look
@@ -122,7 +124,6 @@ local MEDIA = "Interface\\AddOns\\TransmogChecker\\Media\\"
 -- The scan action's glyph on the scan control, left of the text, when the
 -- client has the atlas (the owner's choice).
 local SCAN_ATLAS, SCAN_GLYPH = "UI-RefreshButton", 14
-local SCAN_TIP = "Scans this slot's items on the auction house now."
 -- The slot row: round buttons of 31, 2 apart, 19 between groups
 -- (Blizzard_Collections/Camelot/Blizzard_Wardrobe.lua:24-27), starting at
 -- x 64, clear of the window's portrait (slice C): PortraitFrameTemplate's
@@ -173,12 +174,6 @@ local FUNNEL_PRESSED = "common-dropdown-a-button-settings-pressed-shadowless"
 local FUNNEL_PRESSED_HOVER = "common-dropdown-a-button-settings-pressedhover-shadowless"
 local FUNNEL_OPEN = "common-dropdown-a-button-settings-open-shadowless"
 local FUNNEL_FALLBACK, RESET_ATLAS = "Map-Filter-Button", "auctionhouse-ui-filter-redx"
-local FUNNEL_TEXT, FUNNEL_TIP = "Filter", "Filter and sort"
-local CLASS_TEXT, RESET_TEXT = "Class: %s", "Reset filters"
-local FOR_SALE_TEXT, SOURCE_TEXT, SORT_TEXT, SCAN_SHOWN_TEXT = "For sale only", "Source", "Sort", "Scan prices when the tab opens"
--- the settings page's own, shorter label for Scan when shown (slice F, F1),
--- where the funnel's Settings… opens the page
-local SETTINGS_TEXT, SCAN_SETTING = "Settings…", "Scan prices when tab opens"
 -- A checkbox's mark in the panel's own list menu, without Blizzard's menu.
 local TICKED, UNTICKED = "[x] ", "[ ] "
 -- The band under the header: the count at x 28, y 42, and the weapon type
@@ -197,8 +192,6 @@ local WEAPON_X, WEAPON_CENTRE, WEAPON_WIDTH, WEAPON_HEIGHT = 598, 50, 157, 22
 -- one line, as wide as its widest form for the page count and PAGE_ROOM more.
 local STATUS_Y, STATUS_BUTTON = 441, 110
 local PAGING_Y, WHEEL_WIDTH, WHEEL_HEIGHT, PAGE_ROOM = 441, 16, 16, 4
-local NEXT_TIP, PREVIOUS_TIP = "Next page", "Previous page"
-local WHEEL_TIP, ARROW_HINT = "Mouse wheel over the tiles turns pages", "Mouse wheel over the tiles turns pages too."
 -- The tile tooltip's minimum width (FrameAPITooltipDocumentation.lua:94-104):
 -- the longest sentence, the bought one, takes at most three lines at it.
 local TIP_MIN_WIDTH = 220
@@ -243,7 +236,7 @@ local function arrowButton(parent, direction, onClick, tip)
     button:SetDisabledTexture(ARROW:format(direction, "Disabled"))
     button:SetHighlightTexture(ARROW_HIGHLIGHT, "ADD")
     button:SetScript("OnClick", onClick)
-    tooltip(button, tip, ARROW_HINT)
+    tooltip(button, tip, L.WHEEL_HINT)
     return button
 end
 
@@ -413,7 +406,7 @@ end
 local function moneyMarkup(parts)
     local words = {}
     for i, part in ipairs(parts) do
-        local coin = CreateAtlasMarkup and CreateAtlasMarkup(COIN_ATLAS[part.coin], 12, 12) or COIN_LETTERS[part.coin]
+        local coin = CreateAtlasMarkup and CreateAtlasMarkup(COIN_ATLAS[part.coin], 12, 12) or coinLetter(part.coin)
         words[i] = part.amount .. coin
     end
     return table.concat(words, " ")
@@ -752,7 +745,7 @@ local function newFlyout(panel, level, overTile)
         row.forSale:SetPoint("TOPLEFT", row, "TOPLEFT", 2, -22)
         -- "Buy" on a found row (spec 2.6): the state opens the buy dialog;
         -- the price sits beside it (layout B, 6.2)
-        row.buy = newButton(row, "Buy", BUY_WIDTH, BUY_HEIGHT, function() State.BuyRow(offset + i) end)
+        row.buy = newButton(row, L.BUY, BUY_WIDTH, BUY_HEIGHT, function() State.BuyRow(offset + i) end)
         row.buy:SetPoint("TOPRIGHT", row, "TOPRIGHT", -10, -18)
         row.buy:Hide()
         row.price = row:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
@@ -820,7 +813,7 @@ local function newFlyout(panel, level, overTile)
         collectedText:SetShown(marked)
         if list.collected then
             collectedText:SetWidth(0)
-            collectedText:SetText("Collected")
+            collectedText:SetText(L.COLLECTED)
             -- GREEN_FONT_COLOR (visual pass, board 8)
             collectedText:SetTextColor(0.1, 1, 0.1)
         elseif marked then
@@ -1063,7 +1056,7 @@ local function newSlotRow(panel)
         button:SetScript("OnEnter", function(self)
             if not GameTooltip then return end
             GameTooltip:SetOwner(self, "ANCHOR_RIGHT")
-            GameTooltip:SetText(slot.name)
+            GameTooltip:SetText(L[slot.nameKey])
         end)
         button:SetScript("OnLeave", function()
             if GameTooltip then GameTooltip:Hide() end
@@ -1141,7 +1134,7 @@ end
 -- opens the settings page at Scan when shown (slice D2), where the client
 -- has the page.
 local function settingsPage() return TC.Settings ~= nil and TC.Settings.Available() end
-local function openSettings() TC.Settings.Open(SCAN_SETTING) end
+local function openSettings() TC.Settings.Open(L.SETTING_SCAN) end
 local function newFunnel(panel)
     local current
     local function selected(entry) return entry ~= nil and entry.selected end
@@ -1164,27 +1157,27 @@ local function newFunnel(panel)
             if not current then return end
             for _, entry in ipairs(current.filters) do root:CreateRadio(entry.name, selected, pickShow, entry) end
             root:CreateDivider()
-            root:CreateCheckbox(FOR_SALE_TEXT, forSaleOnly, toggleForSale)
-            local sources = root:CreateButton(SOURCE_TEXT)
+            root:CreateCheckbox(L.FOR_SALE_ONLY, forSaleOnly, toggleForSale)
+            local sources = root:CreateButton(L.MENU_SOURCE)
             for _, entry in ipairs(State.SourceEntries()) do sources:CreateCheckbox(entry.name, sourceTicked, toggleSource, entry.value) end
             local classes = current.classes
-            local submenu = root:CreateButton(CLASS_TEXT:format(inClassColour(classes.text, classes.classFile)))
+            local submenu = root:CreateButton(L.MENU_CLASS:format(inClassColour(classes.text, classes.classFile)))
             for i, entry in ipairs(classes.entries) do
                 submenu:CreateRadio(inClassColour(entry.name, entry.classFile), selected, pickClass, entry)
                 if i == 1 then submenu:CreateDivider() end
             end
             root:CreateDivider()
-            if root.CreateTitle then root:CreateTitle(SORT_TEXT) end
+            if root.CreateTitle then root:CreateTitle(L.MENU_SORT) end
             for _, entry in ipairs(current.sorts) do root:CreateRadio(entry.name, selected, pickSort, entry) end
             root:CreateDivider()
-            root:CreateCheckbox(SCAN_SHOWN_TEXT, scanWhenShown, toggleScan)
+            root:CreateCheckbox(L.MENU_SCAN, scanWhenShown, toggleScan)
             if current.filtersChanged then
                 root:CreateDivider()
-                root:CreateButton(RESET_TEXT, State.ResetFilters)
+                root:CreateButton(L.RESET_FILTERS, State.ResetFilters)
             end
             if settingsPage() then
                 root:CreateDivider()
-                root:CreateButton(SETTINGS_TEXT, openSettings)
+                root:CreateButton(L.MENU_SETTINGS, openSettings)
             end
         end)
     local menu
@@ -1241,7 +1234,7 @@ local function newFunnel(panel)
         glyph:Hide()
         art = hasAtlas(FUNNEL_ATLAS) and FUNNEL_ATLAS or hasAtlas(FUNNEL_FALLBACK) and FUNNEL_FALLBACK or nil
     end
-    funnel:SetText((art or funnel.icon) and "" or FUNNEL_TEXT)
+    funnel:SetText((art or funnel.icon) and "" or L.FUNNEL_TEXT)
     if art then
         -- the template's dropdown art (MenuTemplates.xml:91) gives way to the funnel's
         if not menu and funnel.Background then funnel.Background:SetAlpha(0) end
@@ -1287,7 +1280,7 @@ local function newFunnel(panel)
     funnel:HookScript("OnEnter", function(self)
         if not GameTooltip then return end
         GameTooltip:SetOwner(self, "ANCHOR_TOP")
-        GameTooltip:SetText(FUNNEL_TIP)
+        GameTooltip:SetText(L.FUNNEL_TIP)
         GameTooltip:Show()
     end)
     funnel:HookScript("OnLeave", function()
@@ -1300,7 +1293,7 @@ local function newFunnel(panel)
     markArt:SetAllPoints()
     if hasAtlas(RESET_ATLAS) then markArt:SetAtlas(RESET_ATLAS) else markArt:SetColorTexture(0.7, 0.1, 0.05, 1) end
     mark:SetScript("OnClick", State.ResetFilters)
-    tooltip(mark, RESET_TEXT)
+    tooltip(mark, L.RESET_FILTERS)
     function funnel.draw(view)
         current = view
         -- the mark alone says a choice differs from the start: no held
@@ -1313,9 +1306,9 @@ local function newFunnel(panel)
         for _, entry in ipairs(view.filters) do
             items[#items + 1] = { text = entry.name, action = function() State.SetFilter(entry.value) end }
         end
-        items[#items + 1] = { text = mark(view.forSaleOnly) .. FOR_SALE_TEXT, line = true, action = toggleForSale }
+        items[#items + 1] = { text = mark(view.forSaleOnly) .. L.FOR_SALE_ONLY, line = true, action = toggleForSale }
         for _, entry in ipairs(State.SourceEntries()) do
-            items[#items + 1] = { text = mark(entry.selected) .. SOURCE_TEXT .. ": " .. entry.name,
+            items[#items + 1] = { text = mark(entry.selected) .. L.MENU_SOURCE_ENTRY:format(entry.name),
                 action = function() State.SetSource(entry.value, not entry.selected) end }
         end
         for i, entry in ipairs(view.classes.entries) do
@@ -1323,12 +1316,12 @@ local function newFunnel(panel)
                 action = function() State.SelectClass(entry.value) end }
         end
         for i, entry in ipairs(view.sorts) do
-            items[#items + 1] = { text = SORT_TEXT .. ": " .. entry.name, line = i == 1,
+            items[#items + 1] = { text = L.MENU_SORT_ENTRY:format(entry.name), line = i == 1,
                 action = function() State.SetSort(entry.value) end }
         end
-        items[#items + 1] = { text = mark(view.scanWhenShown) .. SCAN_SHOWN_TEXT, line = true, action = toggleScan }
-        if view.filtersChanged then items[#items + 1] = { text = RESET_TEXT, line = true, action = State.ResetFilters } end
-        if settingsPage() then items[#items + 1] = { text = SETTINGS_TEXT, line = true, action = openSettings } end
+        items[#items + 1] = { text = mark(view.scanWhenShown) .. L.MENU_SCAN, line = true, action = toggleScan }
+        if view.filtersChanged then items[#items + 1] = { text = L.RESET_FILTERS, line = true, action = State.ResetFilters } end
+        if settingsPage() then items[#items + 1] = { text = L.MENU_SETTINGS, line = true, action = openSettings } end
         menu.fill(items)
     end
     return funnel
@@ -1342,12 +1335,12 @@ end
 -- that template, not run in game. Without the template, a bare edit box
 -- with the same handlers and its own placeholder. Every text change goes to
 -- the state, which ignores the text it has.
-local SEARCH_WIDTH, SEARCH_HEIGHT, SEARCH_TEXT = 108, 20, "Search"
+local SEARCH_WIDTH, SEARCH_HEIGHT = 108, 20
 local function newSearchBox(panel)
     local box = templated("EditBox", panel, "SearchBoxTemplate")
     local placeholder
     if box and type(box.Instructions) == "table" then
-        box.Instructions:SetText(SEARCH_TEXT)
+        box.Instructions:SetText(L.SEARCH)
     else
         box = box or CreateFrame("EditBox", nil, panel)
         if box.SetAutoFocus then box:SetAutoFocus(false) end
@@ -1356,7 +1349,7 @@ local function newSearchBox(panel)
         box:SetScript("OnEnterPressed", box.ClearFocus)
         placeholder = box:CreateFontString(nil, "OVERLAY", "GameFontDisableSmall")
         placeholder:SetPoint("LEFT", box, "LEFT", 4, 0)
-        placeholder:SetText(SEARCH_TEXT)
+        placeholder:SetText(L.SEARCH)
     end
     box:SetSize(SEARCH_WIDTH, SEARCH_HEIGHT)
     box:SetScript("OnTextChanged", function(self)
@@ -1500,8 +1493,8 @@ local function buildBrowser(panel)
     local paging = CreateFrame("Frame", nil, panel)
     paging:SetSize(200, 24)
     paging:SetPoint("TOPRIGHT", panel, "TOPRIGHT", -GRID_X, -PAGING_Y)
-    local previous = arrowButton(paging, "Prev", State.PreviousPage, PREVIOUS_TIP)
-    local nextPage = arrowButton(paging, "Next", State.NextPage, NEXT_TIP)
+    local previous = arrowButton(paging, "Prev", State.PreviousPage, L.PREVIOUS_PAGE)
+    local nextPage = arrowButton(paging, "Next", State.NextPage, L.NEXT_PAGE)
     nextPage:SetPoint("RIGHT", paging, "RIGHT", 0, 0)
     previous:SetPoint("RIGHT", nextPage, "LEFT", -TOOLS_GAP, 0)
     -- Collections' page text font (CollectionsPageTextTemplate,
@@ -1518,14 +1511,14 @@ local function buildBrowser(panel)
     wheelMark:SetSize(WHEEL_WIDTH, WHEEL_HEIGHT)
     wheelMark:SetPoint("RIGHT", pageText, "LEFT", -7, 0)
     wheelMark:EnableMouse(true)
-    tooltip(wheelMark, WHEEL_TIP)
+    tooltip(wheelMark, L.WHEEL_TIP)
     -- the page text shows the wheel mark's tooltip too (testpass F2): a font
     -- string takes no pointer, so a frame over it does
     local pageHover = CreateFrame("Frame", nil, paging)
     pageHover:SetPoint("TOPLEFT", pageText, "TOPLEFT", 0, 0)
     pageHover:SetPoint("BOTTOMRIGHT", pageText, "BOTTOMRIGHT", 0, 0)
     pageHover:EnableMouse(true)
-    tooltip(pageHover, WHEEL_TIP)
+    tooltip(pageHover, L.WHEEL_TIP)
     local wheelArt = wheelMark:CreateTexture(nil, "ARTWORK")
     wheelArt:SetAllPoints()
     wheelArt:SetTexture(MEDIA .. "wheel")
@@ -1539,7 +1532,7 @@ local function buildBrowser(panel)
     local statusButton = newButton(panel, "", STATUS_BUTTON, 20, function()
         if statusAction then statusAction() end
     end)
-    tooltip(statusButton, SCAN_TIP)
+    tooltip(statusButton, L.SCAN_TIP)
     statusButton:SetPoint("TOPLEFT", panel, "TOPLEFT", GRID_X, -STATUS_Y - 2)
     -- the scan glyph left of the button's text, the text moved right by
     -- half the glyph so the pair stays centred; without the atlas text only
@@ -1690,7 +1683,7 @@ opener:SetScript("OnEvent", function(self)
     local panel = CreateFrame("Frame", nil, AuctionHouseFrame)
     panel:SetPoint("TOPLEFT", AuctionHouseFrame, "TOPLEFT", 5, -42)
     panel:SetPoint("BOTTOMRIGHT", AuctionHouseFrame, "BOTTOMRIGHT", -4, 27)
-    lib:CreateTab(TAB_ID, panel, TAB_TEXT, WINDOW_TITLE)
+    lib:CreateTab(TAB_ID, panel, L.TAB_APPEARANCES, L.WINDOW_TITLE)
 
     -- The browser is built, and the collection read, only once the player
     -- selects the tab; the library shows the panel then. Collected is read

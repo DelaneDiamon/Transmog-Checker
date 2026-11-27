@@ -1,6 +1,6 @@
 -- The 14 slots of the appearance browser's slot row, in Collections' order
 -- (Blizzard_Collections/Camelot/Blizzard_Wardrobe.lua:24-27, OverrideDefaults),
--- in one table (spec 4.3): the slot's name, its group in the row, Collections'
+-- in one table (spec 4.3): the slot's name (its locale key), its group in the row, Collections'
 -- art for its button, its Collections categories, the inventory slot its
 -- appearances are listed for, and its scan filter entries. anyClass: the
 -- class filter does not narrow the slot (cloaks, shirts and tabards; weapon
@@ -34,39 +34,39 @@ for _, entry in ipairs(armorTypes("IndexRobeType")) do chest[#chest + 1] = entry
 -- used when the weapon types cannot be learnt from GetCategoryInfo (open
 -- point 4), with its own filter entry.
 TC.Slots = {
-    { key = "head", name = "Head", group = 1, art = "head", slotID = 1,
+    { key = "head", nameKey = "SLOT_HEAD", group = 1, art = "head", slotID = 1,
         categories = { { "Head", 1 } }, filters = armorTypes("IndexHeadType") },
-    { key = "shoulder", name = "Shoulder", group = 1, art = "shoulder", slotID = 3,
+    { key = "shoulder", nameKey = "SLOT_SHOULDER", group = 1, art = "shoulder", slotID = 3,
         categories = { { "Shoulder", 2 } }, filters = armorTypes("IndexShoulderType") },
-    { key = "back", name = "Back", group = 1, art = "back", slotID = 15, anyClass = true, zoom = 1.236,
+    { key = "back", nameKey = "SLOT_BACK", group = 1, art = "back", slotID = 15, anyClass = true, zoom = 1.236,
         categories = { { "Back", 3 } }, filters = { { "Armor", "Cloth", "IndexCloakType" } } },
-    { key = "chest", name = "Chest", group = 1, art = "chest", slotID = 5,
+    { key = "chest", nameKey = "SLOT_CHEST", group = 1, art = "chest", slotID = 5,
         categories = { { "Chest", 4 } }, filters = chest },
-    { key = "shirt", name = "Shirt", group = 1, art = "shirt", slotID = 4, anyClass = true,
+    { key = "shirt", nameKey = "SLOT_SHIRT", group = 1, art = "shirt", slotID = 4, anyClass = true,
         categories = { { "Shirt", 5 } }, filters = { { "Armor", "Generic", "IndexBodyType" } } },
     -- the subclass is a guess: tabards are not in Blizzard's tree (spec 4.3)
-    { key = "tabard", name = "Tabard", group = 1, art = "tabard", slotID = 19, anyClass = true,
+    { key = "tabard", nameKey = "SLOT_TABARD", group = 1, art = "tabard", slotID = 19, anyClass = true,
         categories = { { "Tabard", 6 } }, filters = { { "Armor", "Generic", "IndexTabardType" } } },
-    { key = "wrist", name = "Wrist", group = 1, art = "wrist", slotID = 9,
+    { key = "wrist", nameKey = "SLOT_WRIST", group = 1, art = "wrist", slotID = 9,
         categories = { { "Wrist", 7 } }, filters = armorTypes("IndexWristType") },
-    { key = "hands", name = "Hands", group = 2, art = "hands", slotID = 10,
+    { key = "hands", nameKey = "SLOT_HANDS", group = 2, art = "hands", slotID = 10,
         categories = { { "Hands", 8 } }, filters = armorTypes("IndexHandType") },
-    { key = "waist", name = "Waist", group = 2, art = "waist", slotID = 6,
+    { key = "waist", nameKey = "SLOT_WAIST", group = 2, art = "waist", slotID = 6,
         categories = { { "Waist", 9 } }, filters = armorTypes("IndexWaistType") },
-    { key = "legs", name = "Legs", group = 2, art = "legs", slotID = 7,
+    { key = "legs", nameKey = "SLOT_LEGS", group = 2, art = "legs", slotID = 7,
         categories = { { "Legs", 10 } }, filters = armorTypes("IndexLegsType") },
-    { key = "feet", name = "Feet", group = 2, art = "feet", slotID = 8,
+    { key = "feet", nameKey = "SLOT_FEET", group = 2, art = "feet", slotID = 8,
         categories = { { "Feet", 11 } }, filters = armorTypes("IndexFeetType") },
-    { key = "mainhand", name = "Main hand", group = 3, art = "mainhand", slotID = 16, weapon = true,
+    { key = "mainhand", nameKey = "SLOT_MAIN_HAND", group = 3, art = "mainhand", slotID = 16, weapon = true,
         categories = { { "OneHAxe", 13, { "Weapon", "Axe1H" } }, { "OneHSword", 14, { "Weapon", "Sword1H" } },
             { "OneHMace", 15, { "Weapon", "Mace1H" } }, { "Dagger", 16, { "Weapon", "Dagger" } },
             { "Fist", 17, { "Weapon", "Unarmed" } }, { "TwoHAxe", 20, { "Weapon", "Axe2H" } },
             { "TwoHSword", 21, { "Weapon", "Sword2H" } }, { "TwoHMace", 22, { "Weapon", "Mace2H" } },
             { "Staff", 23, { "Weapon", "Staff" } }, { "Polearm", 24, { "Weapon", "Polearm" } } } },
-    { key = "offhand", name = "Off hand", group = 3, art = "secondaryhand", slotID = 17, weapon = true,
+    { key = "offhand", nameKey = "SLOT_OFF_HAND", group = 3, art = "secondaryhand", slotID = 17, weapon = true,
         categories = { { "Shield", 18, { "Armor", "Shield" } },
             { "Holdable", 19, { "Armor", "Generic", "IndexHoldableType" } } } },
-    { key = "ranged", name = "Ranged", group = 3, art = "ranged", slotID = 18, weapon = true,
+    { key = "ranged", nameKey = "SLOT_RANGED", group = 3, art = "ranged", slotID = 18, weapon = true,
         categories = { { "Wand", 12, { "Weapon", "Wand" } }, { "Bow", 25, { "Weapon", "Bows" } },
             { "Gun", 26, { "Weapon", "Guns" } }, { "Crossbow", 27, { "Weapon", "Crossbow" } } } },
 }

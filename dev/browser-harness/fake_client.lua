@@ -485,6 +485,20 @@ function Fake.new(opts)
 
     -- Globals the existing files and the libraries read.
     TC, TC_ItemChecker, TransmogCheckerDB, AuctionHouseFrame, LibStub = nil, nil, nil, nil, nil
+    -- The client's text language (the textLocale CVar): opts.locale, else
+    -- enUS; a test changes c.locale.
+    c.locale = opts.locale or "enUS"
+    function GetLocale() return c.locale end
+    -- The game's popups (Blizzard_StaticPopup/StaticPopup.lua:309): each
+    -- shown one in c.popups as { which, dialog }; c.reloads counts ReloadUI.
+    -- The button texts are made up for the fake (no GlobalStrings).
+    c.popups, c.reloads = {}, 0
+    StaticPopupDialogs = {}
+    function StaticPopup_Show(which)
+        c.popups[#c.popups + 1] = { which = which, dialog = StaticPopupDialogs[which] }
+    end
+    function ReloadUI() c.reloads = c.reloads + 1 end
+    RELOADUI, LATER = "Reload UI", "Later"
     strmatch = string.match
     WOW_PROJECT_MAINLINE, WOW_PROJECT_CAMELOT = 1, 99
     WOW_PROJECT_ID = WOW_PROJECT_CAMELOT

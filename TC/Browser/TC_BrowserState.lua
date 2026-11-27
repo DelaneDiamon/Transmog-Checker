@@ -6,32 +6,35 @@ TC = TC or {}
 TC.BrowserState = {}
 
 local State = TC.BrowserState
+-- Every text is read from the locale table when it is drawn (Locales/).
+local L = TC.L
 
 -- Layout B: 8 columns of 3 rows, 24 tiles a page, whether a flyout is open
 -- or not.
 local PAGE_SIZE = 24
-local ALL_WEAPON_TYPES = "All weapon types"
 -- From 100 gold up a tile leaves the copper out (spec 2.5).
 local TILE_COPPER_BELOW = 100 * 10000
-local NOT_SCANNED = "Not scanned yet"
-local STATUS_FAILED = "The auction house did not answer."
-local NO_APPEARANCES = "No appearances found for this slot."
-local SCAN_SLOT = "Scan slot"
 -- Spec Assumption A10: the progress bar expects the page count of the slot's
 -- last scan, or 5 for a first scan, and stays below 95 percent until the end.
 local FIRST_SCAN_PAGES, MAX_PROGRESS = 5, 0.95
 
-State.FILTERS = { "All", "Collected", "Not collected" }
+-- The Show filter's values, kept in the saved table and compared in the
+-- rules, each with its name's locale key.
+State.FILTERS = { { value = "all", nameKey = "SHOW_ALL" }, { value = "collected", nameKey = "COLLECTED" },
+    { value = "notCollected", nameKey = "NOT_COLLECTED" } }
 -- The Show choice offered while an appearance is pending (TC-39).
-local PENDING_FILTER = "Bought, not collected"
+local PENDING_FILTER = "pending"
+-- Up to 1.0.0 the saved Show was its English name: each becomes its value.
+local OLD_SHOW = { ["All"] = "all", ["Collected"] = "collected", ["Not collected"] = "notCollected",
+    ["Bought, not collected"] = PENDING_FILTER }
 -- The sort's choices: the game's order, or by the lowest known price, the
 -- appearances without one after the priced ones in the game's order. The
 -- game's order keeps its stored value "default" (slice C: renamed, no
 -- longer the default).
-local SORTS = { { value = "default", name = "Collections order" }, { value = "priceLow", name = "Price: low to high" },
-    { value = "priceHigh", name = "Price: high to low" } }
+local SORTS = { { value = "default", nameKey = "SORT_COLLECTIONS" }, { value = "priceLow", nameKey = "SORT_PRICE_LOW" },
+    { value = "priceHigh", nameKey = "SORT_PRICE_HIGH" } }
 -- The Source filter's entry for a source whose type it does not name.
-local OTHER_SOURCE, OTHER_TEXT = "other", "Other"
+local OTHER_SOURCE = "other"
 
 -- The six choices kept between sessions (slice B, the slot slice C, the
 -- class slice D2), each with its default: Scan when shown, Show, For sale
@@ -41,7 +44,7 @@ local OTHER_SOURCE, OTHER_TEXT = "other", "Other"
 -- another character). saved is the table they are kept in:
 -- TransmogCheckerDB.browser once State.Bind handed it over, a table of this
 -- file's own before.
-local DEFAULTS = { scanWhenShown = true, show = "Not collected", forSaleOnly = false, sort = "priceLow", slot = TC.Slots[1].key,
+local DEFAULTS = { scanWhenShown = true, show = "notCollected", forSaleOnly = false, sort = "priceLow", slot = TC.Slots[1].key,
     class = "own" }
 local saved = {}
 
@@ -54,15 +57,16 @@ end
 
 -- A saved value as the state takes it: a missing or malformed one is its
 -- default; a saved Show of Bought, not collected is the default, Not
--- collected (nothing may be pending in a new session).
+-- collected (nothing may be pending in a new session). An English Show of
+-- 1.0.0 is read as its value.
 local function flag(value, default)
     if type(value) == "boolean" then return value end
     return default
 end
 local function savedValues(t)
-    local show = DEFAULTS.show
-    for _, value in ipairs(State.FILTERS) do
-        if t.show == value then show = value end
+    local show, was = DEFAULTS.show, OLD_SHOW[t.show] or t.show
+    for _, filter in ipairs(State.FILTERS) do
+        if was == filter.value then show = was end
     end
     -- a slot is its key; TC.Slots is also indexed by number
     local slot = type(t.slot) == "string" and TC.Slots[t.slot] and t.slot or DEFAULTS.slot
@@ -77,10 +81,10 @@ local function useSaved(t)
     saved = t
 end
 useSaved(saved)
-local PENDING_TEXT = {
-    bags = "In your bags: equip it or sell it to a vendor to collect.",
-    bought = "Bought: take it from the mailbox, then equip it or sell it to a vendor to collect.",
-}
+-- The pending sentences, by what is pending.
+local function pendingTexts()
+    return { bags = L.PENDING_BAGS, bought = L.PENDING_BOUGHT }
+end
 
 local view, listener
 -- The current slot's appearances under the class, read once per visit and
@@ -154,7 +158,6 @@ local sessionPrices = {}
 
 -- The class dropdown's value for "All classes"; a class is its class id.
 local ALL_CLASSES = "all"
-local ALL_CLASSES_TEXT = "All classes"
 
 -- For a developer, read with /dump TC.BrowserState.lastError: the text of
 -- the last error from a failed list read, a failed check or a failed scan.
@@ -346,7 +349,7 @@ local function clientText(name, fallback)
 end
 
 -- The Source filter's entries: one per source type the client names
--- (TRANSMOG_SOURCE_n, else TC.SOURCE_TYPES' English name), n from 1 to
+-- (TRANSMOG_SOURCE_n, else TC.SOURCE_TYPES' name of our own), n from 1 to
 -- C_TransmogCollection.GetNumTransmogSources, else to the last English
 -- one, leaving out a type IsValidTransmogSource refuses, as Collections
 -- lists them (Blizzard_Collections/Mainline/Blizzard_Wardrobe.lua:67-71;
@@ -365,10 +368,10 @@ local function sourceTypes()
             local asked, answer = pcall(TCol.IsValidTransmogSource, n)
             valid = not asked or answer ~= false
         end
-        local name = valid and clientText("TRANSMOG_SOURCE_" .. n, english[n])
+        local name = valid and clientText("TRANSMOG_SOURCE_" .. n, english[n] and L[english[n].nameKey])
         if name then entries[#entries + 1] = { key = n, name = name } end
     end
-    entries[#entries + 1] = { key = OTHER_SOURCE, name = OTHER_TEXT }
+    entries[#entries + 1] = { key = OTHER_SOURCE, name = L.SOURCE_OTHER }
     sourceEntries = entries
     return entries
 end
@@ -464,7 +467,7 @@ local function shown(upTo)
         if view.filter == PENDING_FILTER then
             keep = pending[id] and not collected[id]
         else
-            keep = view.filter == "All" or (view.filter == "Collected") == collected[id]
+            keep = view.filter == "all" or (view.filter == "collected") == collected[id]
         end
         keep = keep and (last < 3 or not view.forSaleOnly or priceOf(id) ~= nil)
         keep = keep and (last < 2 or fromSources(appearance))
@@ -583,7 +586,7 @@ end
 -- them are for sale: "365 appearances, 12 for sale".
 local function countText(appearances)
     local n = #appearances
-    local text = ("%d %s"):format(n, n == 1 and "appearance" or "appearances")
+    local text = TC.Plural("COUNT_APPEARANCES", n):format(n)
     local slot = view.slot
     local known = scans[slot] ~= nil or failures[slot] ~= nil or (scan ~= nil and scan.slot == slot)
     for _, result in pairs(kept) do known = known or result.slot == slot end
@@ -592,7 +595,7 @@ local function countText(appearances)
     for _, appearance in ipairs(appearances) do
         if priceOf(appearance.id) then forSale = forSale + 1 end
     end
-    return ("%s, %d for sale"):format(text, forSale)
+    return TC.Plural("COUNT_FOR_SALE", forSale):format(text, forSale)
 end
 
 function State.SetListener(fn)
@@ -1264,7 +1267,7 @@ end
 
 -- The empty-state buttons' actions.
 local function showAll()
-    State.SetFilter("All")
+    State.SetFilter("all")
 end
 local function showUnpriced()
     State.SetForSaleOnly(false)
@@ -1276,7 +1279,9 @@ end
 -- A price as its coin parts, { amount, coin }, in gold, silver, copper
 -- order. Parts that are zero are left out; on a tile, from 100 gold up the
 -- copper part is too (spec 2.5). Zero is "0c".
-local COIN_LETTERS = { gold = "g", silver = "s", copper = "c" }
+local function coinLetter(coin)
+    return coin == "gold" and L.COIN_GOLD or coin == "silver" and L.COIN_SILVER or L.COIN_COPPER
+end
 local function money(copper, onTile)
     local parts = {}
     local amounts = { gold = math.floor(copper / 10000), silver = math.floor(copper / 100) % 100, copper = copper % 100 }
@@ -1290,12 +1295,8 @@ end
 
 local function moneyText(parts)
     local words = {}
-    for i, part in ipairs(parts) do words[i] = part.amount .. COIN_LETTERS[part.coin] end
+    for i, part in ipairs(parts) do words[i] = part.amount .. coinLetter(part.coin) end
     return table.concat(words, " ")
-end
-
-local function plural(n, one, many)
-    return n == 1 and ("1 " .. one) or (n .. " " .. many)
 end
 
 -- Ages read "just now" under one minute and "N min ago" after (A10):
@@ -1303,11 +1304,13 @@ end
 -- The item tooltip's price line reads the same age without the verb.
 function State.Age(at)
     local seconds = now() - at
-    if seconds < 60 then return "just now" end
-    return ("%d min ago"):format(math.floor(seconds / 60))
+    if seconds < 60 then return L.AGE_JUST_NOW end
+    local minutes = math.floor(seconds / 60)
+    return TC.Plural("AGE_MINUTES", minutes):format(minutes)
 end
-local function age(at, verb)
-    return verb .. " " .. State.Age(at)
+-- The age after its verb: scanned, else checked.
+local function age(at, scanned)
+    return (scanned and L.AGE_SCANNED or L.AGE_CHECKED):format(State.Age(at))
 end
 
 -- The item tooltip's price (slice D1): the lowest price the browser saw
@@ -1323,8 +1326,6 @@ end
 function State.Pending(appearanceID)
     return pending[appearanceID]
 end
-
-local CHECK_AGAIN = "Check again"
 
 -- An item's own name and quality for a row that carries none, as a scan's rows
 -- do not: from the items the list learnt, else the client's item data; nil
@@ -1367,10 +1368,10 @@ local function itemList()
     local slot = TC.Slots[appearance.slot]
     local out = {
         appearance = appearance, collected = collected[id] == true, weapon = slot.weapon,
-        typeText = slot.name, rows = {}, foot = { button = CHECK_AGAIN, enabled = not run },
+        typeText = L[slot.nameKey], rows = {}, foot = { button = L.CHECK_AGAIN, enabled = not run },
     }
     -- bought or in the bags, not collected (TC-39): in the place of Collected
-    if pending[id] and not out.collected then out.pendingText = PENDING_TEXT[pending[id]] end
+    if pending[id] and not out.collected then out.pendingText = pendingTexts()[pending[id]] end
     if slot.weapon then
         -- a weapon's type is its weapon type (spec 2.6)
         for _, weapon in ipairs(weaponTypesOf(appearance.slot) or {}) do
@@ -1380,16 +1381,16 @@ local function itemList()
             end
         end
     else
-        -- the armor type of any item, tradeable or not
+        -- the armor type of any item, tradeable or not, as the client names it
         for _, item in ipairs(know and know.all or {}) do
             if item.subType then
-                out.typeText = out.typeText .. ", " .. item.subType:lower()
+                out.typeText = L.FLYOUT_TYPE_SUBTYPE:format(out.typeText, item.subType)
                 break
             end
         end
     end
     if run then
-        out.state, out.title, out.foot.age = "checking", "Checking the auction house", "Checking"
+        out.state, out.title, out.foot.age = "checking", L.FLYOUT_CHECKING_TITLE, L.FLYOUT_CHECKING_FOOT
         itemRows(out, know and know.items)
         return out
     end
@@ -1400,12 +1401,12 @@ local function itemList()
     end
     out.state = result.outcome
     if result.outcome ~= "could not check" and result.at then
-        out.foot.age = age(result.at, result.scanned and "Scanned" or "Checked")
+        out.foot.age = age(result.at, result.scanned)
     end
-    local itemsLeftOut = result.leftOut and ("Could not check %d of %d items."):format(result.leftOut, result.total)
+    local itemsLeftOut = result.leftOut and TC.Plural("CHECK_LEFT_OUT", result.total):format(result.leftOut, result.total)
     if result.outcome == "found" then
         -- short enough for one line beside the icon (testpass 1)
-        out.title = plural(#result.rows, "item", "items") .. ", cheapest first"
+        out.title = TC.Plural("FLYOUT_FOUND", #result.rows):format(#result.rows)
         -- every found row offers Buy when the client has the calls for it
         -- (TC_Buy); it is off while a check or a scan runs
         local buyable = TC.Buy ~= nil and TC.Buy.Available()
@@ -1423,14 +1424,14 @@ local function itemList()
         end
         if (result.leftOut or 0) > 0 then out.foot.note = itemsLeftOut end
     elseif result.outcome == "not for sale" then
-        out.title, out.text = "Not for sale right now", "No item with this appearance is on the auction house."
+        out.title, out.text = L.NOT_FOR_SALE_NOW, L.NOT_ON_AUCTION_HOUSE
         itemRows(out, result.items or (know and know.items))
     elseif result.outcome == "cannot be sold" then
-        out.title, out.text = "Not for sale right now", "No item with this appearance can be sold on the auction house."
+        out.title, out.text = L.NOT_FOR_SALE_NOW, L.CANNOT_BE_SOLD
     elseif result.queryFailed then
-        out.title = "The auction house did not answer."
+        out.title = L.STATUS_FAILED
     elseif result.noItems then
-        out.title = "The items of this appearance could not be read."
+        out.title = L.ITEMS_UNREADABLE
     else
         out.title = itemsLeftOut
     end
@@ -1443,27 +1444,27 @@ end
 -- or the scan's age.
 local function statusLine(answer)
     local slot = view.slot
-    answer.statusButton, answer.statusAction, answer.statusEnabled = SCAN_SLOT, State.ScanAgain, true
+    answer.statusButton, answer.statusAction, answer.statusEnabled = L.SCAN_SLOT, State.ScanAgain, true
+    -- nothing known is drawn as advice, not state (visual pass, board 9)
+    answer.statusHint = false
     if scan and scan.slot == slot then
-        answer.status = "Scanning " .. TC.Slots[slot].name:lower()
+        answer.status = L.SCANNING_SLOT:format(L[TC.Slots[slot].nameKey])
         answer.progress = math.min(scan.pages / scan.expected, MAX_PROGRESS)
         answer.statusEnabled = false
     elseif failures[slot] then
-        answer.status = STATUS_FAILED
+        answer.status = L.STATUS_FAILED
     elseif scans[slot] then
-        answer.status = age(scans[slot].at, "Scanned")
+        answer.status = age(scans[slot].at, true)
     else
-        answer.status = NOT_SCANNED
+        answer.status, answer.statusHint = L.NOT_SCANNED, true
     end
-    -- nothing known is drawn as advice, not state (visual pass, board 9)
-    answer.statusHint = answer.status == NOT_SCANNED
 end
 
 -- The slot row: the 14 slots in their groups, the chosen one marked.
 local function slotRow()
     local row = {}
     for i, slot in ipairs(TC.Slots) do
-        row[i] = { key = slot.key, name = slot.name, group = slot.group, art = slot.art, selected = slot.key == view.slot }
+        row[i] = { key = slot.key, name = L[slot.nameKey], group = slot.group, art = slot.art, selected = slot.key == view.slot }
     end
     return row
 end
@@ -1474,8 +1475,8 @@ end
 local function weaponDropdown()
     local types = weaponTypesOf(view.slot, chosenClass())
     if not (types and types[1]) then return nil end
-    local entries = { { name = ALL_WEAPON_TYPES, selected = view.weaponType == nil } }
-    local text = ALL_WEAPON_TYPES
+    local entries = { { name = L.ALL_WEAPON_TYPES, selected = view.weaponType == nil } }
+    local text = L.ALL_WEAPON_TYPES
     for _, weapon in ipairs(types) do
         local selected = weapon.category == view.weaponType
         entries[#entries + 1] = { name = weapon.name, value = weapon.category, selected = selected }
@@ -1488,9 +1489,11 @@ end
 -- while an appearance of any slot is pending, Bought, not collected too.
 local function showEntries(filter)
     local entries = {}
-    for i, value in ipairs(State.FILTERS) do entries[i] = { name = value, value = value, selected = value == filter } end
+    for i, show in ipairs(State.FILTERS) do
+        entries[i] = { name = L[show.nameKey], value = show.value, selected = show.value == filter }
+    end
     if next(pending) then
-        entries[#entries + 1] = { name = PENDING_FILTER, value = PENDING_FILTER, selected = filter == PENDING_FILTER }
+        entries[#entries + 1] = { name = L.SHOW_PENDING, value = PENDING_FILTER, selected = filter == PENDING_FILTER }
     end
     return entries
 end
@@ -1531,7 +1534,7 @@ end
 -- The funnel's sort entries, the chosen one marked.
 local function sortEntries()
     local entries = {}
-    for i, sort in ipairs(SORTS) do entries[i] = { name = sort.name, value = sort.value, selected = sort.value == view.sort } end
+    for i, sort in ipairs(SORTS) do entries[i] = { name = L[sort.nameKey], value = sort.value, selected = sort.value == view.sort } end
     return entries
 end
 
@@ -1543,15 +1546,15 @@ end
 local function classDropdown()
     local own = ownClass()
     local chosen = view.class == ALL_CLASSES and ALL_CLASSES or chosenClass()
-    local answer = { text = ALL_CLASSES_TEXT,
-        entries = { { name = ALL_CLASSES_TEXT, value = ALL_CLASSES, selected = chosen == ALL_CLASSES } } }
+    local answer = { text = L.ALL_CLASSES,
+        entries = { { name = L.ALL_CLASSES, value = ALL_CLASSES, selected = chosen == ALL_CLASSES } } }
     local ids = C_SpecializationInfo and C_SpecializationInfo.GetAllClassIDs and C_SpecializationInfo.GetAllClassIDs()
     if type(ids) ~= "table" or not ids[1] then ids = { own } end
     for _, classID in ipairs(ids) do
         local name, file = classInfo(classID)
         if name then
             local selected = classID == chosen
-            answer.entries[#answer.entries + 1] = { name = classID == own and (name .. " (this character)") or name,
+            answer.entries[#answer.entries + 1] = { name = classID == own and L.CLASS_THIS_CHARACTER:format(name) or name,
                 value = classID, classFile = file, selected = selected }
             if selected then answer.text, answer.classFile = name, file end
         end
@@ -1578,7 +1581,7 @@ end
 -- The tile tooltip (visual pass, board 7), built as Collections builds its
 -- own (CollectionWardrobeUtil.SetAppearanceTooltip, Blizzard_FrameXMLUtil/
 -- CollectionsUtil.lua:183-384). The client's strings and colours are read
--- when it has them; the English texts after them are the board's wording,
+-- when it has them; the locale table's texts after them are the board's wording,
 -- used only without them (their wording on Forever is unverified):
 -- clientText, above.
 local function fontColour(name, r, g, b)
@@ -1586,8 +1589,6 @@ local function fontColour(name, r, g, b)
     if type(c) == "table" and c.GetRGB then return { c:GetRGB() } end
     return { r, g, b }
 end
-local LOWEST_PRICE, SEE_ITEMS, CHECK_HINT = "Lowest price", "Click to see the items for sale.", "Click to check the auction house."
-local NO_ANSWER_TEXT, CHECK_AGAIN_HINT, DETAILS_HINT = "No answer from the auction house.", "Click to check again.", "Click for details."
 
 -- An item quality's colour (C_Item.GetItemQualityColor), white without one.
 local function qualityColour(quality, white)
@@ -1607,7 +1608,7 @@ local function sourceName(source, c)
         name = TC.Appearances.ItemName(source.itemID)
         if name and C_Item and C_Item.GetItemInfo then quality = select(3, C_Item.GetItemInfo(source.itemID)) end
     end
-    if not name then return clientText("RETRIEVING_ITEM_INFO", "Retrieving item information"), c.red end
+    if not name then return clientText("RETRIEVING_ITEM_INFO", L.RETRIEVING_ITEM), c.red end
     return name, qualityColour(quality, c.white)
 end
 
@@ -1624,10 +1625,11 @@ local function rule(name, fn, ...)
 end
 
 -- The client's name of a source's source type (TRANSMOG_SOURCE_n, a
--- 1-based index), else the English one (TC.SOURCE_TYPES), else "".
+-- 1-based index), else our own (TC.SOURCE_TYPES), else "".
 local function typeText(source)
     local n = source.sourceType
-    return n and clientText("TRANSMOG_SOURCE_" .. n, TC.SOURCE_TYPES and TC.SOURCE_TYPES[n] or "") or ""
+    local own = TC.SOURCE_TYPES and TC.SOURCE_TYPES[n]
+    return n and clientText("TRANSMOG_SOURCE_" .. n, own and L[own.nameKey] or "") or ""
 end
 
 -- Source type 6 is profession (recorded in game on tailored items, TC-35).
@@ -1671,14 +1673,14 @@ local function sourceLines(source, maxDrops)
     if list and not list[2] then
         local place, difficulties = dropPlace(list[1])
         if difficulties then
-            return { clientText("WARDROBE_TOOLTIP_BOSS_DROP_FORMAT_WITH_DIFFICULTIES", "Drop: %s (%s)"):format(place, difficulties) }
+            return { clientText("WARDROBE_TOOLTIP_BOSS_DROP_FORMAT_WITH_DIFFICULTIES", L.DROP_WITH_DIFFICULTIES):format(place, difficulties) }
         end
-        return { clientText("WARDROBE_TOOLTIP_BOSS_DROP_FORMAT", "Drop: %s"):format(place) }
+        return { clientText("WARDROBE_TOOLTIP_BOSS_DROP_FORMAT", L.DROP):format(place) }
     elseif list then
-        local lines = { "Boss drop:" }
+        local lines = { L.BOSS_DROP_HEADER }
         for i, drop in ipairs(list) do
             if i > maxDrops then
-                lines[#lines + 1] = ("and %d more"):format(#list - maxDrops)
+                lines[#lines + 1] = TC.Plural("MORE_DROPS", #list - maxDrops):format(#list - maxDrops)
                 break
             end
             local place, difficulties = dropPlace(drop)
@@ -1688,7 +1690,7 @@ local function sourceLines(source, maxDrops)
     end
     local text = typeText(source)
     local profession = source.sourceType == PROFESSION_SOURCE and rule("profession", TC.Appearances.Profession, source.itemID)
-    if profession then return { text .. ": " .. profession } end
+    if profession then return { L.SOURCE_WITH_PROFESSION:format(text, profession) } end
     return { text ~= "" and text or nil }
 end
 
@@ -1697,7 +1699,7 @@ end
 -- CollectionsUtil.lua:156-170): one drop's encounter, "<first> +N" for
 -- several, the inferred profession, else the source type.
 local function sourceText(source, c)
-    if source.isCollected then return clientText("TRANSMOG_COLLECTED", "Collected"), c.green end
+    if source.isCollected then return clientText("TRANSMOG_COLLECTED", L.COLLECTED), c.green end
     local list = rule("drops", drops, source)
     if list then
         local first = nonEmpty(list[1].encounter) or list[1].instance
@@ -1723,16 +1725,19 @@ function State.SourceLine(source)
 end
 
 local function otherItemsText()
-    return clientText("WARDROBE_OTHER_ITEMS", "Other items using this appearance:")
+    return clientText("WARDROBE_OTHER_ITEMS", L.OTHER_ITEMS_HEADER)
 end
-local MORE_ITEMS = "and %d more items"
+-- "and N more items"
+local function moreItems(n)
+    return TC.Plural("MORE_ITEMS", n):format(n)
+end
 
 -- The words the item tooltip shares with the browser (slice D1): the Show
 -- filter's "Collected" and "Not collected", the list's header and its
--- "and N more items" (a format), "Lowest price" and the pending sentences.
+-- "and N more items" (a function of N) and the pending sentences.
 function State.Wording()
-    return { collected = clientText("TRANSMOG_COLLECTED", "Collected"), notCollected = State.FILTERS[3],
-        otherItems = otherItemsText(), moreItems = MORE_ITEMS, lowestPrice = LOWEST_PRICE, pending = PENDING_TEXT }
+    return { collected = clientText("TRANSMOG_COLLECTED", L.COLLECTED), notCollected = L.NOT_COLLECTED,
+        otherItems = otherItemsText(), moreItems = moreItems, pending = pendingTexts() }
 end
 
 -- The source the tooltip heads with (CollectionWardrobeUtil.
@@ -1757,7 +1762,7 @@ end
 local function itemLine(itemID)
     local _, _, _, _, minLevel, _, subType, _, equipLoc = loadedInfo(itemID)
     local parts = {}
-    if type(minLevel) == "number" and minLevel > 1 then parts[1] = ("Requires level %d"):format(minLevel) end
+    if type(minLevel) == "number" and minLevel > 1 then parts[1] = L.REQUIRES_LEVEL:format(minLevel) end
     local kind, slot = nonEmpty(subType), nonEmpty(equipLoc) and nonEmpty(_G[equipLoc])
     parts[#parts + 1] = kind and slot and (kind .. ", " .. slot) or kind or slot
     return parts[1] and table.concat(parts, " \194\183 ") or nil
@@ -1769,9 +1774,9 @@ local function bindLine(itemID)
     local bindType = select(14, loadedInfo(itemID))
     local binds = Enum and Enum.ItemBind
     if bindType ~= nil and bindType == (binds and binds.OnEquip or 2) then
-        return TC.Appearances.BIND_ON_EQUIP_TEXT
+        return L.BIND_ON_EQUIP_COLLECT
     elseif bindType ~= nil and bindType == (binds and binds.OnAcquire or 1) then
-        return "Binds when picked up."
+        return L.BIND_ON_PICKUP
     end
 end
 
@@ -1787,7 +1792,8 @@ local function setLine(sourceID)
     local name = type(info) == "table" and nonEmpty(info.name)
     if not name then return nil end
     local label = nonEmpty(info.label)
-    return "Part of set: " .. name .. (label and label ~= name and (" (" .. label .. ")") or "")
+    if label and label ~= name then return L.SET_PART_LABEL:format(name, label) end
+    return L.SET_PART:format(name)
 end
 
 -- The holiday the source requires (GetSourceRequiredHoliday,
@@ -1797,7 +1803,7 @@ local function holidayLine(sourceID)
     local TCol = C_TransmogCollection
     local name = type(sourceID) == "number" and TCol and TCol.GetSourceRequiredHoliday
         and nonEmpty(TCol.GetSourceRequiredHoliday(sourceID))
-    return name and clientText("TRANSMOG_APPEARANCE_USABLE_HOLIDAY", "Usable only during %s."):format(name) or nil
+    return name and clientText("TRANSMOG_APPEARANCE_USABLE_HOLIDAY", L.HOLIDAY_ONLY):format(name) or nil
 end
 
 -- The tooltip never has more lines than this.
@@ -1856,7 +1862,7 @@ function State.TileTooltip(appearance)
     -- bought or in the bags, not collected (TC-39): how to collect it
     local waiting = pending[appearance.id]
     if waiting and not collected[appearance.id] then
-        tail[1], tail[2] = { text = " " }, { text = PENDING_TEXT[waiting], color = c.white, wrap = true }
+        tail[1], tail[2] = { text = " " }, { text = pendingTexts()[waiting], color = c.white, wrap = true }
     end
     local result = forSaleResult(appearance.id)
     if result then
@@ -1864,19 +1870,19 @@ function State.TileTooltip(appearance)
         local first = result.rows[1]
         if first then
             local parts = money(first.minPrice)
-            tail[#tail + 1] = { text = LOWEST_PRICE, color = c.normal, right = moneyText(parts), money = parts, rightColor = c.white }
+            tail[#tail + 1] = { text = L.LOWEST_PRICE, color = c.normal, right = moneyText(parts), money = parts, rightColor = c.white }
         else
-            tail[#tail + 1] = { text = LOWEST_PRICE, color = c.normal, right = "Not for sale", rightColor = c.grey }
+            tail[#tail + 1] = { text = L.LOWEST_PRICE, color = c.normal, right = L.NOT_FOR_SALE, rightColor = c.grey }
         end
-        if result.at then tail[#tail + 1] = { text = age(result.at, result.scanned and "Scanned" or "Checked"), color = c.grey } end
-        tail[#tail + 1] = { text = first and SEE_ITEMS or DETAILS_HINT, color = c.grey, wrap = true }
+        if result.at then tail[#tail + 1] = { text = age(result.at, result.scanned), color = c.grey } end
+        tail[#tail + 1] = { text = first and L.TIP_SEE_ITEMS or L.TIP_DETAILS, color = c.grey, wrap = true }
     elseif checking[appearance.id] then
         -- reading: no hint
     elseif noAnswer[appearance.id] then
-        tail[#tail + 1] = { text = NO_ANSWER_TEXT, color = c.grey, wrap = true }
-        tail[#tail + 1] = { text = CHECK_AGAIN_HINT, color = c.grey, wrap = true }
+        tail[#tail + 1] = { text = L.TIP_NO_ANSWER, color = c.grey, wrap = true }
+        tail[#tail + 1] = { text = L.TIP_CHECK_AGAIN, color = c.grey, wrap = true }
     else
-        tail[#tail + 1] = { text = CHECK_HINT, color = c.grey, wrap = true }
+        tail[#tail + 1] = { text = L.TIP_CHECK, color = c.grey, wrap = true }
     end
     -- the rows the list has room for, its blank line and header aside
     local room = MAX_LINES - #lines - #tail - 2
@@ -1898,7 +1904,7 @@ function State.TileTooltip(appearance)
             local text, textColour = sourceText(source, c)
             lines[#lines + 1] = { text = name, color = colour, right = text, rightColor = textColour }
         end
-        if shown < #sources then lines[#lines + 1] = { text = MORE_ITEMS:format(#sources - shown), color = c.grey } end
+        if shown < #sources then lines[#lines + 1] = { text = moreItems(#sources - shown), color = c.grey } end
     end
     for _, line in ipairs(tail) do lines[#lines + 1] = line end
     return lines
@@ -1915,8 +1921,13 @@ end
 -- slot answered nothing or raised, the empty state says so.
 function State.View()
     local slot = TC.Slots[view.slot]
+    -- filter: the Show choice's name
+    local filterName = L.SHOW_PENDING
+    for _, show in ipairs(State.FILTERS) do
+        if show.value == view.filter then filterName = L[show.nameKey] end
+    end
     local answer = {
-        filter = view.filter, page = view.page, slots = slotRow(),
+        filter = filterName, page = view.page, slots = slotRow(),
         weaponTypes = weaponDropdown(), classes = classDropdown(), search = view.search,
         filters = showEntries(view.filter), forSaleOnly = view.forSaleOnly, sources = sourceEntriesOf(),
         sorts = sortEntries(), scanWhenShown = saved.scanWhenShown, filtersChanged = not filtersAtStart(),
@@ -1924,7 +1935,7 @@ function State.View()
     }
     statusLine(answer)
     if not list then
-        if noneFound[view.slot] then answer.empty = { title = "No appearances", text = NO_APPEARANCES } end
+        if noneFound[view.slot] then answer.empty = { title = L.EMPTY_NO_APPEARANCES_TITLE, text = L.EMPTY_NO_APPEARANCES } end
         return answer
     end
     local appearances = shown()
@@ -1945,11 +1956,11 @@ function State.View()
             tile.strip, tile.money = "price", money(result.rows[1].minPrice, true)
             tile.price = moneyText(tile.money)
         elseif result then
-            tile.strip, tile.price = "not for sale", "Not for sale"
+            tile.strip, tile.price = "not for sale", L.NOT_FOR_SALE
         elseif checking[appearance.id] then
             tile.strip = "bar"
         elseif noAnswer[appearance.id] then
-            tile.strip, tile.price = "no answer", "No answer"
+            tile.strip, tile.price = "no answer", L.NO_ANSWER
         end
         answer.tiles[#answer.tiles + 1] = tile
     end
@@ -1965,52 +1976,52 @@ function State.View()
     end
     if view.open then answer.list = itemList() end
     answer.count = countText(appearances)
-    answer.pageText = ("Page %d / %d"):format(view.page, math.max(pages, 1))
+    answer.pageText = L.PAGE:format(view.page, math.max(pages, 1))
     -- the widest form of the page text for this count, so its room never changes
-    answer.pageTextWidest = ("Page %d / %d"):format(math.max(pages, 1), math.max(pages, 1))
+    answer.pageTextWidest = L.PAGE:format(math.max(pages, 1), math.max(pages, 1))
     answer.paging = pages > 1
     answer.previousEnabled = view.page > 1
     answer.nextEnabled = view.page < pages
-    local slotWord = slot.name:lower()
+    -- the slot's name as the slot row gives it, never lowercased
+    local slotName = L[slot.nameKey]
     local class = chosenClass()
     local className = class and classInfo(class)
-    local forClass = className and (" for " .. className) or ""
+    -- an empty state's sentence: the one naming the class where a class is chosen
+    local function forSlot(text, withClass)
+        if className then return withClass:format(slotName, className) end
+        return text:format(slotName)
+    end
     if scanning or #appearances > 0 then
         -- tiles, or placeholders while the scan runs
     elseif not typed()[1] then
         -- the class filter or the weapon type leaves nothing of the slot (spec 2.9)
-        answer.empty = { title = "No matches", text = ("No %s appearances%s."):format(slotWord, forClass) }
+        answer.empty = { title = L.NO_MATCHES, text = forSlot(L.EMPTY_NO_SLOT, L.EMPTY_NO_SLOT_CLASS) }
     elseif not shown("show")[1] then
         -- The list is never empty (an empty read keeps no list), so past
         -- the weapon type Show is the first filter that can leave nothing.
-        local text = view.filter == "Collected" and ("No collected %s appearances%s."):format(slotWord, forClass)
-            or view.filter == PENDING_FILTER and ("No %s appearance%s is bought and not collected."):format(slotWord, forClass)
-            or ("Every %s appearance%s is collected."):format(slotWord, forClass)
-        answer.empty = { title = "No matches", text = text, button = "Show all", action = showAll }
+        local text = view.filter == "collected" and forSlot(L.EMPTY_NONE_COLLECTED, L.EMPTY_NONE_COLLECTED_CLASS)
+            or view.filter == PENDING_FILTER and forSlot(L.EMPTY_NONE_PENDING, L.EMPTY_NONE_PENDING_CLASS)
+            or forSlot(L.EMPTY_ALL_COLLECTED, L.EMPTY_ALL_COLLECTED_CLASS)
+        answer.empty = { title = L.NO_MATCHES, text = text, button = L.SHOW_ALL_BUTTON, action = showAll }
     elseif not shown("source")[1] then
-        answer.empty = { title = "No matches",
-            text = ("No %s appearance shown here comes from the sources ticked."):format(slotWord),
-            button = "All sources", action = allSources }
+        answer.empty = { title = L.NO_MATCHES, text = L.EMPTY_NO_SOURCE:format(slotName),
+            button = L.ALL_SOURCES, action = allSources }
     elseif not shown("sale")[1] and not scans[view.slot] and failures[view.slot] then
         -- For sale only after the slot's scan failed: as the status line, scan again
-        answer.empty = { title = STATUS_FAILED,
-            text = ("Scan the %s slot again to see which appearances are for sale."):format(slotWord),
-            button = SCAN_SLOT, action = State.ScanAgain }
+        answer.empty = { title = L.STATUS_FAILED, text = L.EMPTY_SCAN_AGAIN:format(slotName),
+            button = L.SCAN_SLOT, action = State.ScanAgain }
     elseif not shown("sale")[1] and not scans[view.slot] then
         -- For sale only on a slot with no kept scan: scan it
-        answer.empty = { title = "Not scanned yet",
-            text = ("Scan the %s slot to see which appearances are for sale."):format(slotWord),
-            button = SCAN_SLOT, action = State.ScanAgain }
+        answer.empty = { title = L.NOT_SCANNED, text = L.EMPTY_SCAN:format(slotName),
+            button = L.SCAN_SLOT, action = State.ScanAgain }
     elseif not shown("sale")[1] then
         -- only a kept scan says nothing is for sale
-        answer.empty = { title = "Nothing for sale",
-            text = ("No %s appearance shown here is on the auction house right now."):format(slotWord),
-            button = "Show all appearances", action = showUnpriced }
+        answer.empty = { title = L.EMPTY_NOTHING_FOR_SALE_TITLE, text = L.EMPTY_NOTHING_FOR_SALE:format(slotName),
+            button = L.SHOW_ALL_APPEARANCES, action = showUnpriced }
     else
         -- only the search leaves nothing (spec 2.9)
-        answer.empty = { title = "No matches",
-            text = ("No %s appearance has an item named like \"%s\"."):format(slotWord, view.search),
-            button = "Clear search", action = clearSearch }
+        answer.empty = { title = L.NO_MATCHES, text = L.EMPTY_NO_SEARCH:format(slotName, view.search),
+            button = L.CLEAR_SEARCH, action = clearSearch }
     end
     -- an empty state and tiles are never drawn together
     if answer.empty then answer.tiles = {} end

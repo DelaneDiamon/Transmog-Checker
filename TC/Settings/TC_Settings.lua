@@ -1,7 +1,7 @@
 -- The settings page (slice D2, addon-settings v1, layout A): one category
 -- in the game's Options > AddOns, made with the client's settings API
 -- (Blizzard_Settings_Shared/Blizzard_Settings.lua). A preview of the item
--- tooltip at the top, then "Item tooltip" with six settings and "Appearances
+-- tooltip at the top, the language under it, then "Item tooltip" with six settings and "Appearances
 -- tab" with Scan prices when tab opens (labels: slice F, F1). Each
 -- setting is a proxy setting (Settings.RegisterProxySetting(category,
 -- variable, variableType, name, defaultValue, getValue, setValue),
@@ -21,9 +21,12 @@ TC.Settings = {}
 local Page = TC.Settings
 
 local NAME = "TransmogChecker"
-local SECTION_TOOLTIP, SECTION_BROWSER = "Item tooltip", "Appearances tab"
+-- Every text is read from the locale table (Locales/) when the page is
+-- registered or drawn: after ADDON_LOADED has set the language.
+local L = TC.L
 -- The rows of "Item tooltip" (addon-settings v1, "Every setting"): label,
--- tooltip and, for a dropdown, its choices. "Include grey & white items" is
+-- tooltip and, for a dropdown, its choices (value, label, colour), each
+-- text by its locale key. "Include grey & white items" is
 -- the inverse of the stored skipPoorAndCommon: ticked, the lines show on
 -- them. A label fits the row's label column without "…": GameFontNormal
 -- (Friz Quadrata 12, Fonts.xml:275-277) from the row's x 37 to 85 left of
@@ -31,25 +34,32 @@ local SECTION_TOOLTIP, SECTION_BROWSER = "Item tooltip", "Appearances tab"
 -- default panel, 27 characters (slice F, F1). The hover text's title is the
 -- label; its first sentence says what the setting does.
 local ROWS = {
-    { key = "tooltipShow", label = "Show collection status",
-        tip = "Adds lines to item tooltips that say whether the item's appearance is collected." },
-    { key = "tooltipStyle", label = "Tooltip style",
-        tip = "Full: the status, how to collect it, the lowest price and other items. Compact: the status on the item's name line.",
-        choices = { { "full", "Full" }, { "compact", "Compact" } } },
-    { key = "notCollectedColor", label = "\"Not collected\" text color", tip = "The color of \"Not collected\" on item tooltips.",
-        choices = { { "orange", "|cFFFF7F00Orange|r" }, { "lightBlue", "|cFF87ABFFLight blue|r" }, { "white", "White" } } },
-    { key = "otherItems", label = "Other items with this look",
-        tip = "Lists the other items that give the same appearance. Full shows where each comes from; Compact shows only how many.",
-        choices = { { "notCollected", "Only when not collected" }, { "always", "Always" }, { "off", "Never" } } },
-    { key = "lowestPrice", label = "Lowest auction price",
-        tip = "Shows the lowest auction price the Appearances tab has seen for this appearance since you logged in or reloaded. Full style only." },
-    { key = "skipPoorAndCommon", label = "Include grey & white items",
-        tip = "Also shows collection status on grey (Poor) and white (Common) items.", inverted = true },
+    { key = "tooltipShow", labelKey = "SETTING_SHOW", tipKey = "SETTING_SHOW_TIP" },
+    { key = "tooltipStyle", labelKey = "SETTING_STYLE", tipKey = "SETTING_STYLE_TIP",
+        choices = { { "full", labelKey = "STYLE_FULL" }, { "compact", labelKey = "STYLE_COMPACT" } } },
+    { key = "notCollectedColor", labelKey = "SETTING_COLOR", tipKey = "SETTING_COLOR_TIP",
+        choices = { { "orange", labelKey = "COLOR_ORANGE", color = "FFFF7F00" },
+            { "lightBlue", labelKey = "COLOR_LIGHT_BLUE", color = "FF87ABFF" }, { "white", labelKey = "COLOR_WHITE" } } },
+    { key = "otherItems", labelKey = "SETTING_OTHERS", tipKey = "SETTING_OTHERS_TIP",
+        choices = { { "notCollected", labelKey = "OTHERS_NOT_COLLECTED" }, { "always", labelKey = "OTHERS_ALWAYS" },
+            { "off", labelKey = "OTHERS_NEVER" } } },
+    { key = "lowestPrice", labelKey = "SETTING_PRICE", tipKey = "SETTING_PRICE_TIP" },
+    { key = "skipPoorAndCommon", labelKey = "SETTING_GREYS", tipKey = "SETTING_GREYS_TIP", inverted = true },
 }
 -- The funnel menu's entry keeps its longer wording, "Scan prices when the
 -- tab opens"; the funnel's Settings… opens the page at this label.
-local SCAN = { key = "scanWhenShown", label = "Scan prices when tab opens",
-    tip = "Scans the auction house for the selected slot each time the Appearances tab is shown." }
+local SCAN = { key = "scanWhenShown", labelKey = "SETTING_SCAN", tipKey = "SETTING_SCAN_TIP" }
+-- The language setting, the general row under the preview: Auto, then each
+-- language with a locale file by its own name, in the order of their codes.
+local function languageChoices()
+    local codes = {}
+    for code in pairs(TC.Locales) do codes[#codes + 1] = code end
+    table.sort(codes)
+    local choices = { { "auto", labelKey = "LANGUAGE_AUTO" } }
+    for _, code in ipairs(codes) do choices[#choices + 1] = { code, label = TC.Locales[code].name } end
+    return choices
+end
+local LANGUAGE = { key = "language", labelKey = "SETTING_LANGUAGE", tipKey = "SETTING_LANGUAGE_TIP", choices = languageChoices }
 
 local category
 -- the registered settings by stored key
@@ -78,15 +88,17 @@ end
 -- (ScrollUtil.lua:1697-1707), the mixin below. No field of the initializer
 -- is written: the list reads them in its own code (Blizzard_SettingsList.lua:57-71).
 -- The page fits the default Options panel without scrolling: the list shows
--- 551 and the headings and settings take 373, which leaves 178 for this row
--- (the arithmetic with its sources is in dev/browser-harness/run.lua, "G1").
+-- 551 and the headings and settings, the language among them, take 408,
+-- which leaves 143 for this row (the arithmetic with its sources is in
+-- dev/browser-harness/run.lua, "G1").
 -- So the samples are drawn one font step under the game's tooltip: the name
 -- in GameTooltipText (12) where the tooltip has GameTooltipHeaderText (14),
 -- the lines in GameTooltipTextSmall (10) where it has GameTooltipText (12)
 -- (FontStyles.xml:314-322, Fonts.xml:1273-1275, 1385-1387, 1403-1405), each
 -- line 2 taller than its font; a price line is as tall as its 14 coins
--- (TC_Tooltip.lua:231). The tallest combination (Full, other items shown,
--- price on) is 2 * 8 + 14 + 11 * 12 + 14 = 176, the template's height.
+-- (TC_Tooltip.lua:231). A sample shows the item's name and the addon's
+-- lines only, with three other items. The tallest combination (Full, other
+-- items shown, price on) is 2 * 8 + 14 + 8 * 12 + 14 = 140, the template's height.
 local PREVIEW_X, PREVIEW_Y, SAMPLE_GAP, SAMPLE_WIDTH = 37, 0, 16, 150
 local PAD, HEAD_HEIGHT, LINE_HEIGHT, COIN_HEIGHT = 8, 14, 12, 14
 local NAME_FONT, LINE_FONT = "GameTooltipText", "GameTooltipTextSmall"
@@ -99,21 +111,28 @@ local NAME_FONT, LINE_FONT = "GameTooltipText", "GameTooltipTextSmall"
 local TEXT_GAP, ROW_EDGE = 40, 8
 -- The caption: one line, CAPTION_GAP under the shorter sample.
 local CAPTION_GAP = 4
-local CAPTION = "Preview: a sample item, not your collection"
-local UNCOMMON, WHITE = "FF1EFF00", "FFFFFFFF"
-local OTHERS = { "Ivycloth Boots of Intellect", "Ivycloth Boots of the Owl", "Ivycloth Boots of Spirit" }
+local UNCOMMON = "FF1EFF00"
+-- The sample items' names (locale keys) and how long ago the price was seen.
+local OTHERS = { { nameKey = "PREVIEW_OTHER_1" }, { nameKey = "PREVIEW_OTHER_2" }, { nameKey = "PREVIEW_OTHER_3" } }
+local AGE_MINUTES = 3
 local SAMPLES = {
-    { name = "Ivycloth Boots of the Eagle", collected = false,
-        known = { pending = "bags", price = { copper = 4150, age = "3 min ago" } } },
-    { name = "Runecloth Boots", collected = true, known = {} },
+    { nameKey = "PREVIEW_ITEM", collected = false, pending = "bags", copper = 4150 },
+    { nameKey = "PREVIEW_COLLECTED_ITEM", collected = true },
 }
 local preview
 
 local function sampleItem(collected)
-    local source = _G.TRANSMOG_SOURCE_4 or "World Drop"
+    local source = _G.TRANSMOG_SOURCE_4 or L.SOURCE_WORLD_DROP
     local others = {}
-    for i, name in ipairs(OTHERS) do others[i] = { name = name, color = UNCOMMON, source = source, collected = false } end
-    return { collected = collected, bindsOnEquip = true, source = source, others = others, otherCount = 5 }
+    for i, other in ipairs(OTHERS) do others[i] = { name = L[other.nameKey], color = UNCOMMON, source = source, collected = false } end
+    return { collected = collected, bindsOnEquip = true, source = source, others = others, otherCount = #OTHERS }
+end
+
+-- What is known of a sample at this show: what is pending and its price.
+local function sampleKnown(spec)
+    if not spec.copper then return { pending = spec.pending } end
+    return { pending = spec.pending,
+        price = { copper = spec.copper, age = TC.Plural("AGE_MINUTES", AGE_MINUTES):format(AGE_MINUTES) } }
 end
 
 -- Line i of a sample: a frame with its left and right text; the first in
@@ -197,11 +216,10 @@ local function draw()
     local all, wanted = {}, {}
     for i, spec in ipairs(SAMPLES) do
         local item = sampleItem(spec.collected)
-        local name = { text = spec.name, color = UNCOMMON }
-        local lines = { name, { text = "Binds when equipped", color = WHITE },
-            { text = "Feet", color = WHITE, right = "Cloth", rightColor = WHITE } }
+        local name = { text = L[spec.nameKey], color = UNCOMMON }
+        local lines = { name }
         if TC.Setting("tooltipShow") then
-            local out = TC.Tooltip.Lines(item, TC.Tooltip.Settings(), spec.known)
+            local out = TC.Tooltip.Lines(item, TC.Tooltip.Settings(), sampleKnown(spec))
             -- Compact: the status on the right of the name line
             if out.nameRight then name.right, name.rightColor = (TC.Tooltip.Texts(out.nameRight)), out.nameRight.color end
             for _, line in ipairs(out.lines) do lines[#lines + 1] = line end
@@ -243,7 +261,7 @@ local function build(parent)
     else
         caption:SetTextColor(0.5, 0.5, 0.5)
     end
-    caption:SetText(CAPTION)
+    caption:SetText(L.PREVIEW_CAPTION)
     preview.caption = caption
     -- the row's width is the list's: the samples are placed again in it
     preview:SetScript("OnSizeChanged", draw)
@@ -290,15 +308,35 @@ end
 local function control(cat, row, get, set, default)
     local VarType = Settings.VarType or {}
     local kind = row.choices and (VarType.String or "string") or (VarType.Boolean or "boolean")
-    local setting = Settings.RegisterProxySetting(cat, variable(row.key), kind, row.label, default, get, set)
+    local setting = Settings.RegisterProxySetting(cat, variable(row.key), kind, L[row.labelKey], default, get, set)
     settings[row.key] = setting
-    if not row.choices then return Settings.CreateCheckbox(cat, setting, row.tip) end
+    if not row.choices then return Settings.CreateCheckbox(cat, setting, L[row.tipKey]) end
+    -- a choice's label: its own (a language's name) or its locale key's, in its colour
+    local function label(choice)
+        local text = choice.label or L[choice.labelKey]
+        return choice.color and ("|c" .. choice.color .. text .. "|r") or text
+    end
     local function options()
         local container = Settings.CreateControlTextContainer()
-        for _, choice in ipairs(row.choices) do container:Add(choice[1], choice[2]) end
+        local choices = type(row.choices) == "function" and row.choices() or row.choices
+        for _, choice in ipairs(choices) do container:Add(choice[1], label(choice)) end
         return container:GetData()
     end
-    return Settings.CreateDropdown(cat, setting, options, row.tip)
+    return Settings.CreateDropdown(cat, setting, options, L[row.tipKey])
+end
+
+-- The game's reload prompt (StaticPopup_Show, Blizzard_StaticPopup/
+-- StaticPopup.lua:309), in the form Blizzard's own reload dialogs take
+-- (Blizzard_AddOnPerformance/AddOnPerformance.lua:1-13) with Blizzard's
+-- button texts RELOADUI (Blizzard_AddOnList/AddonList.lua:541) and LATER
+-- (Blizzard_WowSurveyUI/Blizzard_WowSurveyUI.lua:4): windows are built
+-- once, so a new language shows after a reload.
+local RELOAD_DIALOG = "TRANSMOGCHECKER_RELOAD"
+local function promptReload()
+    if not (StaticPopupDialogs and StaticPopup_Show) then return end
+    StaticPopupDialogs[RELOAD_DIALOG] = { text = L.RELOAD_PROMPT, button1 = RELOADUI, button2 = LATER,
+        OnAccept = function() if ReloadUI then ReloadUI() end end, timeout = 0, whileDead = 1, hideOnEscape = 1 }
+    StaticPopup_Show(RELOAD_DIALOG)
 end
 
 -- A row is greyed while the predicate answers false, and looked at again
@@ -325,7 +363,12 @@ local function register()
     if Settings.CreatePanelInitializer and layout and layout.AddInitializer then
         layout:AddInitializer(Settings.CreatePanelInitializer("TransmogCheckerPreviewTemplate", {}))
     end
-    header(layout, SECTION_TOOLTIP)
+    -- the language: stored at once, read after the reload the prompt offers
+    control(cat, LANGUAGE, function() return TC.Setting("language") end, function(value)
+        local was = TC.Setting("language")
+        if TC.SetSetting("language", value) and value ~= was then promptReload() end
+    end, TC.SettingDefault("language"))
+    header(layout, L.SECTION_TOOLTIP)
     local function shown() return TC.Setting("tooltipShow") end
     for _, row in ipairs(ROWS) do
         local key, inverted = row.key, row.inverted
@@ -347,7 +390,7 @@ local function register()
     end
     local State = TC.BrowserState
     if State and State.ScanWhenShown and State.SetScanWhenShown then
-        header(layout, SECTION_BROWSER)
+        header(layout, L.SECTION_BROWSER)
         control(cat, SCAN, State.ScanWhenShown, State.SetScanWhenShown, true)
     end
     Settings.RegisterAddOnCategory(cat)
@@ -386,7 +429,7 @@ local afterCombat
 function Page.Open(element)
     if not category then return false end
     if InCombatLockdown and InCombatLockdown() then
-        say("Settings open after combat.")
+        say(L.SETTINGS_AFTER_COMBAT)
         if not afterCombat then
             afterCombat = CreateFrame("Frame")
             afterCombat:SetScript("OnEvent", function(self)

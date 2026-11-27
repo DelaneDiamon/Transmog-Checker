@@ -7,8 +7,13 @@ TC = TC or {}
 -- them loads as the default. Labels: Show collection status, Tooltip
 -- style, "Not collected" text color, Other items with this look, Lowest
 -- auction price, Include grey & white items (the inverse of
--- skipPoorAndCommon, kept from before); debug stays /tc debug.
+-- skipPoorAndCommon, kept from before); debug stays /tc debug. language:
+-- "auto" (the game's) or a code with a locale file (Locales/), whose values
+-- are the registered ones, so a function answers for them.
 local BOOLEAN = { [true] = true, [false] = true }
+local function isLanguage(value)
+    return value == "auto" or (type(value) == "string" and TC.Locales[value] ~= nil)
+end
 local SETTINGS = {
     tooltipShow = { default = true, values = BOOLEAN },
     tooltipStyle = { default = "full", values = { full = true, compact = true } },
@@ -17,10 +22,13 @@ local SETTINGS = {
     lowestPrice = { default = true, values = BOOLEAN },
     skipPoorAndCommon = { default = true, values = BOOLEAN },
     debug = { default = false, values = BOOLEAN },
+    language = { default = "auto", values = isLanguage },
 }
 
 local function valid(key, value)
-    return value ~= nil and SETTINGS[key].values[value] == true
+    local values = SETTINGS[key].values
+    if type(values) == "function" then return values(value) end
+    return value ~= nil and values[value] == true
 end
 
 -- A setting's value: the stored one, else its default (also before the
@@ -74,6 +82,9 @@ loader:SetScript("OnEvent", function(self, _, loadedAddon)
     end
 
     TC.Config = TransmogCheckerDB
+    -- the language every string is read in from now on; a change on the
+    -- settings page applies after a reload, as windows are built once
+    TC.SetLanguage(TC.Setting("language"))
 
     -- the appearance browser's six remembered choices, in their own table
     -- (TC_BrowserState checks each value)
@@ -89,10 +100,11 @@ local function say(text)
 end
 
 -- The help; with the settings page, the page's two lines (addon-settings v1, Entry points).
-local HELP = { "/tc lists these commands.", "/tc help lists these commands.", "/tc debug turns debug output on or off." }
-local HELP_WITH_PAGE = { "/tc opens the settings.", "/tc debug turns debug output on or off." }
+local L = TC.L
 local function help()
-    for _, line in ipairs(TC.Settings and TC.Settings.Available() and HELP_WITH_PAGE or HELP) do say(line) end
+    local lines = TC.Settings and TC.Settings.Available() and { L.SLASH_HELP_OPENS, L.SLASH_HELP_DEBUG }
+        or { L.SLASH_HELP_LIST, L.SLASH_HELP_HELP, L.SLASH_HELP_DEBUG }
+    for _, line in ipairs(lines) do say(line) end
 end
 
 -- The minimap's addon list calls this (## AddonCompartmentFunc in the .toc):
@@ -112,18 +124,18 @@ SlashCmdList["TC"] = function(msg)
         TransmogChecker_OpenSettings()
     elseif cmd == "debug" then
         TC.Config.debug = not TC.Config.debug
-        print("|cFF9D9D9DTC:|r Debug mode " .. (TC.Config.debug and "enabled" or "disabled"))
+        say(TC.Config.debug and L.DEBUG_ON or L.DEBUG_OFF)
     elseif cmd == "alts" or cmd == "hidealts" then
         TC.SetSetting("otherItems", TC.Setting("otherItems") == "always" and "notCollected" or "always")
-        say("Other items with this look: " .. (TC.Setting("otherItems") == "always" and "always" or "only when not collected"))
+        say(TC.Setting("otherItems") == "always" and L.SLASH_ALTS_ALWAYS or L.SLASH_ALTS_NOT_COLLECTED)
     elseif cmd == "filter" or cmd == "blizz" then
-        say("Blizzard's \"not collected\" line is now always hidden while TransmogChecker's lines show.")
+        say(L.SLASH_FILTER)
     elseif cmd == "skipgreys" or cmd == "greys" or cmd == "grays" then
         TC.SetSetting("skipPoorAndCommon", not TC.Setting("skipPoorAndCommon"))
-        say("Include grey & white items: " .. (TC.Setting("skipPoorAndCommon") and "off" or "on"))
+        say(TC.Setting("skipPoorAndCommon") and L.SLASH_GREYS_OFF or L.SLASH_GREYS_ON)
     else
         help()
     end
 end
 
-print("TransmogChecker: Addon loaded.")
+print(L.LOADED_ADDON)

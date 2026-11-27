@@ -1,8 +1,8 @@
 <Ui xmlns="http://www.blizzard.com/wow/ui/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.blizzard.com/wow/ui/
 ..\..\..\Blizzard_SharedXML\UI.xsd">
 	<!-- The settings page's preview row (TC_Settings.lua): its height is the row's, what the
-	     tallest sample needs and within the 178 the default Options panel leaves it. -->
+	     tallest sample needs and within the 143 the default Options panel leaves it. -->
 	<Frame name="TransmogCheckerPreviewTemplate" mixin="TransmogCheckerPreviewMixin" virtual="true">
-		<Size y="176"/>
+		<Size y="140"/>
 	</Frame>
 </Ui>
