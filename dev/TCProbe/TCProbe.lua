@@ -4033,7 +4033,7 @@ local function probeStatic()
     probeModel()
     local transmog = db.namespaces.C_TransmogCollection
     local auction = db.namespaces.C_AuctionHouse
-    print(("TCProbe: C_TransmogCollection %s functions, C_AuctionHouse %s functions. Nothing runs by itself: /tcprobe ah records the auction house while its window is open, /tcprobe tiles <slot> [cam|full] shows a page of model tiles, /tcprobe tab adds a test tab to the open auction window, /tcprobe model shows the model frames, /tcprobe collect records what the collection calls say about some 270 items, anywhere, without the auction house, /tcprobe find looks six appearances up by item name while the auction window is open (at most 10 browses and 6 searches), /tcprobe slot <slot> prints what the client and the addon answer for a slot, /tcprobe source <item> prints an item's source."):format(
+    print(("TCProbe: C_TransmogCollection %s functions, C_AuctionHouse %s functions. Nothing runs by itself: /tcprobe ah records the auction house while its window is open, /tcprobe tiles <slot> [cam|full] shows a page of model tiles, /tcprobe tab adds a test tab to the open auction window, /tcprobe model shows the model frames, /tcprobe collect records what the collection calls say about some 270 items, anywhere, without the auction house, /tcprobe find looks six appearances up by item name while the auction window is open (at most 10 browses and 6 searches), /tcprobe slot <slot> prints what the client and the addon answer for a slot, /tcprobe source <item> prints an item's source, /tcprobe sources <slot> counts the source types of a slot's appearances."):format(
         transmog and #transmog or "missing", auction and #auction or "missing"))
 end
 
@@ -4537,11 +4537,84 @@ local function probeSource(arguments)
     end
 end
 
+-- "/tcprobe sources <slot>" (slice C, item 6: the Boss Drop entry that shows
+-- nothing): for every appearance of the slot in the browser's list (all
+-- classes) and each of its sources as the Source filter reads them
+-- (TC.Appearances.Sources), the count of each sourceType value, nil too;
+-- how many of those sources have drop data (GetAppearanceSourceDrops); the
+-- client's name of the value (TRANSMOG_SOURCE_n) and one example item; then
+-- how many appearances have a source of each value. 20 appearances a frame,
+-- one run at a time; nothing reaches the auction house.
+local SOURCES_PER_FRAME = 20
+local sourcesRunning = false
+local function probeSources(word)
+    local function out(line)
+        print("TCProbe sources: " .. line)
+        if #db.sourcesProbe < 400 then db.sourcesProbe[#db.sourcesProbe + 1] = line end
+    end
+    local entry = slotEntry(word)
+    if not entry then return print("TCProbe: /tcprobe sources <slot>, a slot as /tcprobe slot takes it") end
+    if sourcesRunning then return print("TCProbe sources: a run is still in progress; wait for \"done.\" (or /reload).") end
+    local listed = call(TC and TC.Appearances, "List", entry.key)
+    local list = listed[1]
+    if type(list) ~= "table" then
+        return print(("TCProbe sources: no list for %s: %s"):format(entry.key,
+            (listed.missing or listed.error) and text(listed) or "the read waits a frame; run it again"))
+    end
+    db.sourcesProbe = {}
+    sourcesRunning = true
+    -- by sourceType value (a number, or its text: "nil"): { sources, drops,
+    -- example }; appearances: how many appearances have a source of it
+    local types, appearances, sources, raised = {}, {}, 0, 0
+    out(("%s: %d appearances in the browser's list (all classes), %d a frame"):format(entry.key, #list, SOURCES_PER_FRAME))
+    local function report()
+        local keys = {}
+        for k in pairs(types) do keys[#keys + 1] = k end
+        table.sort(keys, function(a, b)
+            if type(a) ~= type(b) then return type(a) == "number" end
+            return a < b
+        end)
+        local parts = {}
+        for _, k in ipairs(keys) do
+            local t = types[k]
+            out(("sourceType %s (%s): %d sources, %d with drop data, e.g. item %s"):format(tostring(k),
+                type(k) == "number" and tostring(_G["TRANSMOG_SOURCE_" .. k]) or "-", t.sources, t.drops, tostring(t.example)))
+            parts[#parts + 1] = ("%s: %d"):format(tostring(k), appearances[k])
+        end
+        out("appearances with at least one source of each sourceType: " .. (parts[1] and table.concat(parts, ", ") or "none"))
+        out(("%d sources read; %d appearances whose read raised. done."):format(sources, raised))
+        sourcesRunning = false
+    end
+    local function step(first)
+        for i = first, math.min(first + SOURCES_PER_FRAME - 1, #list) do
+            local got = call(TC.Appearances, "Sources", list[i])
+            if got.missing or got.error then raised = raised + 1 end
+            local seen = {}
+            for _, source in ipairs(type(got[1]) == "table" and got[1] or {}) do
+                local n = type(source) == "table" and source.sourceType or nil
+                local k = type(n) == "number" and n or tostring(n)
+                local t = types[k] or { sources = 0, drops = 0 }
+                types[k], sources, t.sources = t, sources + 1, t.sources + 1
+                t.example = t.example or (type(source) == "table" and source.itemID) or nil
+                local id = type(source) == "table" and source.sourceID
+                local drops = type(id) == "number" and call(C_TransmogCollection, "GetAppearanceSourceDrops", id)[1]
+                if type(drops) == "table" and drops[1] then t.drops = t.drops + 1 end
+                if not seen[k] then seen[k], appearances[k] = true, (appearances[k] or 0) + 1 end
+            end
+        end
+        if first + SOURCES_PER_FRAME > #list then return report() end
+        if not (C_Timer and C_Timer.After) then return step(first + SOURCES_PER_FRAME) end
+        C_Timer.After(0, function() step(first + SOURCES_PER_FRAME) end)
+    end
+    step(1)
+end
+
 local base = SlashCmdList["TCPROBE"]
 SlashCmdList["TCPROBE"] = function(msg)
     local word, rest = (msg or ""):match("^%s*(%S*)%s*(.-)%s*$")
     word = word:lower()
     if word == "slot" then return probeSlot(rest) end
+    if word == "sources" then return probeSources(rest) end
     if word == "source" then return probeSource(rest) end
     return base(msg)
 end
