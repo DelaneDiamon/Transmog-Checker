@@ -26,10 +26,11 @@ local function sameState(before, after, what)
 end
 
 -- The saved browser choices (TransmogCheckerDB.browser) the tests written
--- before slice B run with: Show on Not collected and Scan when shown off,
--- the start and the reads of the catalogue they were written for. New tests
+-- before slice B run with: Show on Not collected, Scan when shown off and,
+-- since slice C, the sort Collections order: the start and the reads of the
+-- catalogue they were written for. New tests
 -- give opts.saved: their own saved table, or false for none at all.
-local function oldStart() return { show = "Not collected", scanWhenShown = false } end
+local function oldStart() return { show = "Not collected", scanWhenShown = false, sort = "default" } end
 
 -- A fresh client with every file of the .toc loaded and the saved table in
 -- place, handed to the state as ADDON_LOADED would hand it over.
@@ -2496,7 +2497,7 @@ test("the panel forwards the wheel, the arrows and the Filter menu to the state"
     check(choose("Collected"), "a \"Collected\" entry in the funnel's menu")
     check(textShown(c, "5 appearances"), "count after choosing Collected")
     equal(markedShow(c), "Collected", "the funnel marks Collected")
-    local arrows = findAll(c, function(w) return w.kind == "Button" and visible(w) and w.width == 22 end)
+    local arrows = findAll(c, function(w) return w.kind == "Button" and visible(w) and w.width == 22 and w.calls.SetNormalTexture end)
     equal(#arrows, 0, "paging arrows shown with one page")
 end)
 
@@ -2595,7 +2596,7 @@ end)
 test("the panel draws the arrows' state from the view", function()
     local c, tabs = visitTwice()
     tabs[1].scripts.OnClick(tabs[1])
-    local arrows = findAll(c, function(w) return w.kind == "Button" and w.width == 22 and visible(w) end)
+    local arrows = findAll(c, function(w) return w.kind == "Button" and w.width == 22 and visible(w) and w.calls.SetNormalTexture end)
     equal(#arrows, 2, "arrows shown")
     local v = TC.BrowserState.View()
     equal(arrows[1].enabled, v.previousEnabled, "previous arrow")
@@ -2862,7 +2863,7 @@ local function panelSweep(c)
 end
 local function panelCatalogue(c)
     if TC.BrowserState.View().forSaleOnly then funnelPick(c, "For sale only") end
-    funnelPick(c, "Default")
+    funnelPick(c, "Collections order")
 end
 
 test("whole: the files in .toc order, login, the window, the tab, paging, the Filter and All send nothing", function()
@@ -3355,15 +3356,19 @@ end
 
 -- ledger (slice B): the toggles are gone, so the row starts at the grid's
 -- left edge, x 28 (it was 136)
-test("whole: the slot row's 14 buttons sit at x 28, y 4, 31 wide, 2 apart and 19 between groups, with the ring on the chosen", function()
+test("whole: the slot row's 14 buttons sit at x 64 (slice C, clear of the portrait), y 4, 31 wide, 2 apart and 19 between groups, with the ring on the chosen", function()
     local c, tabs = visitTwice({ appearances = manySlots() })
     tabs[1].scripts.OnClick(tabs[1])
     local buttons = slotButtons(c)
     equal(#buttons, 14, "slot buttons")
     local xs = {}
     for i, b in ipairs(buttons) do xs[i] = b.points[1].x end
-    equal(table.concat(xs, ","), "28,61,94,127,160,193,226,276,309,342,375,425,458,491", "x positions")
-    equal(buttons[14].points[1].x + 31 - 28, 494, "the row is 494 wide")
+    equal(table.concat(xs, ","), "64,97,130,163,196,229,262,312,345,378,411,461,494,527", "x positions")
+    equal(buttons[14].points[1].x + 31 - 64, 494, "the row is 494 wide")
+    -- the portrait: 62 square at x -5 of the window, the panel 5 right of it
+    -- (SharedUIPanelTemplates.xml:581-585): it ends at the panel's x 52
+    check(buttons[1].points[1].x - (-5 + 62 - 5) >= 10, "a gap of 10 or more after the portrait")
+    check(buttons[14].points[1].x + 31 < 628, "the row ends before Search")
     equal(buttons[1].points[1].y, -4, "y")
     check(visible(buttons[1].ring) and not visible(buttons[2].ring), "the ring on Head only")
     buttons[2].scripts.OnEnter(buttons[2])
@@ -4100,14 +4105,14 @@ local function classEntries(c)
     end
 end
 
-test("whole: Search at x 642, y 9, 108 x 20 with its placeholder; Escape in it keeps the window", function()
+test("whole: Search at x 628 (slice C), y 9, 108 x 20 with its placeholder; Escape in it keeps the window", function()
     local c, tabs = visitTwice(classFixture(0))
     tabs[1].scripts.OnClick(tabs[1])
     local box = searchBox(c)
     check(box and visible(box), "a shown search box")
     equal(box.width, 108, "search width")
     equal(box.height, 20, "search height")
-    equal(box.points[1].x .. "," .. box.points[1].y, "642,-9", "search position")
+    equal(box.points[1].x .. "," .. box.points[1].y, "628,-9", "search position")
     check(textShown(c, "Search"), "the placeholder")
     c.type(box, "x")
     check(not textShown(c, "Search"), "no placeholder while there is text")
@@ -6020,7 +6025,7 @@ test("styles: with Blizzard's menu templates the weapon type and the funnel are 
     equal(weapon.points[1].point .. " " .. weapon.points[1].x .. "," .. weapon.points[1].y, "LEFT 598,-50",
         "weapon type at x 598, centred on y 50")
     equal(funnel.width .. "x" .. funnel.height, "30x30", "funnel size")
-    equal(funnel.points[1].x .. "," .. funnel.points[1].y, "757,-4", "funnel at x 757, y 4")
+    equal(funnel.points[1].x .. "," .. funnel.points[1].y, "743,-4", "funnel at x 743, y 4 (slice C)")
     equal(funnel.Text.text, "", "the funnel has no text with its art")
     check(visible(funnel) and not visible(weapon), "funnel shown, weapon type not on head")
     equal(#findAll(c, function(w) return w.kind == "Button" and (w.width == 150 or w.width == 157 or w.width == 138) end),
@@ -6122,12 +6127,12 @@ test("styles: the funnel lists Show, For sale only, Source, Class, the sort, Sca
     local funnel = funnelOf(c)
     local texts = openMenu(c, funnel)
     equal(table.concat(texts, "|"), "All|Collected|Not collected|-|For sale only|Source|Class: |cffWARLOCKWarlock|r|-|Sort"
-        .. "|Default|Price: low to high|Price: high to low|-|Scan when shown|-|Reset filters", "entries at the start")
-    equal(selectedTexts(c), "Not collected|Default", "Not collected and Default marked")
+        .. "|Collections order|Price: low to high|Price: high to low|-|Scan when shown|-|Reset filters", "entries at the start")
+    equal(selectedTexts(c), "Not collected|Collections order", "Not collected and Collections order marked")
     check(c.choose("Collected"), "a Collected entry")
     check(textShown(c, "5 appearances"), "count after Collected")
     texts = openMenu(c, funnel)
-    equal(selectedTexts(c), "Collected|Default", "Collected marked")
+    equal(selectedTexts(c), "Collected|Collections order", "Collected marked")
     equal(texts[#texts], "Reset filters", "Reset filters while a choice differs")
     funnel:CloseMenu()
     sweep()
@@ -6201,13 +6206,13 @@ test("styles: without the menu templates, or without the menu API, the funnel an
             equal(b.template, "UIPanelButtonTemplate", what .. ": template")
             check(b.menu, what .. ": its own menu")
         end
-        equal(funnel.points[1].x .. "," .. funnel.points[1].y, "757,-4", what .. ": funnel position")
+        equal(funnel.points[1].x .. "," .. funnel.points[1].y, "743,-4", what .. ": funnel position")
         equal(weapon.height, 22, what .. ": the fallback weapon type button keeps its own height")
         -- ledger (slice B): the list holds slice B's entries, each checkbox
         -- marked by its text; Show is not greyed with For sale only (it was)
         local texts = openMenu(c, funnel)
         equal(table.concat({ texts[1], texts[4], texts[5], texts[11], texts[12], texts[22], texts[25], #texts }, "|"),
-            "All|[ ] For sale only|[x] Source: Boss Drop|[x] Source: Other|All classes|Sort: Default|[ ] Scan when shown|25",
+            "All|[ ] For sale only|[x] Source: Boss Drop|[x] Source: Other|All classes|Sort: Collections order|[ ] Scan when shown|25",
             what .. ": Show, For sale only, Source, the classes, the sort, Scan when shown")
         funnel.close()
         sentNothing(c, what)
@@ -6418,7 +6423,7 @@ test("B state: the funnel's Show and class choices, the changed mark and Reset f
     v = TC.BrowserState.View()
     equal(tostring(v.forSaleOnly) .. "/" .. v.filter .. "/" .. tostring(v.filtersChanged), "false/All/false",
         "Reset ends For sale only and the sort too")
-    for _, e in ipairs(v.sorts) do if e.selected then equal(e.name, "Default", "the sort back on Default") end end
+    for _, e in ipairs(v.sorts) do if e.selected then equal(e.name, "Price: low to high", "the sort back on its default, Price: low to high (slice C)") end end
     equal(#c.ah.sends, 1, "only the sweep's scan was read")
 end)
 
@@ -6496,10 +6501,10 @@ local function hover(w)
     return GameTooltip.text, GameTooltip.calls.AddLine and GameTooltip.calls.AddLine[1]
 end
 local function texturePath(w) return w.calls.SetTexture and w.calls.SetTexture[1] end
--- The funnel's reset mark: the 18 square button on it.
+-- The funnel's reset mark: the 22 square button on it (18 before slice C).
 local function markOf(c)
     local funnel = funnelOf(c)
-    return find(c, function(w) return w.kind == "Button" and w.parent == funnel and w.width == 18 end)
+    return find(c, function(w) return w.kind == "Button" and w.parent == funnel and w.width == 22 end)
 end
 local function arrowsOf(c)
     return findAll(c, function(w) return w.kind == "Button" and w.width == 22 and w.height == 22 and w.calls.SetNormalTexture end)
@@ -6520,10 +6525,10 @@ test("B whole: the header row: the slot row at the grid's left edge, Search, the
     local c, tabs = visitTwice({ appearances = manySlots() })
     tabs[1].scripts.OnClick(tabs[1])
     equal(find(c, function(w) return w.kind == "Button" and w.mode end), nil, "no catalogue or sweep toggle")
-    equal(point(slotButtons(c)[1]), "28,-4", "the slot row at x 28, y 4")
+    equal(point(slotButtons(c)[1]), "64,-4", "the slot row at x 64, y 4")
     local count = countShown(c)
     equal(point(count), "28,-42", "the count at x 28, y 42")
-    equal(point(funnelOf(c)), "757,-4", "the funnel at x 757, y 4")
+    equal(point(funnelOf(c)), "743,-4", "the funnel at x 743, y 4")
     -- nothing of the old header
     equal(#findAll(c, function(w) return w.template == "PanelTopTabButtonTemplate" end), 0, "no text tabs")
     equal(#findAll(c, function(w) return (w.kind == "Button" or w.kind == "DropdownButton") and (w.width == 150 or w.width == 138) end),
@@ -6568,13 +6573,13 @@ test("B whole: the funnel's mark shows while a choice differs; the mark and Rese
     local funnel = funnelOf(c)
     check(mark and not visible(mark), "no mark at the start")
     check(not funnel.highlightLocked, "the funnel's highlight is not held at the start")
-    equal(mark.width .. "x" .. mark.height, "18x18", "the mark's size")
-    equal(mark.points[1].relativePoint .. " " .. point(mark), "TOPRIGHT -9,-7", "the mark in the funnel's top right corner")
-    -- testpass F5: the whole mark inside the funnel's right edge and below the
+    equal(mark.width .. "x" .. mark.height, "22x22", "the mark's size (slice C: 22, was 18)")
+    equal(mark.points[1].relativePoint .. " " .. point(mark), "TOPRIGHT 2,-9", "the mark on the funnel's top right corner")
+    -- testpass F5: the whole mark inside the panel and below the
     -- panel's top, clear of the frame's border (the panel is 791 wide)
     local fp = funnel.points[1]
     local cx, cy = fp.x + funnel.width + mark.points[1].x, -fp.y - mark.points[1].y
-    check(cx + mark.width / 2 <= fp.x + funnel.width, "the mark's right edge inside the funnel's")
+    check(cx - mark.width / 2 < fp.x + funnel.width and cx + mark.width / 2 > fp.x + funnel.width, "slice C: the mark across the funnel's right edge, on its corner")
     check(cx + mark.width / 2 <= 791 - 4, "the mark at least 4 inside the panel's right edge")
     check(cy - mark.height / 2 >= 2, "the mark's top at least 2 below the panel's top")
     local names, choose = classEntries(c)
@@ -7222,7 +7227,7 @@ test("TC-36 markers: the hover state and the tooltip end when the page turns", f
     enter(f)
     check(visible(f.hoverGlow) and GameTooltip:IsShown(), "hovered, with the tooltip")
     equal(GameTooltip.owner, f.button, "the tooltip's owner")
-    equal(GameTooltip.anchor, "ANCHOR_RIGHT", "anchored right, as Collections")
+    equal(GameTooltip.anchor, "ANCHOR_TOP", "anchored above its tile (slice C)")
     TC.BrowserState.NextPage()
     check(not visible(f.hoverGlow), "the hover ends on a page turn")
     check(not GameTooltip:IsShown(), "the tooltip hides on a page turn")
@@ -7409,8 +7414,19 @@ test("chosen art: the mark at the funnel's top right", function()
     tabs[1].scripts.OnClick(tabs[1])
     check(not find(c, function(w) return w.template == "SquareIconButtonTemplate" end), "no square template frame")
     local mark = markOf(c)
-    equal(mark.points[1].point .. " " .. mark.points[1].relativePoint .. " " .. point(mark), "CENTER TOPRIGHT -9,-7",
-        "the mark in the top right corner")
+    equal(mark.points[1].point .. " " .. mark.points[1].relativePoint .. " " .. point(mark), "CENTER TOPRIGHT 2,-9",
+        "the mark on the top right corner (slice C)")
+    -- slice C: at least 22, on the funnel's corner, inside the panel (800
+    -- wide window, Blizzard_AuctionHouseFrame.xml:5, less 5 and 4) with 4
+    -- to spare, its top below the panel's
+    local funnel = funnelOf(c)
+    local cx, cy = funnel.points[1].x + funnel.width + mark.points[1].x, funnel.points[1].y + mark.points[1].y
+    local left, right, top, bottom = cx - mark.width / 2, cx + mark.width / 2, cy + mark.height / 2, cy - mark.height / 2
+    check(mark.width >= 22 and mark.height >= 22, "a mark of at least 22")
+    equal(table.concat({ left, right, top, bottom }, ","), "764,786,-2,-24", "the mark's box in the panel")
+    check(right <= 800 - 5 - 4 - 4 and top <= -2, "inside the panel, clear of the border")
+    check(left > funnel.points[1].x + funnel.width / 2 and bottom > funnel.points[1].y - funnel.height,
+        "it covers the funnel's right part only, above its bottom")
     noErrors(c, "chosen art")
 end)
 
@@ -7419,7 +7435,7 @@ test("chosen art: the funnel's settings art with its hover and pressed forms; th
     tabs[1].scripts.OnClick(tabs[1])
     local funnel = funnelOf(c)
     equal(funnel.icon.calls.SetAtlas[1], "common-dropdown-a-button-settings-shadowless", "the owner's art")
-    equal(funnel.width .. "x" .. funnel.height .. " " .. point(funnel), "30x30 757,-4", "its box and place")
+    equal(funnel.width .. "x" .. funnel.height .. " " .. point(funnel), "30x30 743,-4", "its box and place")
     funnel.scripts.OnEnter(funnel)
     equal(funnel.icon.calls.SetAtlas[1], "common-dropdown-a-button-settings-hover-shadowless", "hover")
     funnel.scripts.OnLeave(funnel)
@@ -9357,7 +9373,8 @@ end)
 -- drop, 1005 a type the client does not name (9), 1006 vendors. prices:
 -- one listing per appearance id of its first item, put up for the scan and
 -- the checks. saved: the saved browser table (default: none but Scan when
--- shown off, so nothing is read unless the test says).
+-- shown off, so nothing is read unless the test says, and since slice C
+-- the sort Collections order, the start these tests were written for).
 local SB_TYPES = { [1001] = { 1, 1, 1 }, [1002] = { 2, 2, 2 }, [1003] = { 6, 6, 6 }, [1004] = { 1, 2, 4 },
     [1005] = { 9, 9, 9 }, [1006] = { 3, 3, 3 } }
 local SB_PRICES = { [1001] = 50, [1002] = 300, [1004] = 100, [1005] = 300 }
@@ -9366,7 +9383,7 @@ local function sbState(prices, opts)
     local list = Fake.appearances(6, 1)
     for _, a in ipairs(list) do a.sourceTypes = SB_TYPES[a.id] end
     opts.appearances = opts.appearances or list
-    if opts.saved == nil then opts.saved = { scanWhenShown = false } end
+    if opts.saved == nil then opts.saved = { scanWhenShown = false, sort = "default" } end
     local c = bootState(opts)
     TC.BrowserState.Refresh()
     for id, price in pairs(prices or {}) do
@@ -9441,7 +9458,8 @@ test("slice B For sale only with no scan says to scan the slot; the button scans
 end)
 
 test("slice B Source: one type, several, Other, an appearance of two types, and All sources", function()
-    local c = sbState()
+    -- slice C: the saved start with the default sort, so All sources is the start
+    local c = sbState(nil, { saved = { scanWhenShown = false } })
     local S = TC.BrowserState
     local names = {}
     for i, e in ipairs(S.View().sources) do names[i] = e.name .. (e.selected and "*" or "") end
@@ -9551,7 +9569,7 @@ test("slice B sort: by price low and high, equal prices in the game's order, unp
     equal(tileIDs(S.View()), "1001,1002,1003,1004,1005,1006", "an unknown sort changes nothing")
     local marked
     for _, e in ipairs(S.View().sorts) do if e.selected then marked = e.name end end
-    equal(marked, "Default", "Default marked")
+    equal(marked, "Collections order", "Collections order marked")
     equal(#c.ah.sends, 1, "the scan only")
 end)
 
@@ -9630,9 +9648,9 @@ test("slice B Reset filters: Show, For sale only, Source, class, weapon type, se
     local ticked = 0
     for _, e in ipairs(v.sources) do if e.selected then ticked = ticked + 1 end end
     equal(table.concat({ v.filter, tostring(v.forSaleOnly), ticked, v.classes.text, v.weaponTypes.text, "'" .. v.search .. "'", sort,
-        tostring(v.filtersChanged) }, "/"), "All/false/7/Warlock/All weapon types/''/Default/false", "every default")
+        tostring(v.filtersChanged) }, "/"), "All/false/7/Warlock/All weapon types/''/Price: low to high/false", "every default")
     equal(TransmogCheckerDB.browser.show .. "/" .. tostring(TransmogCheckerDB.browser.forSaleOnly) .. "/" .. TransmogCheckerDB.browser.sort,
-        "All/false/default", "the saved values follow")
+        "All/false/priceLow", "the saved values follow")
     equal(TransmogCheckerDB.browser.scanWhenShown, false, "Scan when shown is no filter: untouched")
     sentNothing(c, "reset")
 end)
@@ -9648,7 +9666,7 @@ test("slice B the filter-active mark: each filter and the sort alone set it; bac
         { "Source", function() S.SetSource("other", false) end, function() S.SetSource("other", true) end },
         { "class", function() S.SelectClass(8) end, function() S.SelectClass(9) end },
         { "search", function() S.SetSearch("x") end, function() S.SetSearch("") end },
-        { "sort", function() S.SetSort("priceLow") end, function() S.SetSort("default") end },
+        { "sort", function() S.SetSort("default") end, function() S.SetSort("priceLow") end },
         { "Scan when shown (no filter)", function() S.SetScanWhenShown(false) end, function() S.SetScanWhenShown(true) end },
     }) do
         way[2]()
@@ -9716,12 +9734,12 @@ test("slice B saved: the defaults on a first run, the tooltip's settings beside 
     equal(TransmogCheckerDB, nil, "nothing saved yet")
     c.fire("ADDON_LOADED", "TransmogChecker")
     local b = TransmogCheckerDB.browser
-    equal(table.concat({ tostring(b.scanWhenShown), b.show, tostring(b.forSaleOnly), b.sort }, "/"), "true/All/false/default",
-        "the four defaults")
+    equal(table.concat({ tostring(b.scanWhenShown), b.show, tostring(b.forSaleOnly), b.sort }, "/"), "true/All/false/priceLow",
+        "the defaults (slice C: the sort by price)")
     local keys = {}
     for k in pairs(b) do keys[#keys + 1] = k end
     table.sort(keys)
-    equal(table.concat(keys, ","), "forSaleOnly,scanWhenShown,show,sort", "the four values only")
+    equal(table.concat(keys, ","), "forSaleOnly,scanWhenShown,show,slot,sort", "the five values only (slice C: the slot)")
     local v = TC.BrowserState.View()
     equal(v.filter .. "/" .. tostring(v.forSaleOnly) .. "/" .. tostring(v.scanWhenShown), "All/false/true", "the view")
     equal(table.concat({ tostring(TC.Config.hideCollectedAlts), tostring(TC.Config.filterBlizzNotCollectedLine),
@@ -9747,7 +9765,7 @@ test("slice B saved: each value is written on change and loaded in the next sess
         "false/Collected/true/priceHigh", "written on change")
     local n = 0
     for _ in pairs(saved) do n = n + 1 end
-    equal(n, 4, "class, Source and search are not saved")
+    equal(n, 5, "class, Source and search are not saved (the fifth is the slot, slice C)")
     -- the next session: the saved table as the client loads it
     local d = boot({ saved = false })
     TransmogCheckerDB = { browser = saved }
@@ -9764,10 +9782,10 @@ end)
 
 test("slice B saved: Bought, not collected loads as All; malformed values and a malformed table load as the defaults", function()
     for _, case in ipairs({
-        { { show = "Bought, not collected", forSaleOnly = true }, "true/All/true/default" },
-        { { scanWhenShown = "yes", show = 7, forSaleOnly = {}, sort = "cheap" }, "true/All/false/default" },
+        { { show = "Bought, not collected", forSaleOnly = true }, "true/All/true/priceLow" },
+        { { scanWhenShown = "yes", show = 7, forSaleOnly = {}, sort = "cheap" }, "true/All/false/priceLow" },
         { { scanWhenShown = false, show = "Not collected", sort = "priceLow" }, "false/Not collected/false/priceLow" },
-        { "junk", "true/All/false/default" },
+        { "junk", "true/All/false/priceLow" },
     }) do
         local c = boot({ saved = false })
         TransmogCheckerDB = { browser = case[1], hideCollectedAlts = false, skipPoorAndCommon = false }
@@ -10461,6 +10479,106 @@ test("TC-43 item 8: 30 appearances without a source type cost no source read per
     S.Refresh()
     S.View()
     equal((c.sourcesCalls or 0) - base, 30, "a Refresh reads each once again")
+end)
+
+---------------------------------------------------------------- Slice C: the owner's second in-game pass
+
+-- item 4: the sort's default is Price: low to high
+test("slice C sort: Price: low to high on a first run, for a missing or malformed saved sort, with no filter-active mark", function()
+    for _, case in ipairs({ { nil, "first run" }, { {}, "missing" }, { { sort = "cheap" }, "malformed" },
+        { { sort = 7 }, "not a string" } }) do
+        local c = boot({ saved = false })
+        TransmogCheckerDB = case[1] and { browser = case[1] } or nil
+        c.fire("ADDON_LOADED", "TransmogChecker")
+        equal(TransmogCheckerDB.browser.sort, "priceLow", case[2] .. ": saved")
+        local v, marked = TC.BrowserState.View(), nil
+        for _, e in ipairs(v.sorts) do if e.selected then marked = e.name end end
+        equal(marked, "Price: low to high", case[2] .. ": marked")
+        equal(v.filtersChanged, false, case[2] .. ": no filter-active mark")
+        noErrors(c, case[2])
+    end
+end)
+
+test("slice C sort: a saved \"default\" keeps the game's order, named Collections order; Reset gives Price: low to high", function()
+    local c = sbState(SB_PRICES, { saved = { scanWhenShown = false, sort = "default" } })
+    scanned(c)
+    local S = TC.BrowserState
+    local names = {}
+    for i, e in ipairs(S.View().sorts) do names[i] = e.value .. "=" .. e.name .. (e.selected and "*" or "") end
+    equal(table.concat(names, "|"), "default=Collections order*|priceLow=Price: low to high|priceHigh=Price: high to low",
+        "the choices with their stored values, the saved one marked")
+    equal(tileIDs(S.View()), "1001,1002,1003,1004,1005,1006", "Collections order: the game's order")
+    equal(S.View().filtersChanged, true, "Collections order differs from the default: the mark")
+    S.SetSort("priceLow")
+    equal(S.View().filtersChanged, false, "Price: low to high: no mark")
+    equal(TransmogCheckerDB.browser.sort, "priceLow", "stored as priceLow")
+    S.SetSort("default")
+    equal(TransmogCheckerDB.browser.sort, "default", "Collections order stored as default")
+    S.ResetFilters()
+    equal(TransmogCheckerDB.browser.sort .. " " .. tileIDs(S.View()), "priceLow 1001,1004,1002,1005,1003,1006",
+        "Reset: stored and drawn by price")
+    equal(S.View().filtersChanged, false, "and no mark")
+    equal(#c.ah.sends, 1, "the scan only")
+end)
+
+-- item 5: the selected slot is remembered
+test("slice C slot: the selected slot is saved; the next visit and the next session open on it", function()
+    local c, tabs = visitTwice({ appearances = manySlots(), saved = { scanWhenShown = false } })
+    tabs[1].scripts.OnClick(tabs[1])
+    slotButtons(c)[10].scripts.OnClick(slotButtons(c)[10])
+    equal(TransmogCheckerDB.browser.slot, "legs", "saved on selecting Legs")
+    c.closeAuction()
+    c.openAuction()
+    tabs[1].scripts.OnClick(tabs[1])
+    equal(chosenSlot(TC.BrowserState.View()), "Legs", "the next visit opens on Legs")
+    check(visible(slotButtons(c)[10].ring) and not visible(slotButtons(c)[1].ring), "the ring on Legs")
+    local saved = {}
+    for k, v in pairs(TransmogCheckerDB.browser) do saved[k] = v end
+    local d = boot({ saved = false })
+    TransmogCheckerDB = { browser = saved }
+    d.fire("ADDON_LOADED", "TransmogChecker")
+    TC.BrowserState.Refresh()
+    equal(chosenSlot(TC.BrowserState.View()), "Legs", "the next session opens on Legs")
+    sentNothing(c, "slot saved")
+    noErrors(d, "next session")
+end)
+
+test("slice C slot: an unknown or malformed saved slot loads as Head", function()
+    for _, value in ipairs({ "boots", 1, "Legs", true }) do
+        local c = boot({ saved = false })
+        TransmogCheckerDB = { browser = { slot = value } }
+        c.fire("ADDON_LOADED", "TransmogChecker")
+        equal(TransmogCheckerDB.browser.slot, "head", tostring(value) .. ": saved")
+        equal(chosenSlot(TC.BrowserState.View()), "Head", tostring(value) .. ": the view")
+        noErrors(c, tostring(value))
+    end
+end)
+
+test("slice C slot: with Scan when shown on, showing the tab scans the remembered slot", function()
+    local c, tabs = sbWhole({ slot = "legs" })
+    tabs[1].scripts.OnClick(tabs[1])
+    equal(#c.ah.sends, 1, "one scan on showing the tab")
+    equal(TC.BrowserState.View().status, "Scanning legs", "of Legs")
+    noErrors(c, "remembered slot scanned")
+end)
+
+-- item 6: the Source filter, entry by entry
+test("slice C Source: an appearance with a source of each type passes with only that entry ticked, type 1 among them", function()
+    local list = {}
+    for n = 1, 6 do list[n] = { id = 100 + n, uiOrder = 10 - n, sources = { 1000 + n }, sourceTypes = { n } } end
+    -- one appearance, two items: a boss drop and a world drop
+    list[7] = { id = 107, uiOrder = 0, sources = { 1071, 1072 }, sourceTypes = { 1, 4 } }
+    local c = bootState({ appearances = list, saved = { scanWhenShown = false, sort = "default" } })
+    local S = TC.BrowserState
+    S.Refresh()
+    for n = 1, 6 do
+        onlySources({ [n] = true })
+        local expected = tostring(100 + n) .. ((n == 1 or n == 4) and ",107" or "")
+        equal(tileIDs(S.View()), expected, "only entry " .. n .. " ticked")
+    end
+    onlySources({ other = true })
+    equal(tileIDs(S.View()), "", "Other only: none")
+    sentNothing(c, "source types")
 end)
 
 test("TC-15 no forbidden collection call was made in the whole run", function()

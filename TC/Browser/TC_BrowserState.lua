@@ -25,17 +25,20 @@ State.FILTERS = { "All", "Collected", "Not collected" }
 -- The Show choice offered while an appearance is pending (TC-39).
 local PENDING_FILTER = "Bought, not collected"
 -- The sort's choices: the game's order, or by the lowest known price, the
--- appearances without one after the priced ones in the game's order.
-local SORTS = { { value = "default", name = "Default" }, { value = "priceLow", name = "Price: low to high" },
+-- appearances without one after the priced ones in the game's order. The
+-- game's order keeps its stored value "default" (slice C: renamed, no
+-- longer the default).
+local SORTS = { { value = "default", name = "Collections order" }, { value = "priceLow", name = "Price: low to high" },
     { value = "priceHigh", name = "Price: high to low" } }
 -- The Source filter's entry for a source whose type it does not name.
 local OTHER_SOURCE, OTHER_TEXT = "other", "Other"
 
--- The four choices kept between sessions (slice B), each with its default:
--- Scan when shown, Show, For sale only and the sort. saved is the table
--- they are kept in: TransmogCheckerDB.browser once State.Bind handed it
--- over, a table of this file's own before.
-local DEFAULTS = { scanWhenShown = true, show = "All", forSaleOnly = false, sort = "default" }
+-- The five choices kept between sessions (slice B, the slot slice C), each
+-- with its default: Scan when shown, Show, For sale only, the sort and the
+-- slot (the first of the slot row, Head). saved is the table they are kept
+-- in: TransmogCheckerDB.browser once State.Bind handed it over, a table of
+-- this file's own before.
+local DEFAULTS = { scanWhenShown = true, show = "All", forSaleOnly = false, sort = "priceLow", slot = TC.Slots[1].key }
 local saved = {}
 
 local function isSort(value)
@@ -57,8 +60,11 @@ local function savedValues(t)
     for _, value in ipairs(State.FILTERS) do
         if t.show == value then show = value end
     end
+    -- a slot is its key; TC.Slots is also indexed by number
+    local slot = type(t.slot) == "string" and TC.Slots[t.slot] and t.slot or DEFAULTS.slot
     return { scanWhenShown = flag(t.scanWhenShown, DEFAULTS.scanWhenShown), show = show,
-        forSaleOnly = flag(t.forSaleOnly, DEFAULTS.forSaleOnly), sort = isSort(t.sort) and t.sort or DEFAULTS.sort }
+        forSaleOnly = flag(t.forSaleOnly, DEFAULTS.forSaleOnly), sort = isSort(t.sort) and t.sort or DEFAULTS.sort,
+        slot = slot }
 end
 -- Takes t as the saved table: its values as the state takes them are
 -- written back into it, so it holds no malformed value.
@@ -145,9 +151,7 @@ local ALL_CLASSES_TEXT = "All classes"
 -- the last error from a failed list read, a failed check or a failed scan.
 State.lastError = nil
 
--- Each visit starts on the first slot of the slot row, Head (spec 2.1, A4).
-local START_SLOT = TC.Slots[1].key
-
+-- Each visit starts on the saved slot, else Head (slice C).
 local function startView()
     -- open: the appearance whose flyout is open, or nil; weaponType: the
     -- category the weapon type dropdown picks, nil for all weapon types;
@@ -156,7 +160,7 @@ local function startView()
     -- saved; sourcesOff: the Source filter's unticked entries (a source
     -- type, or OTHER_SOURCE), none at the start
     local start = savedValues(saved)
-    return { slot = START_SLOT, filter = start.show, forSaleOnly = start.forSaleOnly, sort = start.sort,
+    return { slot = start.slot, filter = start.show, forSaleOnly = start.forSaleOnly, sort = start.sort,
         sourcesOff = {}, page = 1, search = "" }
 end
 view = startView()
@@ -785,7 +789,7 @@ end
 -- queue is cancelled and late answers change nothing.
 function State.Reset()
     local start = startView()
-    local changed = next(lists) ~= nil or view.slot ~= START_SLOT or view.filter ~= start.filter
+    local changed = next(lists) ~= nil or view.slot ~= start.slot or view.filter ~= start.filter
         or view.forSaleOnly ~= start.forSaleOnly or view.sort ~= start.sort or next(view.sourcesOff) ~= nil
         or view.page ~= 1 or view.open ~= nil or next(latest) ~= nil or next(checking) ~= nil or next(scans) ~= nil
         or scan ~= nil or next(failures) ~= nil or view.search ~= "" or view.class ~= nil
@@ -895,12 +899,14 @@ end
 -- the slot left keeps running and is kept under that slot, unless this
 -- slot is scanned (scanSlot). The name loading of the slot left stops;
 -- a search text that is not empty counts as a use of Search on the new slot.
+-- The slot is kept between sessions (slice C).
 function State.SelectSlot(slot)
     if slot == view.slot or not TC.Slots[slot] or dialogOpen() then return end
     batch(function()
         TC.Appearances.StopLoads()
         dropKeys()
         view.slot, view.weaponType, view.page, view.open = slot, nil, 1, nil
+        saved.slot = slot
         list = lists[slot]
         State.Refresh()
         autoScan()
@@ -1043,7 +1049,8 @@ function State.SetSource(key, on)
     narrowed()
 end
 
--- The sort ("default", "priceLow", "priceHigh"), kept between sessions.
+-- The sort ("default" for Collections order, "priceLow", "priceHigh"),
+-- kept between sessions.
 function State.SetSort(value)
     if value == view.sort or not isSort(value) then return end
     view.sort, saved.sort = value, value
@@ -1062,17 +1069,19 @@ end
 -- The saved table (TransmogCheckerDB.browser), handed over once the client
 -- has loaded it (TransmogChecker.lua, ADDON_LOADED): its values, malformed
 -- ones as the defaults, become the view's, and each change is written into
--- it. The four values are Scan when shown, Show, For sale only and the sort.
+-- it. The five values are Scan when shown, Show, For sale only, the sort
+-- and the slot.
 function State.Bind(t)
     if type(t) ~= "table" then return end
     useSaved(t)
     view.filter, view.forSaleOnly, view.sort, view.page = t.show, t.forSaleOnly, t.sort, 1
+    if view.slot ~= t.slot then view.slot, view.weaponType, list = t.slot, nil, lists[t.slot] end
     settle()
 end
 
 -- Whether Reset filters would change nothing: Show All, For sale only off,
 -- every Source entry ticked, the character's own class, all weapon types,
--- no search text and the Default sort.
+-- no search text and the sort Price: low to high.
 local function filtersAtStart()
     return view.filter == DEFAULTS.show and view.forSaleOnly == DEFAULTS.forSaleOnly and not next(view.sourcesOff)
         and (view.class == nil or view.class == (ownClass())) and view.weaponType == nil and view.search == ""

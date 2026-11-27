@@ -116,26 +116,30 @@ local MEDIA = "Interface\\AddOns\\TransmogChecker\\Media\\"
 local SCAN_ATLAS, SCAN_GLYPH = "UI-RefreshButton", 14
 local SCAN_TIP = "Scans this slot's items on the auction house now."
 -- The slot row: round buttons of 31, 2 apart, 19 between groups
--- (Blizzard_Collections/Camelot/Blizzard_Wardrobe.lua:24-27), starting at the
--- grid's left edge, x 28, where the catalogue and sweep toggles were
--- before (slice B). Collections' own art (WardrobeSlotButtonTemplate,
+-- (Blizzard_Collections/Camelot/Blizzard_Wardrobe.lua:24-27), starting at
+-- x 64, clear of the window's portrait (slice C): PortraitFrameTemplate's
+-- 62 square portrait at x -5, y 7 of the window
+-- (Blizzard_SharedXML/Mainline/SharedUIPanelTemplates.xml:581-585) ends,
+-- with the panel at x 5, y -42 of the window (below), at the panel's x 52
+-- and y 13, beside the row's y 4 to 35. Collections' own art (WardrobeSlotButtonTemplate,
 -- Blizzard_Collections/Mainline/Blizzard_Wardrobe.xml:99-130, and
 -- CreateSlotButtons, Blizzard_Wardrobe.lua:460-503); that this client has
 -- these atlases is read from source and unverified in game.
-local SLOTS_X, SLOTS_Y, SLOT_SIZE, SLOT_GAP, GROUP_GAP = 28, 4, 31, 2, 19
+local SLOTS_X, SLOTS_Y, SLOT_SIZE, SLOT_GAP, GROUP_GAP = 64, 4, 31, 2, 19
 local SLOT_ART, SLOT_SELECTED, SLOT_HIGHLIGHT = "transmog-nav-slot-%s", "transmog-nav-slot-selected", "bags-roundhighlight"
--- Search at x 642, y 9, 108 x 20; the funnel at x 757, y 4, 30 square, with
+-- Search at x 628, y 9, 108 x 20; the funnel at x 743, y 4, 30 square, with
 -- the world map's filter art (Blizzard_WorldMap/Mainline/
 -- Blizzard_WorldMapTemplates.xml:7, 41) and the auction house's reset mark
 -- (Blizzard_SharedXML/Mainline/SharedUIPanelTemplates.xml:867-871), as the
 -- auction house's Filter button carries it (ClearFiltersButton,
 -- Blizzard_AuctionHouseUI/Shared/Blizzard_AuctionHouseSearchBar.xml:21-25),
--- while a choice differs from the start (layout B, 1.3). The funnel is 4
--- from the panel's right edge, so the mark is 18 square and sits in the
--- funnel's top right corner, its right edge on the funnel's and its top 2
--- below the panel's, clear of the frame's border (testpass F5).
-local SEARCH_X, SEARCH_Y = 642, 9
-local FUNNEL_X, FUNNEL_Y, FUNNEL_SIZE, MARK_SIZE, MARK_X, MARK_Y = 757, 4, 30, 18, -9, -7
+-- while a choice differs from the start (layout B, 1.3). Search and the
+-- funnel sit 14 further left than before (slice C), so the mark is 22
+-- square on the funnel's top right corner: x 764 to 786, 5 from the panel's
+-- right edge, and y 2 to 24, its top 2 below the panel's, clear of the
+-- frame's border (testpass F5); it covers the funnel's right 9 and top 20.
+local SEARCH_X, SEARCH_Y = 628, 9
+local FUNNEL_X, FUNNEL_Y, FUNNEL_SIZE, MARK_SIZE, MARK_X, MARK_Y = 743, 4, 30, 22, 2, -9
 -- The funnel's art is the owner's choice, the settings button of
 -- Blizzard_DamageMeter/DamageMeterSettingsDropdownButton.xml:5-8, with its
 -- hover and pressed forms; without it the world map's filter art.
@@ -1305,7 +1309,12 @@ local function buildBrowser(panel)
     local function showTip(tile)
         if not GameTooltip or tile.isOpen then return hideTip() end
         tipOwner = tile.button
-        GameTooltip:SetOwner(tile.button, "ANCHOR_RIGHT")
+        -- above its tile (slice C), as Blizzard's ANCHOR_TOP tooltips
+        -- (Blizzard_GarrisonSharedTemplates.lua:2657), so it covers neither the
+        -- next tiles of the row nor the item list; near the top of the screen
+        -- the client keeps it on screen (clampedToScreen,
+        -- Blizzard_SharedXML/SharedTooltipTemplates.xml:10, 95)
+        GameTooltip:SetOwner(tile.button, "ANCHOR_TOP")
         -- the sentences wrap (AddLine's wrap, as GameTooltip_AddColoredLine
         -- passes it, SharedTooltipTemplates.lua:166-172) at no less than the
         -- minimum width, given back on hiding as the achievement frame does
